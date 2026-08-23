@@ -1,0 +1,45 @@
+# Node / Frontend dependencies & build artifacts
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.pnpm-store/
+.npm/
+
+# Rust / Server build artifacts
+target/
+**/*.rs.bk
+
+# Application / Server runtime data & logs
+data/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+
+# Environment & local secret files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE & OS generated files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db

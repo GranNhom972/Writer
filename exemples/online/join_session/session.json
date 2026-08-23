@@ -1,0 +1,10 @@
+{
+  "token_session": "sess-rapport-q3-3f9c2a7d41b8",
+
+  "participant": {
+    "user_id": "bob",
+    "email": "bob@exemple.fr"
+  },
+
+  "_note": "Même token_session que ../create_session/session.json : c'est ce qui désigne la session à rejoindre. La permission n'est pas ici — elle est inscrite dans la session, et le serveur la renvoie."
+}

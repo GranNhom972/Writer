@@ -1,0 +1,501 @@
+/* Surface du document. Les valeurs viennent exclusivement des jetons. */
+
+.page-stack {
+  /* Zoom du ruban : `zoom` conserve le flux (contrairement à `transform: scale`),
+     donc la pagination et le défilement restent justes. */
+  zoom: var(--zoom, 1);
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+  min-height: 100%;
+}
+
+.page-guides {
+  position: absolute;
+  inset: var(--space-6) 0 var(--space-8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Gouttière entre feuilles. Elle n'est pas un ornement : la pagination compte
+     `297 mm + gouttière` d'une feuille à la suivante (`GAPBETWEENPAGES` chez
+     Writer). Dessinée ici et comptée là-bas, à partir de la même constante. */
+  gap: var(--page-gap, 5mm);
+  pointer-events: none;
+}
+
+.page-guide {
+  position: relative;
+  width: var(--page-width);
+  max-width: 100%;
+  /* Une feuille ne se comprime JAMAIS. Le conteneur étant un peu plus court que
+     la somme des feuilles, la valeur par défaut (`flex-shrink: 1`) leur retirait
+     près de 14 px chacune : au bas de la cinquième page, les cadres, l'en-tête et
+     le pied avaient 55 px d'avance sur le texte. */
+  flex: none;
+  background: var(--bg-page);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  /* Ombre portée franche : c'est elle qui fait lire une feuille posée sur un
+     plan de travail plutôt qu'un simple rectangle blanc. */
+  box-shadow: var(--elevation-popover);
+}
+
+.page-guide__number {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--fg-disabled);
+}
+
+/* En-tête et pied : dans la marge de la page, jamais dans la zone de texte —
+   sinon ils recouvriraient le contenu au lieu de l'encadrer. Le cadre ne fait
+   que POSER la bande ; l'apparence de celle-ci vient de `.bande`, partagée avec
+   le dialogue (cf. app.css). */
+.page-guide__band {
+  position: absolute;
+  left: var(--marge-gauche, 25mm);
+  /* La bande réagit au clic pour ouvrir son dialogue, alors que la pile de
+     cadres, elle, laisse tout passer vers le texte. */
+  pointer-events: auto;
+  cursor: pointer;
+  /* Au-dessus du corps de texte : `.ProseMirror` porte `z-index: 1` et son
+     rembourrage recouvre justement la zone des marges, donc la bande. Sans
+     cela, le clic atterrit dans l'éditeur et la bande reste inatteignable. */
+  z-index: 2;
+}
+
+.page-guide__band--header {
+  top: var(--entete-haut, 12mm);
+}
+
+.page-guide__band--footer {
+  bottom: var(--pied-bas, 12mm);
+}
+
+.page-guide__band:hover .bande::before,
+.page-guide__band:focus-visible .bande::before {
+  /* Repère au survol : la bande est cliquable, il faut que ça se voie. */
+  content: '';
+  position: absolute;
+  inset: -2mm -1mm;
+  border-radius: var(--radius-xs);
+  background: var(--accent-subtle);
+}
+
+.page-guide__band:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Bande vide : présente pour le clic, invisible tant qu'on ne la vise pas. Une
+   zone qu'on ne peut pas atteindre parce qu'elle n'a rien à montrer serait un
+   cul-de-sac — c'est pourtant là qu'on clique pour créer un en-tête. */
+.page-guide__band--vide {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-xs);
+}
+
+.page-guide__band-invite {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-disabled);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.page-guide__band--vide:hover,
+.page-guide__band--vide:focus-visible {
+  background: var(--accent-subtle);
+}
+
+.page-guide__band--vide:hover .page-guide__band-invite,
+.page-guide__band--vide:focus-visible .page-guide__band-invite {
+  opacity: 1;
+  /* Une invite qu'on doit deviner ne sert à rien : au survol elle passe au
+     contraste du texte secondaire, pas à celui d'un libellé désactivé. */
+  color: var(--fg-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-guide__band-invite {
+    transition: none;
+  }
+}
+
+
+.ProseMirror {
+  position: relative;
+  z-index: 1;
+  width: var(--page-width);
+  max-width: 100%;
+  /* Le corps couvre exactement la pile de feuilles, gouttières comprises : c'est
+     ce qui garantit que les cadres tombent au même endroit que les cales de
+     pagination, quel que soit le nombre de pages. */
+  min-height: calc(
+    var(--page-count, 1) * var(--page-height) + (var(--page-count, 1) - 1) * var(--page-gap, 5mm)
+  );
+  /* Marges pilotées par les réglages de mise en page (dialogue En-tête et pied). */
+  padding: var(--marge-haut, 25mm) var(--marge-droite, 25mm) var(--marge-bas, 25mm)
+    var(--marge-gauche, 25mm);
+  font-family: var(--font-document);
+  font-size: 12pt;
+  line-height: 1.5;
+  color: var(--fg-primary);
+  outline: none;
+}
+
+.ProseMirror:focus-visible {
+  /* Le focus porte sur le conteneur de page, pas sur chaque paragraphe. */
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.ProseMirror p {
+  margin: 0 0 var(--space-4);
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6 {
+  margin: var(--space-6) 0 var(--space-3);
+  line-height: var(--leading-tight);
+  font-weight: 600;
+}
+
+.ProseMirror h1 { font-size: 2em; }
+.ProseMirror h2 { font-size: 1.6em; }
+.ProseMirror h3 { font-size: 1.3em; }
+
+.ProseMirror ul,
+.ProseMirror ol {
+  margin: 0 0 var(--space-4);
+  padding-inline-start: var(--space-7); /* propriété logique : compatible RTL */
+}
+
+.pm-page-break {
+  height: 0;
+  margin: var(--space-5) 0;
+  border-top: 1px dashed var(--border-strong);
+}
+
+/* --- Curseurs et sélections distants (directive UX §7) --- */
+
+.ProseMirror-yjs-cursor {
+  position: relative;
+  margin-inline: -1px;
+  border-inline-start: 2px solid var(--presence-1);
+  word-break: normal;
+  pointer-events: none;
+}
+
+.ProseMirror-yjs-cursor > div {
+  position: absolute;
+  top: -1.4em;
+  inset-inline-start: -2px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+  color: #fff;
+  /* L'étiquette s'estompe après 3 s d'immobilité : elle ne masque pas le texte. */
+  animation: label-fade var(--motion-base) var(--motion-ease) 3s forwards;
+}
+
+@keyframes label-fade {
+  to { opacity: 0; }
+}
+
+.ProseMirror-yjs-cursor:hover > div {
+  opacity: 1;
+  animation: none;
+}
+
+/* Sélection distante : ~20 % d'opacité, jamais assez opaque pour dégrader le
+   contraste du texte sous-jacent. */
+.ProseMirror-yjs-selection {
+  opacity: 0.2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ProseMirror-yjs-cursor > div {
+    animation: none;
+  }
+}
+
+
+/* --- Images --- */
+.pm-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+
+.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Liens --- */
+.ProseMirror a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+/* --- Listes à cocher --- */
+.pm-task-list {
+  margin: 0 0 var(--space-4);
+  padding-inline-start: var(--space-3);
+  list-style: none;
+}
+
+.pm-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.pm-task-item__control {
+  padding-top: 0.25em;
+}
+
+.pm-task-item__control input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.pm-task-item__content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* La tâche faite reste lisible : barrée et atténuée, jamais masquée. */
+.pm-task-item[data-checked='true'] .pm-task-item__content {
+  color: var(--fg-secondary);
+  text-decoration: line-through;
+}
+
+
+/* --- Formules dans le document --- */
+.pm-math {
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+
+.pm-math--inline {
+  display: inline-block;
+  padding: 0 2px;
+}
+
+.pm-math--block {
+  display: block;
+  margin: var(--space-4) 0;
+  text-align: center;
+}
+
+.pm-math:hover {
+  background: var(--accent-subtle);
+}
+
+.pm-math:focus-visible,
+.pm-math--selected {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Formule invalide : la source reste affichée et corrigeable, soulignée en rouge —
+   on n'efface jamais la saisie de l'usager au profit d'un message. */
+.pm-math--error {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--danger);
+  background: var(--danger-subtle);
+  text-decoration: underline wavy var(--danger);
+}
+
+.pm-math--empty {
+  font-family: var(--font-ui);
+  font-size: 0.85em;
+  color: var(--fg-secondary);
+  background: var(--bg-sunken);
+  padding: 0 var(--space-2);
+}
+
+/* KaTeX hérite de la couleur du document (thème sombre compris). */
+.pm-math .katex {
+  color: inherit;
+}
+
+/* --- Tableaux (Point A) --- */
+.pm-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-4) 0;
+  table-layout: fixed;
+}
+
+
+
+.pm-table-header {
+  background-color: var(--bg-sunken);
+  font-weight: 600;
+}
+
+.pm-table-cell p,
+.pm-table-header p {
+  margin: 0;
+}
+
+/* --- Notes de bas de page et champs (Point A) --- */
+.pm-footnote-ref {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+}
+
+.pm-footnote-ref:hover {
+  background: var(--accent-subtle);
+  text-decoration: underline;
+}
+
+.pm-page-num {
+  font-weight: bold;
+  padding: 0 2px;
+}
+
+/* --- Images et alignements avancés (Point A) --- */
+.pm-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+  display: block;
+}
+
+.pm-image--center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.pm-image--left {
+  margin-right: auto;
+}
+
+.pm-image--right {
+  margin-left: auto;
+}
+
+.pm-image--float-left {
+  float: left;
+  margin-right: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.pm-image--float-right {
+  float: right;
+  margin-left: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+
+
+/* --- Occurrences de recherche --- */
+.search-hit {
+  /* Jaune de surlignage : contraste conservé avec le texte noir (> 12:1). */
+  background: #fff08a;
+  border-radius: 2px;
+}
+
+/* L'occurrence courante se distingue des autres par la couleur ET par un
+   contour : la couleur seule ne porte jamais l'information (directive UX §2.1). */
+.search-hit--current {
+  background: #ffb020;
+  box-shadow: 0 0 0 2px #b54708;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .search-hit {
+    background: #6b5a12;
+    color: #fdf6dd;
+  }
+
+  :root:not([data-theme='light']) .search-hit--current {
+    background: #b07d13;
+    box-shadow: 0 0 0 2px #ffd28a;
+  }
+}
+
+
+/* --- Tableaux : le trait vient des variables portées par la table --- */
+.pm-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: var(--space-4) 0;
+}
+
+.pm-table td,
+.pm-table th {
+  padding: var(--space-2) var(--space-3);
+  border: var(--pm-table-border-width, 1px) solid var(--pm-table-border-color, var(--border-strong));
+  vertical-align: top;
+}
+
+/* Épaisseur nulle : on garde un trait discret à l'écran pour pouvoir viser les
+   cellules, mais il disparaît à l'impression — sans quoi le tableau serait
+   inéditable. */
+.pm-table[data-border-width='0'] td,
+.pm-table[data-border-width='0'] th {
+  border: 1px dashed var(--border-subtle);
+}
+
+@media print {
+  .pm-table[data-border-width='0'] td,
+  .pm-table[data-border-width='0'] th {
+    border: 0;
+  }
+}
+
+.pm-table[data-header-row='true'] th {
+  background: var(--bg-sunken);
+  font-weight: 600;
+  text-align: start;
+}
+
+.pm-table td > p:last-child,
+.pm-table th > p:last-child {
+  margin-bottom: 0;
+}
+
+
+/* Bloc reporté en haut de page : l'espace est pris en `padding-top`, jamais en
+   marge (une marge se replierait sur la précédente) ni par un élément inséré
+   (un <div> entre deux <li> serait du HTML invalide). */
+.pm-page-poussee {
+  background-clip: content-box;
+  /* La poussée remplace la marge haute : garder les deux ferait descendre le
+     bloc d'une marge de trop, et la mesure suivante corrigerait dans l'autre
+     sens — le calcul ne convergerait jamais. */
+  margin-top: 0;
+}
+
+/* Ligne de tableau reportée : une ligne ne se rembourre pas, ce sont ses cellules
+   qui portent l'espace (`SwTabFrm::Split` coupe entre deux lignes, jamais au
+   milieu). Le trait supérieur est retiré pour ne pas dessiner un cadre vide en
+   travers de la coupure. */
+tr.pm-page-poussee > td,
+tr.pm-page-poussee > th {
+  padding-top: inherit;
+  border-top-color: transparent;
+}

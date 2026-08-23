@@ -1,0 +1,39 @@
+{
+  "name": "@cloudantille/write-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "katex": "^0.16.47",
+    "prosemirror-commands": "^1.6.2",
+    "prosemirror-keymap": "^1.2.2",
+    "prosemirror-model": "^1.24.1",
+    "prosemirror-schema-list": "^1.4.1",
+    "prosemirror-state": "^1.4.3",
+    "prosemirror-view": "^1.37.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "y-prosemirror": "^1.2.15",
+    "y-protocols": "^1.0.6",
+    "y-websocket": "^2.0.4",
+    "yjs": "^13.6.21"
+  },
+  "devDependencies": {
+    "@types/katex": "^0.16.8",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^6.1.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.3",
+    "vite": "^8.2.2",
+    "vitest": "^3.2.7"
+  }
+}

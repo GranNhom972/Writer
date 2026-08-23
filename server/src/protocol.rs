@@ -1,0 +1,164 @@
+//! Encodage/décodage des messages du protocole `y-protocols` (lib0).
+//!
+//! Trames **binaires** (integration_api_rust.md §3). Format lib0 :
+//!   varuint  messageType        0 = sync, 1 = awareness
+//!   sync ->  varuint subType    0 = SyncStep1, 1 = SyncStep2, 2 = Update
+//!            varuint8array      payload (state vector ou update CRDT)
+//!   awareness -> varuint8array  payload opaque (relayé tel quel, jamais journalisé)
+
+pub const MSG_SYNC: u64 = 0;
+pub const MSG_AWARENESS: u64 = 1;
+
+pub const SYNC_STEP1: u64 = 0;
+pub const SYNC_STEP2: u64 = 1;
+pub const SYNC_UPDATE: u64 = 2;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Message {
+    /// Le pair annonce son vecteur d'état et demande le différentiel.
+    SyncStep1(Vec<u8>),
+    /// Réponse à un SyncStep1 : update couvrant le différentiel.
+    SyncStep2(Vec<u8>),
+    /// Update CRDT incrémentale.
+    Update(Vec<u8>),
+    /// Présence (curseurs, sélections) — éphémère.
+    Awareness(Vec<u8>),
+}
+
+pub fn write_varuint(out: &mut Vec<u8>, mut n: u64) {
+    loop {
+        let mut byte = (n & 0x7f) as u8;
+        n >>= 7;
+        if n > 0 {
+            byte |= 0x80;
+            out.push(byte);
+        } else {
+            out.push(byte);
+            break;
+        }
+    }
+}
+
+pub fn write_var_u8array(out: &mut Vec<u8>, payload: &[u8]) {
+    write_varuint(out, payload.len() as u64);
+    out.extend_from_slice(payload);
+}
+
+pub struct Cursor<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf, pos: 0 }
+    }
+
+    pub fn read_varuint(&mut self) -> Option<u64> {
+        let mut result: u64 = 0;
+        let mut shift = 0u32;
+        loop {
+            let byte = *self.buf.get(self.pos)?;
+            self.pos += 1;
+            result |= ((byte & 0x7f) as u64).checked_shl(shift)?;
+            if byte & 0x80 == 0 {
+                return Some(result);
+            }
+            shift += 7;
+            if shift > 63 {
+                return None; // varint malformé : on refuse plutôt que de paniquer
+            }
+        }
+    }
+
+    pub fn read_var_u8array(&mut self) -> Option<&'a [u8]> {
+        let len = self.read_varuint()? as usize;
+        let end = self.pos.checked_add(len)?;
+        let slice = self.buf.get(self.pos..end)?;
+        self.pos = end;
+        Some(slice)
+    }
+}
+
+impl Message {
+    /// Décode une trame entrante. `None` = trame malformée ou type non supporté :
+    /// on ignore silencieusement plutôt que de fermer la session d'un client honnête.
+    pub fn decode(frame: &[u8]) -> Option<Message> {
+        let mut cur = Cursor::new(frame);
+        match cur.read_varuint()? {
+            MSG_SYNC => {
+                let sub = cur.read_varuint()?;
+                let payload = cur.read_var_u8array()?.to_vec();
+                match sub {
+                    SYNC_STEP1 => Some(Message::SyncStep1(payload)),
+                    SYNC_STEP2 => Some(Message::SyncStep2(payload)),
+                    SYNC_UPDATE => Some(Message::Update(payload)),
+                    _ => None,
+                }
+            }
+            MSG_AWARENESS => Some(Message::Awareness(cur.read_var_u8array()?.to_vec())),
+            _ => None,
+        }
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        match self {
+            Message::SyncStep1(p) => {
+                write_varuint(&mut out, MSG_SYNC);
+                write_varuint(&mut out, SYNC_STEP1);
+                write_var_u8array(&mut out, p);
+            }
+            Message::SyncStep2(p) => {
+                write_varuint(&mut out, MSG_SYNC);
+                write_varuint(&mut out, SYNC_STEP2);
+                write_var_u8array(&mut out, p);
+            }
+            Message::Update(p) => {
+                write_varuint(&mut out, MSG_SYNC);
+                write_varuint(&mut out, SYNC_UPDATE);
+                write_var_u8array(&mut out, p);
+            }
+            Message::Awareness(p) => {
+                write_varuint(&mut out, MSG_AWARENESS);
+                write_var_u8array(&mut out, p);
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn varint_roundtrip() {
+        for n in [0u64, 1, 127, 128, 300, 16_384, u32::MAX as u64] {
+            let mut buf = Vec::new();
+            write_varuint(&mut buf, n);
+            assert_eq!(Cursor::new(&buf).read_varuint(), Some(n), "valeur {n}");
+        }
+    }
+
+    #[test]
+    fn message_roundtrip() {
+        let cases = [
+            Message::SyncStep1(vec![0, 1, 2]),
+            Message::SyncStep2(vec![9; 300]),
+            Message::Update(vec![42]),
+            Message::Awareness(vec![7, 7]),
+        ];
+        for msg in cases {
+            assert_eq!(Message::decode(&msg.encode()), Some(msg.clone()));
+        }
+    }
+
+    #[test]
+    fn malformed_frames_are_rejected_not_panicking() {
+        assert_eq!(Message::decode(&[]), None);
+        assert_eq!(Message::decode(&[0]), None);
+        assert_eq!(Message::decode(&[0, 0, 200]), None); // longueur annoncée > buffer
+        assert_eq!(Message::decode(&[99, 0, 0]), None); // type inconnu
+    }
+}

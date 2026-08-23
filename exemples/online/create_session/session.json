@@ -1,0 +1,30 @@
+{
+  "token_session": "sess-rapport-q3-3f9c2a7d41b8",
+  "title": "Rapport Q3",
+
+  "participants": [
+    { "user_id": "alice",  "email": "alice@exemple.fr",  "permission": "write" },
+    { "user_id": "bob",    "email": "bob@exemple.fr",    "permission": "write" },
+    { "user_id": "carole", "email": "carole@exemple.fr", "permission": "read"  }
+  ],
+
+  "document": {
+    "title": "Rapport Q3",
+    "blocks": [
+      { "type": "heading", "level": 1, "text": "Rapport trimestriel — Q3" },
+      { "type": "paragraph", "text": "Ce document a été fourni au serveur à la création de la session : il est journalisé avant que quiconque l'ouvre." },
+      { "type": "heading", "level": 2, "text": "Points à traiter" },
+      { "type": "bullet_list", "items": [
+        "Chiffres de clôture",
+        "Écarts par rapport au prévisionnel",
+        "Décisions à arbitrer"
+      ] },
+      { "type": "heading", "level": 2, "text": "Décisions" },
+      { "type": "ordered_list", "items": [
+        "Valider le budget du T4",
+        "Arbitrer le recrutement"
+      ] },
+      { "type": "paragraph", "text": "" }
+    ]
+  }
+}

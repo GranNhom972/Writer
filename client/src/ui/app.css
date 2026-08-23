@@ -1,0 +1,1941 @@
+/* Coquille applicative. Le chrome ne dépasse pas 25 % de la hauteur du viewport
+   (01_DIRECTIVE_UX_ERGONOMIE.md §3) : le document est le sujet. */
+
+.shell {
+  /* Repère de positionnement des panneaux ancrés (barre de recherche). */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-canvas);
+}
+
+.shell--centered {
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+
+/* --- Barre de titre --- */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-5);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.titlebar__identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.titlebar__heading {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 400;
+}
+
+.titlebar__input {
+  width: min(42ch, 40vw);
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--fg-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.titlebar__input:hover:not(:disabled) {
+  border-color: var(--border-subtle);
+}
+
+.titlebar__input:focus {
+  border-color: var(--accent);
+  background: var(--bg-app);
+}
+
+/* --- Barre de menus --- */
+.menubar {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.menubar__item {
+  position: relative;
+}
+
+.menubar__trigger {
+  padding: var(--space-1) var(--space-3);
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.menubar__trigger:hover,
+.menubar__trigger[aria-expanded='true'] {
+  color: var(--fg-primary);
+  background: var(--bg-sunken);
+}
+
+.menu {
+  position: absolute;
+  z-index: 20;
+  inset-inline-start: 0;
+  /* Largeur dictée par le contenu, entre deux bornes : un libellé qui se coupe
+     sur deux lignes casse le balayage vertical du menu. */
+  min-width: 240px;
+  max-width: min(380px, calc(100vw - var(--space-6)));
+  width: max-content;
+  padding: var(--space-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-popover);
+}
+
+.menu__group {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+.menu__entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  font: inherit;
+  color: var(--fg-primary);
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.menu__entry:hover:not(:disabled),
+.menu__entry:focus-visible {
+  background: var(--accent-subtle);
+}
+
+.menu__entry:disabled {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+
+.menu__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu__check {
+  display: inline-block;
+  width: 1em;
+  color: var(--accent);
+}
+
+/* Les raccourcis forment une colonne : l'œil les compare sans les chercher. */
+.menu__shortcut {
+  flex: none;
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.titlebar__spacer,
+.statusbar__spacer {
+  flex: 1;
+}
+
+/* --- Ruban --- */
+.ribbon {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-5);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ribbon__group {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.ribbon__separator {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--space-1) var(--space-3);
+  background: var(--border-subtle);
+}
+
+/* --- Sélecteurs et champs du ruban --- */
+.ribbon__select select {
+  min-height: var(--control-height);
+  max-width: 18ch;
+  text-overflow: ellipsis;
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ribbon__select--wide select {
+  min-width: 12ch;
+}
+
+.ribbon__group--size {
+  align-items: center;
+}
+
+.ribbon__size::-webkit-outer-spin-button,
+.ribbon__size::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.ribbon__size {
+  /* Les flèches natives du champ `number` sont masquées : elles volaient la place
+     du chiffre (il devenait invisible) et offraient des cibles de 8 px, sous le
+     minimum de la Loi de Fitts. Le pas se fait par les boutons A− / A+. */
+  appearance: textfield;
+  -moz-appearance: textfield;
+  width: 6ch;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  font: inherit;
+  text-align: center;
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+/* --- Icônes --- */
+.icon {
+  display: block;
+  flex: none;
+  /* L'icône hérite de la couleur du bouton : aucun état ne se règle ici. */
+  color: inherit;
+}
+
+/* --- Panneaux flottants (couleurs, liens, images) --- */
+.picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + var(--space-2));
+  inset-inline-start: 0;
+  max-width: calc(100vw - var(--space-5));
+  padding: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-popover);
+}
+
+.popover--end {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(7, 24px);
+  gap: var(--space-2);
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.swatch[aria-pressed='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.popover__reset {
+  width: 100%;
+  margin-top: var(--space-3);
+}
+
+.url-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 320px;
+}
+
+.url-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.url-form__error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border-radius: var(--radius-sm);
+}
+
+/* --- Palette de couleurs --- */
+.palette {
+  width: 268px;
+}
+
+.palette__reset,
+.palette__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font: inherit;
+  color: var(--fg-primary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.palette__reset {
+  width: 100%;
+  min-height: var(--control-height);
+  margin-bottom: var(--space-3);
+}
+
+.palette__reset:hover,
+.palette__add:hover {
+  background: var(--bg-sunken);
+}
+
+/* Damier : signifie « aucune couleur » sans dépendre d'un libellé seul. */
+.palette__reset-chip {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background-image: linear-gradient(45deg, var(--border-strong) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border-strong) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border-strong) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border-strong) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+.color-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.color-grid__row {
+  display: flex;
+  gap: 4px;
+}
+
+.color-grid__swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.color-grid__swatch:hover {
+  transform: scale(1.15);
+}
+
+/* Le focus doit rester visible sur une pastille de n'importe quelle couleur :
+   anneau décalé, jamais un simple changement de bordure. */
+.color-grid__swatch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.palette__custom {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.palette__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.palette__custom-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.palette__add {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border-style: dashed;
+  color: var(--fg-secondary);
+}
+
+.palette__current {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+/* --- Sélecteur de couleur personnalisée --- */
+.custom-color {
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.custom-color__area {
+  position: relative;
+  height: 140px;
+  border-radius: var(--radius-sm);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.custom-color__white,
+.custom-color__black {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+}
+
+.custom-color__white {
+  background: linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+}
+
+.custom-color__black {
+  background: linear-gradient(to top, #000, rgba(0, 0, 0, 0));
+}
+
+.custom-color__thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.custom-color__area:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.custom-color__hue input {
+  width: 100%;
+  height: 14px;
+  appearance: none;
+  border-radius: 7px;
+  background: linear-gradient(
+    to right,
+    #f00 0%,
+    #ff0 17%,
+    #0f0 33%,
+    #0ff 50%,
+    #00f 67%,
+    #f0f 83%,
+    #f00 100%
+  );
+}
+
+.custom-color__hue input::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.custom-color__hue input::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.custom-color__fields {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.channel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.channel--hex {
+  flex: 2.2;
+}
+
+.channel__label {
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+.channel__input {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: center;
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.channel__input::-webkit-outer-spin-button,
+.channel__input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.custom-color__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+.custom-color__preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.custom-color__sample {
+  width: 28px;
+  height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+}
+
+.custom-color__arrow {
+  color: var(--fg-secondary);
+}
+
+.custom-color__contrast {
+  flex: 1 0 100%;
+  font-size: var(--text-xs);
+}
+
+.custom-color__contrast--AAA,
+.custom-color__contrast--AA {
+  color: var(--success);
+}
+
+.custom-color__contrast--AA-large {
+  color: var(--warning);
+}
+
+.custom-color__contrast--insuffisant {
+  color: var(--danger);
+}
+
+.custom-color__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* --- Bande d'en-tête et de pied ---------------------------------------------
+   Ces règles servent DEUX fois : la bande dessinée sur la feuille et celle qu'on
+   manipule dans le dialogue. C'est ce partage qui rend l'aperçu fidèle — le jour
+   où il aurait sa propre feuille de style, il commencerait à mentir. */
+
+.bande {
+  position: relative;
+  font-family: var(--font-document);
+  line-height: 1.3;
+  color: var(--fg-secondary);
+}
+
+/* Filet posé HORS de la boîte : la hauteur de la bande est celle de son contenu,
+   et un `border` la rognerait d'un pixel à chaque rendu. */
+.bande::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.bande--header::after { top: 100%; }
+.bande--footer::after { bottom: 100%; }
+
+.bande__ligne {
+  position: absolute;
+  inset-inline: 0;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bande__bloc {
+  position: absolute;
+  white-space: nowrap;
+}
+
+.bande__bloc--image {
+  object-fit: contain;
+}
+
+/* --- Bande en mode édition --- */
+
+.bande--editable {
+  background: var(--bg-page);
+  outline: 1px dashed var(--border-subtle);
+}
+
+.bande--editable .bande__bloc {
+  cursor: grab;
+  /* Le pointeur pilote le déplacement : sans cela, un glissement au doigt
+     ferait défiler le dialogue au lieu de bouger le bloc. */
+  touch-action: none;
+  user-select: none;
+}
+
+.bande--editable .bande__bloc:hover {
+  outline: 1px dashed var(--border-strong);
+  outline-offset: 2px;
+}
+
+.bande__bloc--selectionne,
+.bande--editable .bande__bloc--selectionne:hover {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bande__bloc:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* --- Éditeur d'une bande : l'aperçu EST la surface de travail --- */
+
+.bande-editeur {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Cadre de mise à l'échelle. La bande y est posée en millimètres réels et
+   réduite par `zoom` : les proportions, les corps et les positions restent ceux
+   du papier. Le rognage évite qu'un bloc traîné trop loin élargisse le dialogue. */
+.bande-editeur__cadre {
+  overflow: hidden;
+  padding: var(--space-4) var(--space-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.bande-editeur__cadre:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.bande-editeur__plan {
+  /* La bande dépasse en bas de son propre filet : on lui laisse la place. */
+  padding-bottom: 2mm;
+}
+
+.bande-editeur__outils {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.bande-editeur__adresse {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.bande-editeur__adresse .field__input {
+  flex: 1;
+}
+
+.bande-editeur__erreur {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-md);
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.bande-editeur__proprietes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: end;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.bande-editeur__large {
+  grid-column: 1 / -1;
+}
+
+.bande-editeur__styles {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* L'état pressé ne repose pas sur la seule couleur (directive UX §2.1). */
+.bande-editeur__styles .btn[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.bande-editeur__couleur {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bande-editeur__couleur input {
+  width: 32px;
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: none;
+}
+
+.bande-editeur__ligne {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* --- En-tête et pied de page --- */
+.furniture {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.furniture__tokens {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.furniture__token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.furniture__token-row .btn {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.furniture__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.furniture__check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+}
+
+.furniture__section {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.furniture__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.furniture__mesure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-md);
+}
+
+.furniture__mesure-champ {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+.furniture__mesure .stepper__input {
+  width: 6ch;
+}
+
+.furniture__unite {
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.furniture__select {
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.furniture__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* --- Retour de téléchargement (non modal, éphémère) --- */
+.toast {
+  position: fixed;
+  z-index: 70;
+  right: var(--space-5);
+  bottom: var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: min(460px, calc(100vw - var(--space-7)));
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-md);
+  color: var(--fg-primary);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-popover);
+}
+
+.toast--busy {
+  border-color: var(--accent);
+}
+
+.toast__spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent-subtle);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: toast-spin 700ms linear infinite;
+}
+
+@keyframes toast-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Mouvement réduit : l'indicateur reste visible, il cesse simplement de tourner. */
+@media (prefers-reduced-motion: reduce) {
+  .toast__spinner {
+    animation: none;
+    border-top-color: var(--accent);
+  }
+}
+
+/* --- Poignées de manipulation directe du tableau --- */
+.table-overlay {
+  position: absolute;
+  z-index: 15;
+  /* Le calque laisse passer les clics : seules ses poignées les captent, sinon
+     il empêcherait d'écrire dans les cellules qu'il recouvre. */
+  pointer-events: none;
+}
+
+.table-overlay button {
+  pointer-events: auto;
+}
+
+/* Le tableau où se trouve le curseur se signale par un liseré discret : avec
+   plusieurs tableaux dans la page, il faut savoir lequel les poignées visent. */
+.table-overlay::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+  pointer-events: none;
+}
+
+/* Barres fines sur les bords : présentes sans être bruyantes, elles s'affirment
+   au survol du tableau. */
+.table-overlay__grip {
+  position: absolute;
+  padding: 0;
+  background: var(--border-subtle);
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
+}
+
+.table-overlay__grip--col {
+  top: -10px;
+  height: 6px;
+}
+
+.table-overlay__grip--row {
+  left: -10px;
+  width: 6px;
+}
+
+.table-overlay:hover .table-overlay__grip,
+.table-overlay__grip:focus-visible,
+.table-overlay__grip--active {
+  opacity: 1;
+}
+
+.table-overlay__grip:hover,
+.table-overlay__grip--active {
+  background: var(--accent);
+}
+
+/* Points d'insertion : le « + » apparaît à la frontière visée. */
+.table-overlay__add {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--accent);
+  background: var(--bg-app);
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.table-overlay__add--col {
+  top: -28px;
+  transform: translateX(-50%);
+}
+
+.table-overlay__add--row {
+  left: -28px;
+  transform: translateY(-50%);
+}
+
+.table-overlay:hover .table-overlay__add,
+.table-overlay__add:focus-visible {
+  opacity: 1;
+}
+
+.table-overlay__add:hover {
+  color: #fff;
+  background: var(--accent);
+}
+
+/* Poignée d'angle : le geste du tableur, pour dimensionner d'un seul mouvement. */
+.table-overlay__corner {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: var(--accent);
+  border: 2px solid var(--bg-app);
+  border-radius: 3px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.table-overlay:hover .table-overlay__corner,
+.table-overlay__corner:focus-visible {
+  opacity: 1;
+}
+
+.table-overlay__badge {
+  position: absolute;
+  right: -8px;
+  bottom: -34px;
+  padding: 2px var(--space-2);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.table-overlay__menu {
+  position: absolute;
+  z-index: 25;
+  min-width: 210px;
+  padding: var(--space-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-popover);
+  pointer-events: auto;
+}
+
+.table-overlay__menu--col {
+  top: -8px;
+  transform: translateY(-100%);
+}
+
+.table-overlay__menu--row {
+  left: -8px;
+  transform: translateX(-100%);
+}
+
+.table-overlay__item {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  font: inherit;
+  color: var(--fg-primary);
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.table-overlay__item:hover:not(:disabled),
+.table-overlay__item:focus-visible {
+  background: var(--accent-subtle);
+}
+
+.table-overlay__item:disabled {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+
+.table-overlay__item--danger {
+  color: var(--danger);
+}
+
+/* --- Grille de choix de taille de tableau --- */
+.table-picker {
+  width: max-content;
+}
+
+.table-picker__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.table-picker__grid:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  border-radius: var(--radius-xs);
+}
+
+.table-picker__row {
+  display: flex;
+  gap: 2px;
+}
+
+.table-picker__cell {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 1px;
+  cursor: pointer;
+}
+
+.table-picker__cell--active {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.table-picker__label {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-align: center;
+  color: var(--fg-primary);
+}
+
+.table-picker__hint {
+  font-weight: 400;
+  color: var(--fg-secondary);
+}
+
+/* --- Propriétés du tableau --- */
+/* Panneau détaché de son bouton : la position vient de la mesure du bouton, et
+   `inset-inline-start` doit être annulé — sans quoi les deux bords sont fixés et
+   la boîte s'étire sur toute la largeur. */
+.popover--anchored {
+  inset-inline-start: auto;
+  max-width: min(320px, calc(100vw - var(--space-6)));
+}
+
+.table-props {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.table-props__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.table-props__section + .table-props__section {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.table-props__title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.table-props__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.table-props__field--inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.table-props__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-md);
+}
+
+.table-props__value {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.table-props__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+}
+
+.table-props__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--fg-secondary);
+}
+
+.table-props__hint kbd {
+  padding: 0 3px;
+  font-family: var(--font-mono);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+}
+
+.table-props__actions {
+  display: flex;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.table-props__actions .btn {
+  width: 100%;
+  justify-content: center;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.stepper__input {
+  width: 4ch;
+  min-height: var(--control-height);
+  padding: 0 var(--space-1);
+  font: inherit;
+  text-align: center;
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.stepper__input::-webkit-outer-spin-button,
+.stepper__input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+/* --- Barre de recherche (non modale, ancrée) --- */
+.findbar {
+  position: absolute;
+  z-index: 40;
+  top: var(--space-3);
+  inset-inline-end: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(520px, calc(100vw - var(--space-7)));
+  padding: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-popover);
+}
+
+.findbar__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.findbar__row--replace {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Champ + compteur dans un même bloc : le compteur appartient au champ, il ne
+   doit pas se lire comme un élément indépendant. */
+.findbar__field {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.findbar__field:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.findbar__icon {
+  color: var(--fg-secondary);
+}
+
+.findbar__input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) 0;
+  font: inherit;
+  color: var(--fg-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.findbar__count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.findbar__count--empty {
+  color: var(--danger);
+}
+
+.findbar__options {
+  display: flex;
+  gap: var(--space-5);
+}
+
+.findbar__option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+/* --- Dialogue modal --- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(16, 24, 40, 0.45);
+}
+
+.modal {
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-modal);
+}
+
+.modal__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+
+/* --- Éditeur de formules --- */
+.math-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.math-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.math-dialog__input {
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  line-height: 1.5;
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+/* L'aperçu garde une hauteur minimale : sans elle, le dialogue sautille à chaque
+   passage entre formule valide et message d'erreur. */
+.math-dialog__preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  padding: var(--space-4);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+
+.math-dialog__render {
+  font-size: 1.25em;
+  color: var(--fg-primary);
+}
+
+.math-dialog__hint {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--fg-secondary);
+}
+
+.math-dialog__error {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--danger);
+}
+
+.math-dialog__mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.math-dialog__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+}
+
+.math-dialog__palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-4);
+}
+
+.math-group__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.math-group__items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.math-group__button {
+  min-width: 34px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  font-family: var(--font-document);
+  font-size: var(--text-xl);
+  line-height: 1;
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.math-group__button:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.math-dialog__example-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.math-dialog__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.math-dialog kbd {
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+}
+
+/* --- Boutons : cible ≥ 32px souris, ≥ 44px tactile (Loi de Fitts) --- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  min-width: 32px;
+  padding: 0 var(--space-4);
+  font: inherit;
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-sunken);
+  box-shadow: var(--elevation-hover);
+}
+
+.btn:disabled {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+  border-color: var(--border-subtle);
+}
+
+.btn--primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn--icon {
+  min-width: 32px;
+  padding: 0 var(--space-2);
+  background: transparent;
+  border-color: transparent;
+}
+
+.btn--primary .icon {
+  /* Icône légèrement moins appuyée que le libellé qu'elle accompagne. */
+  opacity: 0.9;
+}
+
+/* L'état pressé ne repose pas sur la seule couleur : bordure + fond + aria-pressed.
+   `data-active` couvre le cas contextuel (le bouton porte sur l'élément courant),
+   avec le même rendu : pour l'œil, « actif » doit se lire de la même façon. */
+.btn--icon[aria-pressed='true'],
+.btn--icon[data-active='true'] {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (pointer: coarse) {
+  .btn,
+  .btn--icon {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* --- Zone document --- */
+.document-area {
+  flex: 1;
+  overflow: auto;
+}
+
+/* --- Bandeaux --- */
+.banner {
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--text-md);
+}
+
+.banner--offline {
+  color: var(--warning);
+  background: var(--warning-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* --- Barre d'état : 24px --- */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: 24px;
+  padding: 0 var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+  background: var(--bg-app);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.statusbar__item--badge {
+  color: var(--warning);
+}
+
+.statusbar__sync {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.statusbar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.statusbar__sync--connected { color: var(--success); }
+.statusbar__sync--connecting { color: var(--fg-secondary); }
+.statusbar__sync--offline { color: var(--warning); }
+.statusbar__sync--local { color: var(--fg-secondary); }
+
+/* --- Présence --- */
+.presence {
+  display: flex;
+  align-items: center;
+}
+
+.presence__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-inline-start: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-app);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: #fff;
+}
+
+.presence__avatar--overflow {
+  color: var(--fg-primary);
+  background: var(--bg-sunken);
+}
+
+/* --- États (vide / erreur / chargement) --- */
+.state-panel {
+  max-width: 560px;
+  padding: var(--space-7);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-popover);
+}
+
+.state-panel--error {
+  border-color: var(--danger);
+}
+
+.state-panel__title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xl);
+}
+
+.state-panel__text {
+  margin: 0 0 var(--space-5);
+  color: var(--fg-secondary);
+}
+
+.start-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.start-form__row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.field--inline {
+  flex: 1;
+}
+
+.field__label {
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.field__input {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  font: inherit;
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-page {
+  width: min(var(--page-width), 100%);
+  padding: var(--space-7);
+  background: var(--bg-page);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-line {
+  height: 14px;
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-xs);
+  background: var(--bg-sunken);
+}
+
+.skeleton-line--title {
+  height: 26px;
+  width: 60%;
+  margin-bottom: var(--space-6);
+}
+
+/* --- Points de rupture (§3) --- */
+@media (max-width: 767px) {
+  .titlebar__id {
+    display: none;
+  }
+  .ribbon {
+    padding-inline: var(--space-3);
+  }
+}
+
+
+/* --- Impression : seul le document est imprimé --- */
+@media print {
+  /* Le PDF « fidèle » passe par le moteur du navigateur : ce qu'il rend ici EST
+     ce que l'usager obtient. Tout ce qui relève de l'édition disparaît. */
+  .titlebar,
+  .ribbon,
+  .ruler,
+  .statusbar,
+  .banner,
+  .page-guides,
+  .table-overlay,
+  .findbar,
+  .toast,
+  .popover,
+  .modal-backdrop,
+  .document-outline {
+    display: none !important;
+  }
+
+  .shell,
+  .document-area {
+    display: block !important;
+    overflow: visible !important;
+    height: auto !important;
+    background: #fff !important;
+  }
+
+  .page-stack {
+    display: block;
+    padding: 0;
+    /* Le zoom d'écran ne doit pas déformer la page imprimée. */
+    zoom: 1 !important;
+  }
+
+  .ProseMirror {
+    width: auto;
+    min-height: 0;
+    /* Les marges viennent de `@page` : les cumuler doublerait les blancs. */
+    padding: 0;
+    box-shadow: none;
+    font-size: 12pt;
+  }
+
+  /* Décorations d'édition : invisibles sur le papier. */
+  .search-hit,
+  .search-hit--current {
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .ProseMirror-yjs-cursor,
+  .ProseMirror-yjs-selection {
+    display: none !important;
+  }
+
+  .pm-math--empty,
+  .pm-math--error {
+    background: transparent !important;
+    text-decoration: none !important;
+  }
+
+  /* Ruptures de page : celles du document, et celles qu'impose la lisibilité. */
+  .pm-page-break {
+    break-after: page;
+    border: 0;
+    margin: 0;
+    height: 0;
+  }
+
+  .ProseMirror h1,
+  .ProseMirror h2,
+  .ProseMirror h3,
+  .ProseMirror h4,
+  .ProseMirror h5,
+  .ProseMirror h6 {
+    /* Un titre seul en bas de page est un défaut classique de mise en page. */
+    break-after: avoid;
+    break-inside: avoid;
+  }
+
+  .ProseMirror p,
+  .ProseMirror li {
+    /* Jamais une ligne isolée en haut ou en bas de page. */
+    orphans: 3;
+    widows: 3;
+  }
+
+  .pm-table,
+  .pm-task-item,
+  .pm-image,
+  .pm-math--block {
+    break-inside: avoid;
+  }
+
+  .pm-table[data-border-width='0'] td,
+  .pm-table[data-border-width='0'] th {
+    border: 0;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
+}
+
+@page {
+  size: A4;
+  /* Mêmes marges que la page à l'écran : le document imprimé garde sa géométrie. */
+  margin: 25mm;
+}
+
+
+/* --- Banc d'essai de pagination (page /pagination-test.html) --- */
+.essai {
+  padding: var(--space-5);
+}
+
+.essai__barre {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.essai__titre {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.essai__verdict {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.essai__verdict--ok {
+  color: var(--success);
+  background: var(--success-subtle);
+}
+
+.essai__verdict--echec {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+.essai__rapport {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.essai__page {
+  margin-top: var(--space-4);
+}
+
+/* Élément fautif : souligné en rouge, visible sans lire le rapport. */
+.essai-faute {
+  outline: 2px solid var(--danger);
+  background: var(--danger-subtle);
+}

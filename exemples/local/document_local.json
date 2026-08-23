@@ -1,0 +1,15 @@
+{
+  "title": "Notes de réunion",
+  "blocks": [
+    { "type": "heading", "level": 1, "text": "Notes de réunion" },
+    { "type": "paragraph", "text": "Ce document a été rédigé en local, dans ce fichier. Le client d'exemple le fournit au serveur puis affiche chaque sauvegarde au fil de la frappe." },
+    { "type": "heading", "level": 2, "text": "Ordre du jour" },
+    { "type": "bullet_list", "items": [
+      "Relire le rapport trimestriel",
+      "Répartir la rédaction",
+      "Fixer la prochaine date"
+    ] },
+    { "type": "heading", "level": 2, "text": "Relevé de décisions" },
+    { "type": "paragraph", "text": "" }
+  ]
+}
