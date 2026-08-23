@@ -75,10 +75,6 @@ export function createDocument(token: string, title: string): Promise<DocumentSu
   });
 }
 
-export function listDocuments(token: string): Promise<{ documents: DocumentSummary[] }> {
-  return request<{ documents: DocumentSummary[] }>('/documents', token);
-}
-
 export function getDocument(token: string, docId: string): Promise<DocumentSummary> {
   return request<DocumentSummary>(`/documents/${docId}`, token);
 }

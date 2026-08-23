@@ -615,7 +615,9 @@
 .bande::after {
   content: '';
   position: absolute;
-  inset-inline: 0;
+  /* Le filet suit la colonne de texte, pas le bord du papier. La bande, elle,
+     couvre toute la feuille pour qu'un logo puisse se poser dans la marge. */
+  inset-inline: var(--bande-marge-gauche, 0) var(--bande-marge-droite, 0);
   height: 1px;
   background: var(--border-subtle);
 }
@@ -667,46 +669,274 @@
   outline-offset: 2px;
 }
 
+.bande__bloc--cropping {
+  outline: none !important;
+  z-index: 20;
+}
+
+/* Poignées de redimensionnement (Coin = proportionnel, Bord = libre) */
+.bande__handle {
+  position: absolute;
+  z-index: 25;
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  touch-action: none;
+}
+
+/* Hitbox invisible élargie pour faciliter la saisie à la souris et au toucher */
+.bande__handle::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+}
+
+.bande__handle--nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.bande__handle--ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.bande__handle--sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.bande__handle--se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+
+.bande__handle--n { top: -6px; left: calc(50% - 5px); border-radius: 2px; cursor: ns-resize; }
+.bande__handle--s { bottom: -6px; left: calc(50% - 5px); border-radius: 2px; cursor: ns-resize; }
+.bande__handle--w { top: calc(50% - 5px); left: -6px; border-radius: 2px; cursor: ew-resize; }
+.bande__handle--e { top: calc(50% - 5px); right: -6px; border-radius: 2px; cursor: ew-resize; }
+
+/* Image complète en arrière-plan en mode rognage */
+.bande__crop-full-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Masques sombres autour du cadre de rognage */
+.bande__crop-dimmer {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.6);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Cadre de rognage interactif (déplaçable et redimensionnable) */
+.bande__crop-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.3);
+  cursor: move;
+  z-index: 10;
+  touch-action: none;
+}
+
+/* Grille des tiers (3x3) */
+.bande__crop-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.4) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.4) 1px, transparent 1px);
+  background-size: 33.333% 33.333%;
+  background-position: -1px -1px;
+}
+
+/* Poignées de rognage (Coins en L et barres de bord) */
+.bande__crop-handle {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+}
+
+.bande__crop-handle::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+}
+
+.bande__crop-handle--nw {
+  top: -3px;
+  left: -3px;
+  width: 14px;
+  height: 14px;
+  border-top: 3px solid #ffffff;
+  border-left: 3px solid #ffffff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+  cursor: nwse-resize;
+}
+
+.bande__crop-handle--ne {
+  top: -3px;
+  right: -3px;
+  width: 14px;
+  height: 14px;
+  border-top: 3px solid #ffffff;
+  border-right: 3px solid #ffffff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+  cursor: nesw-resize;
+}
+
+.bande__crop-handle--sw {
+  bottom: -3px;
+  left: -3px;
+  width: 14px;
+  height: 14px;
+  border-bottom: 3px solid #ffffff;
+  border-left: 3px solid #ffffff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+  cursor: nesw-resize;
+}
+
+.bande__crop-handle--se {
+  bottom: -3px;
+  right: -3px;
+  width: 14px;
+  height: 14px;
+  border-bottom: 3px solid #ffffff;
+  border-right: 3px solid #ffffff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+  cursor: nwse-resize;
+}
+
+.bande__crop-handle--n {
+  top: -3px;
+  left: calc(50% - 10px);
+  width: 20px;
+  height: 3px;
+  background: #ffffff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  cursor: ns-resize;
+}
+
+.bande__crop-handle--s {
+  bottom: -3px;
+  left: calc(50% - 10px);
+  width: 20px;
+  height: 3px;
+  background: #ffffff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  cursor: ns-resize;
+}
+
+.bande__crop-handle--w {
+  top: calc(50% - 10px);
+  left: -3px;
+  width: 3px;
+  height: 20px;
+  background: #ffffff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  cursor: ew-resize;
+}
+
+.bande__crop-handle--e {
+  top: calc(50% - 10px);
+  right: -3px;
+  width: 3px;
+  height: 20px;
+  background: #ffffff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  cursor: ew-resize;
+}
+
+/* Barre d'outils flottante en mode rognage */
+.bande__crop-toolbar {
+  position: absolute;
+  top: -38px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #0f172a;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 35;
+  white-space: nowrap;
+}
+
+.bande__crop-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 0 2px;
+}
+
+.bande__crop-ratios {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.bande__crop-ratio-btn {
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.bande__crop-ratio-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.bande__crop-btn {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: background 150ms ease;
+}
+
+.bande__crop-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.bande__crop-btn--valider {
+  background: var(--accent, #2563eb);
+  color: #ffffff;
+}
+
+.bande__crop-btn--valider:hover {
+  background: #1d4ed8;
+}
+
+.bande__margin-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--accent-subtle);
+  border-right: 1px dashed var(--accent-subtle);
+  pointer-events: none;
+  opacity: 0.6;
+}
+
 .bande__bloc:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-}
-
-/* --- Éditeur d'une bande : l'aperçu EST la surface de travail --- */
-
-.bande-editeur {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--border-subtle);
-}
-
-/* Cadre de mise à l'échelle. La bande y est posée en millimètres réels et
-   réduite par `zoom` : les proportions, les corps et les positions restent ceux
-   du papier. Le rognage évite qu'un bloc traîné trop loin élargisse le dialogue. */
-.bande-editeur__cadre {
-  overflow: hidden;
-  padding: var(--space-4) var(--space-3);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-}
-
-.bande-editeur__cadre:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.bande-editeur__plan {
-  /* La bande dépasse en bas de son propre filet : on lui laisse la place. */
-  padding-bottom: 2mm;
-}
-
-.bande-editeur__outils {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }
 
 .bande-editeur__adresse {
@@ -727,19 +957,6 @@
   border-radius: var(--radius-sm);
 }
 
-.bande-editeur__proprietes {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  align-items: end;
-  gap: var(--space-3) var(--space-4);
-  padding: var(--space-3);
-  background: var(--bg-sunken);
-  border-radius: var(--radius-sm);
-}
-
-.bande-editeur__large {
-  grid-column: 1 / -1;
-}
 
 .bande-editeur__styles {
   display: flex;
@@ -769,11 +986,30 @@
   background: none;
 }
 
-.bande-editeur__ligne {
+
+.bande-editeur__crop-section {
   display: flex;
   flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.bande-editeur__crop-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+.bande-editeur__crop-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+}
+
 
 /* --- En-tête et pied de page --- */
 .furniture {
@@ -781,6 +1017,57 @@
   flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-5);
+}
+
+.furniture__tabs {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-2);
+}
+
+.furniture__tab {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--fg-secondary);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--motion-ease);
+}
+
+.furniture__tab:hover {
+  color: var(--fg-primary);
+  background: var(--bg-hover);
+}
+
+.furniture__tab--active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* État de la bande, lisible sans changer d'onglet : sans elle, on ne sait pas
+   qu'un pied existe tant qu'on n'est pas allé voir. */
+.furniture__pastille {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--fg-disabled);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+}
+
+.furniture__pastille--pleine {
+  color: var(--success);
+  background: var(--success-subtle);
+  border-color: transparent;
 }
 
 .furniture__tokens {
@@ -866,6 +1153,467 @@
   gap: var(--space-2);
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-subtle);
+}
+
+/* --- Repères d'aimantation ---------------------------------------------------
+   Tracés le temps du geste seulement : un repère permanent devient du décor,
+   un repère qui apparaît AU MOMENT où il agit explique ce qui vient de se
+   passer. Leur couleur distingue la nature du repère, mais ne la porte PAS
+   seule (directive UX §2.1) : le bandeau de lecture la nomme en toutes lettres
+   — « Marge gauche », « Centre de la page ». */
+.bande__repere {
+  position: absolute;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.bande__repere--v {
+  top: -4mm;
+  bottom: -4mm;
+  width: 0;
+  border-left: 1px dashed var(--repere-couleur, var(--accent));
+}
+
+.bande__repere--h {
+  left: -4mm;
+  right: -4mm;
+  height: 0;
+  border-top: 1px dashed var(--repere-couleur, var(--accent));
+}
+
+.bande__repere--margin { --repere-couleur: var(--danger); }
+.bande__repere--center { --repere-couleur: var(--accent); }
+.bande__repere--block { --repere-couleur: var(--success); }
+.bande__repere--baseline { --repere-couleur: var(--warning); }
+.bande__repere--edge { --repere-couleur: var(--fg-disabled); }
+
+/* --- Atelier d'une bande -----------------------------------------------------
+   Deux colonnes : la feuille à gauche, l'inspecteur à droite. L'inspecteur
+   défile pour lui-même et garde une largeur fixe — quand il apparaissait sous
+   la surface, chaque sélection faisait sauter tout le dialogue et poussait les
+   réglages hors écran. */
+.atelier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.atelier__barre {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.atelier__separateur {
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+  margin: 0 var(--space-1);
+}
+
+.atelier__spacer {
+  flex: 1;
+}
+
+.atelier__zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.atelier__corps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.atelier__scene {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Fenêtre sur la feuille. Elle défile dans les deux sens : au-delà de
+   « Ajuster », le papier est plus grand qu'elle, et c'est le but. */
+.atelier__cadre {
+  overflow: auto;
+  max-height: 46vh;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.atelier__cadre:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.atelier__piste {
+  position: relative;
+  margin: 0 auto;
+}
+
+/* Tranche de feuille. Le papier est montré tel quel — bord, ombre portée — et
+   se perd en fondu du côté où la page continue. */
+.atelier__feuille {
+  position: relative;
+  background: var(--bg-page);
+  box-shadow: var(--elevation-popover);
+}
+
+.atelier__feuille::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 14mm;
+  pointer-events: none;
+}
+
+.atelier__feuille--header::after {
+  bottom: 0;
+  background: linear-gradient(to bottom, transparent, var(--bg-page));
+}
+
+.atelier__feuille--footer::after {
+  top: 0;
+  background: linear-gradient(to top, transparent, var(--bg-page));
+}
+
+/* Fantôme du corps de texte : ce que la bande laisse au document. Des lignes
+   plutôt qu'un aplat — l'œil y lit « du texte » sans avoir à le déchiffrer. */
+.atelier__fantome {
+  position: absolute;
+  opacity: 0.5;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--border-strong) 0,
+    var(--border-strong) 1.6mm,
+    transparent 1.6mm,
+    transparent 4.8mm
+  );
+}
+
+.atelier__bande {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.atelier__bande--header { top: 0; }
+.atelier__bande--footer { bottom: 0; }
+
+/* --- Règle graduée : les marges sont des poignées --- */
+.regle {
+  position: relative;
+  height: 22px;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+}
+
+.regle__zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-subtle);
+}
+
+.regle__trait {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 4px;
+  background: var(--border-strong);
+}
+
+.regle__trait--majeur {
+  height: 7px;
+}
+
+.regle__nombre {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1;
+  color: var(--fg-secondary);
+}
+
+.regle__poignee {
+  position: absolute;
+  top: 2px;
+  width: 11px;
+  height: 11px;
+  min-width: 0;
+  min-height: 0;
+  margin-left: -5.5px;
+  padding: 0;
+  background: var(--accent);
+  border: none;
+  border-radius: 0;
+  /* Triangle pointant vers la colonne de texte : la forme du curseur de marge
+     des traitements de texte, reconnue sans légende. */
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.regle__poignee:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* --- Lecture de position -----------------------------------------------------
+   Fixe, sous la surface. Une bulle qui suit le curseur masque justement ce
+   qu'on cherche à placer. */
+.atelier__lecture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-primary);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.atelier__lecture b {
+  font-weight: 600;
+  color: var(--fg-secondary);
+}
+
+.atelier__point {
+  color: var(--fg-disabled);
+}
+
+.atelier__reperes {
+  padding: 0 var(--space-2);
+  font-family: var(--font-ui);
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-radius: var(--radius-xs);
+}
+
+.atelier__aide {
+  font-family: var(--font-ui);
+  color: var(--fg-secondary);
+}
+
+.atelier__aide kbd {
+  margin: 0 var(--space-1);
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+}
+
+.atelier__legende {
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+/* --- Gabarits : une bande vide n'est plus une page blanche --- */
+.atelier__gabarits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.atelier__gabarit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  font-family: inherit;
+  text-align: left;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--motion-ease);
+}
+
+.atelier__gabarit:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.atelier__gabarit-nom {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-primary);
+}
+
+.atelier__gabarit-apercu {
+  font-family: var(--font-document);
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+/* --- Inspecteur --- */
+.atelier__inspecteur {
+  max-height: 62vh;
+  overflow: auto;
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  scrollbar-gutter: stable;
+}
+
+.inspecteur {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.inspecteur__entete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.inspecteur__titre {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.inspecteur__vide {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.inspecteur__champ {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.inspecteur__paire,
+.inspecteur__marges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.inspecteur__calage {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.inspecteur__calage .btn {
+  border-color: var(--border-subtle);
+  background: var(--bg-app);
+}
+
+.inspecteur__formats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.inspecteur__formats .segmente__btn {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-3);
+}
+
+.inspecteur__replie > summary {
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+.inspecteur__note {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.inspecteur__actions {
+  display: flex;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.inspecteur__actions .btn {
+  flex: 1;
+}
+
+/* --- Sélecteur segmenté --- */
+.segmente {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segmente__btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+  background: var(--bg-app);
+  border: none;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+
+.segmente__btn + .segmente__btn {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.segmente__btn:hover {
+  background: var(--bg-sunken);
+}
+
+/* L'état choisi ne repose pas sur la seule couleur : graisse et liseré basse
+   l'accompagnent (directive UX §2.1). */
+.segmente__btn[aria-pressed='true'] {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-subtle);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* --- Adaptation aux fenêtres étroites --- */
+@media (max-width: 940px) {
+  .atelier__corps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .atelier__inspecteur {
+    max-height: none;
+  }
 }
 
 /* --- Retour de téléchargement (non modal, éphémère) --- */
@@ -1370,6 +2118,11 @@
   max-width: 100%;
   max-height: 90vh;
   overflow: auto;
+  /* Place de l'ascenseur réservée en permanence. Sans cela, un contenu dont la
+     hauteur dépend de la largeur — la bande d'en-tête, mise à l'échelle de la
+     place disponible — entre en oscillation : l'ascenseur apparaît, la largeur
+     diminue, la bande rétrécit, l'ascenseur disparaît, et ainsi de suite. */
+  scrollbar-gutter: stable;
   background: var(--bg-raised);
   border-radius: var(--radius-lg);
   box-shadow: var(--elevation-modal);
@@ -1567,6 +2320,29 @@
 
 .btn--primary:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+/* Bouton discret : même géométrie, moins d'appui visuel. Il sert aux barres
+   d'outils, où un cadre par action produit une grille de boîtes illisible. */
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--bg-sunken);
+  border-color: var(--border-subtle);
+}
+
+/* Action destructrice : elle DOIT se voir comme telle avant le clic. */
+.btn--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: var(--danger-subtle);
 }
 
 .btn--icon {

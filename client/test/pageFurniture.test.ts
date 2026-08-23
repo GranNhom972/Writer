@@ -10,12 +10,14 @@ import {
   MAX_BLOCKS_PER_BAND,
   type FurnitureBlock,
   footerLine,
-  isEmpty,
+  formatPageNumber,
   readFurniture,
   renderFurniture,
   resolveGeometry,
   showsOn,
+  snapAxis,
   type PageFurniture,
+  type SnapTarget,
 } from '../src/document/pageFurniture';
 
 const contexte = { page: 2, pages: 5, titre: 'Notes de réunion', date: new Date('2026-08-22T10:00:00Z') };
@@ -95,12 +97,6 @@ describe('affichage par page', () => {
   it('affiche partout par défaut', () => {
     expect(showsOn(DEFAULT_FURNITURE, 1)).toBe(true);
   });
-
-  it('reconnaît une définition vide', () => {
-    expect(isEmpty(DEFAULT_FURNITURE)).toBe(true);
-    expect(isEmpty({ ...DEFAULT_FURNITURE, header: '  ' })).toBe(true);
-    expect(isEmpty({ ...DEFAULT_FURNITURE, pageNumber: true })).toBe(false);
-  });
 });
 
 describe('réglages de géométrie', () => {
@@ -159,6 +155,40 @@ describe('réglages de géométrie', () => {
     // Mais posé à 20 mm du bord, il faut bien pousser le corps.
     const bas = resolveGeometry({ ...DEFAULT_FURNITURE, header: 'Société', headerMm: 20, fontSizePt: 16 });
     expect(bas.marginTopMm).toBe(32.3);
+  });
+
+  it('maintient le wrapper d’en-tête stable tant que les objets ne dépassent pas la limite', () => {
+    // Avec marginTopMm = 25mm, le wrapper de base fait 20mm.
+    const img5 = resolveGeometry({
+      ...DEFAULT_FURNITURE,
+      marginTopMm: 25,
+      blocks: [{ ...createBlock('header', 'image'), src: 'https://ex.fr/a.png', y: 0, heightMm: 5 }],
+    });
+    const img8 = resolveGeometry({
+      ...DEFAULT_FURNITURE,
+      marginTopMm: 25,
+      blocks: [{ ...createBlock('header', 'image'), src: 'https://ex.fr/a.png', y: 0, heightMm: 8 }],
+    });
+
+    // Les deux tiennent dans la marge de 25mm (12 + 8 + 5 = 25mm) et le wrapper de base fait 20mm
+    expect(img5.headerContentMm).toBe(20);
+    expect(img8.headerContentMm).toBe(20);
+    expect(img5.marginTopMm).toBe(25);
+    expect(img8.marginTopMm).toBe(25);
+
+    // Si l'objet dépasse la limite (ex. 30mm), le wrapper s'agrandit pour l'envelopper et repousse la marge
+    const img30 = resolveGeometry({
+      ...DEFAULT_FURNITURE,
+      marginTopMm: 25,
+      blocks: [{ ...createBlock('header', 'image'), src: 'https://ex.fr/a.png', y: 0, heightMm: 30 }],
+    });
+    expect(img30.headerContentMm).toBe(30);
+    expect(img30.marginTopMm).toBe(47); // headerMm (12) + 30 + 5
+  });
+
+  it('calcule la hauteur d’un bloc image en tenant compte du rognage', () => {
+    const b = { ...createBlock('header', 'image'), src: 'https://ex.fr/a.png', heightMm: 40, cropTop: 25, cropBottom: 25 };
+    expect(blockHeightMm(b)).toBe(20);
   });
 });
 
@@ -303,5 +333,103 @@ describe('hauteur de bande', () => {
   it('mesure un bloc de texte à son interligne', () => {
     expect(blockHeightMm(bloc({ fontSizePt: 10 }))).toBe(4.6);
     expect(blockHeightMm(bloc({ kind: 'image', heightMm: 18 }))).toBe(18);
+  });
+
+  it('lit et borne les valeurs de rognage d’image', () => {
+    const f = readFurniture({
+      blocks: [
+        {
+          kind: 'image',
+          src: 'https://x.fr/logo.png',
+          cropTop: 10,
+          cropRight: 25,
+          cropBottom: 99,
+          cropLeft: -5,
+        },
+      ],
+    });
+    expect(f.blocks[0]!.cropTop).toBe(10);
+    expect(f.blocks[0]!.cropRight).toBe(25);
+    expect(f.blocks[0]!.cropBottom).toBe(80);
+    expect(f.blocks[0]!.cropLeft).toBe(0);
+  });
+});
+
+describe('numéro de page', () => {
+  const bornes = { page: 2, pages: 7 };
+
+  it('met le numéro en forme selon le format choisi', () => {
+    expect(formatPageNumber('simple', bornes)).toBe('2');
+    expect(formatPageNumber('page', bornes)).toBe('Page 2');
+    expect(formatPageNumber('fraction', bornes)).toBe('2 / 7');
+    expect(formatPageNumber('page-sur', bornes)).toBe('Page 2 / 7');
+    expect(formatPageNumber('tiret', bornes)).toBe('— 2 —');
+  });
+
+  it('applique le format au pied de page', () => {
+    const pied: PageFurniture = {
+      ...DEFAULT_FURNITURE,
+      footer: 'Confidentiel',
+      pageNumber: true,
+      pageNumberFormat: 'tiret',
+    };
+    expect(footerLine(pied, contexte)).toBe('Confidentiel — — 2 —');
+    expect(footerLine({ ...pied, footer: '' }, contexte)).toBe('— 2 —');
+  });
+
+  it('écarte un format inconnu venu du réseau', () => {
+    expect(readFurniture({ pageNumberFormat: 'romain' }).pageNumberFormat).toBe('page-sur');
+    expect(readFurniture({ pageNumberFormat: 42 }).pageNumberFormat).toBe('page-sur');
+    expect(readFurniture({ pageNumberFormat: 'fraction' }).pageNumberFormat).toBe('fraction');
+  });
+});
+
+describe('aimantation', () => {
+  const marge: SnapTarget = { mm: 25, kind: 'margin', label: 'Marge gauche' };
+  const centre: SnapTarget = { mm: 105, kind: 'center', label: 'Centre de la page' };
+  const droite: SnapTarget = { mm: 185, kind: 'margin', label: 'Marge droite' };
+
+  it('laisse la position intacte hors de portée', () => {
+    const resultat = snapAxis(60, 30, [marge, centre, droite], 2);
+    expect(resultat.startMm).toBe(60);
+    expect(resultat.guides).toEqual([]);
+  });
+
+  it('cale le bord gauche sur la marge', () => {
+    const resultat = snapAxis(26.4, 30, [marge], 2);
+    expect(resultat.startMm).toBeCloseTo(25);
+    expect(resultat.guides).toEqual([marge]);
+  });
+
+  it('cale le bord droit sur la marge droite', () => {
+    // Bord droit à 186,2 mm : c'est LUI qui tombe à portée, pas le bord gauche.
+    const resultat = snapAxis(156.2, 30, [droite], 2);
+    expect(resultat.startMm).toBeCloseTo(155);
+    expect(resultat.guides).toEqual([droite]);
+  });
+
+  it('centre l’élément quand c’est son milieu qui est à portée', () => {
+    const resultat = snapAxis(89.3, 30, [centre], 2);
+    expect(resultat.startMm).toBeCloseTo(90);
+    expect(resultat.guides).toEqual([centre]);
+  });
+
+  it('retient la correction la plus faible entre deux cibles concurrentes', () => {
+    const proche: SnapTarget = { mm: 25.4, kind: 'block' };
+    const resultat = snapAxis(25.5, 10, [marge, proche], 3);
+    expect(resultat.startMm).toBeCloseTo(25.4);
+  });
+
+  it('rend tous les repères que la correction satisfait', () => {
+    // Un élément de 60 mm dont le bord gauche tombe sur la marge a son milieu
+    // sur une autre cible : les deux repères doivent se montrer ensemble.
+    const milieu: SnapTarget = { mm: 55, kind: 'block' };
+    const resultat = snapAxis(25.5, 60, [marge, milieu], 2);
+    expect(resultat.startMm).toBeCloseTo(25);
+    expect(resultat.guides).toEqual([marge, milieu]);
+  });
+
+  it('accepte une liste de cibles vide', () => {
+    expect(snapAxis(12, 8, [], 2)).toEqual({ startMm: 12, guides: [] });
   });
 });

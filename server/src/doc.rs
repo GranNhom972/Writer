@@ -62,7 +62,7 @@ impl DocHandle {
         let update = Update::decode_v1(bytes).map_err(|e| AppError::Crdt(e.to_string()))?;
         self.with_doc(|doc| {
             let mut txn = doc.transact_mut();
-            let _ = txn.apply_update(update);
+            txn.apply_update(update);
         });
         Ok(())
     }

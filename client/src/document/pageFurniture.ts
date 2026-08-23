@@ -17,6 +17,23 @@ export type FurnitureBand = 'header' | 'footer';
 export type FurnitureBlockKind = 'text' | 'image';
 
 /**
+ * Présentation du numéro de page.
+ *
+ * Un seul gabarit imposé — « Page 2 / 7 » — obligeait à retaper le numéro à la
+ * main dans la ligne de pied dès qu'on en voulait un autre, ce qui faisait
+ * perdre la substitution automatique. Le format est donc un réglage.
+ */
+export type PageNumberFormat = 'simple' | 'page' | 'fraction' | 'page-sur' | 'tiret';
+
+export const PAGE_NUMBER_FORMATS: readonly { valeur: PageNumberFormat; exemple: string }[] = [
+  { valeur: 'simple', exemple: '2' },
+  { valeur: 'page', exemple: 'Page 2' },
+  { valeur: 'fraction', exemple: '2 / 7' },
+  { valeur: 'page-sur', exemple: 'Page 2 / 7' },
+  { valeur: 'tiret', exemple: '— 2 —' },
+];
+
+/**
  * Un élément libre posé dans une bande.
  *
  * Writer connaît la même distinction : le texte de l'en-tête coule dans le cadre
@@ -51,6 +68,11 @@ export interface FurnitureBlock {
   underline: boolean;
   /** Couleur du texte, en notation `#rrggbb`. */
   color: string;
+  /** Découpe / rognage de l'image (0 à 80 %). */
+  cropTop?: number;
+  cropRight?: number;
+  cropBottom?: number;
+  cropLeft?: number;
 }
 
 export interface PageFurniture {
@@ -58,8 +80,10 @@ export interface PageFurniture {
   header: string;
   /** Texte du pied de page ; vide = pas de pied. */
   footer: string;
-  /** Affiche « Page X / N » dans le pied. */
+  /** Affiche le numéro de page dans le pied. */
   pageNumber: boolean;
+  /** Présentation de ce numéro. */
+  pageNumberFormat: PageNumberFormat;
   /** Affiche l'en-tête et le pied sur la première page (page de garde). */
   onFirstPage: boolean;
 
@@ -86,6 +110,7 @@ export const DEFAULT_FURNITURE: PageFurniture = {
   header: '',
   footer: '',
   pageNumber: false,
+  pageNumberFormat: 'page-sur',
   onFirstPage: true,
   headerMm: 12,
   footerMm: 12,
@@ -169,6 +194,12 @@ function alignement(valeur: unknown, defaut: FurnitureAlign): FurnitureAlign {
   return valeur === 'left' || valeur === 'center' || valeur === 'right' ? valeur : defaut;
 }
 
+function formatNumero(valeur: unknown): PageNumberFormat {
+  return PAGE_NUMBER_FORMATS.some((f) => f.valeur === valeur)
+    ? (valeur as PageNumberFormat)
+    : DEFAULT_FURNITURE.pageNumberFormat;
+}
+
 /**
  * Adresse d'image acceptable.
  *
@@ -238,12 +269,21 @@ export function createBlock(band: FurnitureBand, kind: FurnitureBlockKind): Furn
     italic: false,
     underline: false,
     color: DEFAULT_BLOCK_COLOR,
+    cropTop: 0,
+    cropRight: 0,
+    cropBottom: 0,
+    cropLeft: 0,
   };
 }
 
 /** Hauteur occupée par un bloc dans sa bande, en millimètres. */
 export function blockHeightMm(bloc: FurnitureBlock): number {
-  if (bloc.kind === 'image') return bloc.heightMm;
+  if (bloc.kind === 'image') {
+    const cT = bloc.cropTop ?? 0;
+    const cB = bloc.cropBottom ?? 0;
+    const cropH = Math.max(0.01, (100 - cT - cB) / 100);
+    return Math.round(bloc.heightMm * cropH * 10) / 10;
+  }
   return lineHeightMm(bloc.fontSizePt);
 }
 
@@ -263,6 +303,12 @@ function readBlock(source: unknown): FurnitureBlock | null {
   const texte = (valeur: unknown, max: number): string =>
     typeof valeur === 'string' ? valeur.slice(0, max) : '';
 
+  const crop = (valeur: unknown): number => {
+    const n = typeof valeur === 'number' ? valeur : Number.parseFloat(String(valeur));
+    if (!Number.isFinite(n)) return 0;
+    return Math.min(80, Math.max(0, Math.round(n * 10) / 10));
+  };
+
   return {
     id: typeof brut['id'] === 'string' && brut['id'].length <= 64 ? brut['id'] : newBlockId(),
     band,
@@ -279,6 +325,10 @@ function readBlock(source: unknown): FurnitureBlock | null {
     italic: brut['italic'] === true,
     underline: brut['underline'] === true,
     color: couleur(brut['color']),
+    cropTop: crop(brut['cropTop']),
+    cropRight: crop(brut['cropRight']),
+    cropBottom: crop(brut['cropBottom']),
+    cropLeft: crop(brut['cropLeft']),
   };
 }
 
@@ -332,21 +382,24 @@ export interface ResolvedGeometry {
  * L'en-tête doit rester au-dessus du corps de texte, et le pied en dessous :
  * sinon ils se recouvrent. La marge du corps est donc repoussée si nécessaire.
  *
- * Même partage que chez Writer : `SwPageFrm` empile [en-tête, corps, pied], et
- * `SwBodyFrm::Format` donne au corps ce que ses voisins lui laissent
- * (`nHeight = GetUpper()->Prt().Height()` moins la hauteur de chaque frère).
+ * Le wrapper de la bande adopte une hauteur minimale stable basée sur la marge,
+ * et ne s'agrandit QUE si un élément dépasse cette limite.
  */
 export function resolveGeometry(furniture: PageFurniture): ResolvedGeometry {
-  // La bande ne se devine pas : on mesure ce qu'elle contient. La réserve
-  // forfaitaire de 8 mm qu'on appliquait avant ne couvrait ni un en-tête en gros
-  // corps, ni le moindre logo — les deux passaient sous le texte.
-  const headerContentMm = bandContentMm(furniture, 'header');
-  const footerContentMm = bandContentMm(furniture, 'footer');
+  const rawHeaderContentMm = bandContentMm(furniture, 'header');
+  const rawFooterContentMm = bandContentMm(furniture, 'footer');
+
+  const baseHeaderMm = Math.max(16, furniture.marginTopMm - FURNITURE_DIST_MM);
+  const baseFooterMm = Math.max(16, furniture.marginBottomMm - FURNITURE_DIST_MM);
+
+  const headerContentMm = Math.max(baseHeaderMm, rawHeaderContentMm);
+  const footerContentMm = Math.max(baseFooterMm, rawFooterContentMm);
+
   const reserve = (contenu: number): number =>
     contenu === 0 ? 0 : Math.round((contenu + FURNITURE_DIST_MM) * 10) / 10;
 
-  const headerBandMm = reserve(headerContentMm);
-  const footerBandMm = reserve(footerContentMm);
+  const headerBandMm = reserve(rawHeaderContentMm);
+  const footerBandMm = reserve(rawFooterContentMm);
 
   return {
     marginTopMm: Math.max(
@@ -388,6 +441,7 @@ export function readFurniture(source: unknown): PageFurniture {
     header: texte(brut['header']),
     footer: texte(brut['footer']),
     pageNumber: brut['pageNumber'] === true,
+    pageNumberFormat: formatNumero(brut['pageNumberFormat']),
     onFirstPage: brut['onFirstPage'] !== false,
     headerMm: borner(brut['headerMm'], DEFAULT_FURNITURE.headerMm, FURNITURE_LIMITS.distanceMm),
     footerMm: borner(brut['footerMm'], DEFAULT_FURNITURE.footerMm, FURNITURE_LIMITS.distanceMm),
@@ -443,12 +497,31 @@ export function renderFurniture(modele: string, contexte: FurnitureContext): str
     .replace(/\{date\}/g, date.toLocaleDateString('fr-FR'));
 }
 
+/** Le numéro de page, mis en forme selon le format choisi. */
+export function formatPageNumber(
+  format: PageNumberFormat,
+  contexte: Pick<FurnitureContext, 'page' | 'pages'>,
+): string {
+  switch (format) {
+    case 'simple':
+      return String(contexte.page);
+    case 'page':
+      return `Page ${contexte.page}`;
+    case 'fraction':
+      return `${contexte.page} / ${contexte.pages}`;
+    case 'tiret':
+      return `— ${contexte.page} —`;
+    default:
+      return `Page ${contexte.page} / ${contexte.pages}`;
+  }
+}
+
 /** Texte du pied, numéro de page compris. */
 export function footerLine(furniture: PageFurniture, contexte: FurnitureContext): string {
   const texte = renderFurniture(furniture.footer, contexte).trim();
   if (!furniture.pageNumber) return texte;
 
-  const numero = `Page ${contexte.page} / ${contexte.pages}`;
+  const numero = formatPageNumber(furniture.pageNumberFormat, contexte);
   return texte ? `${texte} — ${numero}` : numero;
 }
 
@@ -457,6 +530,127 @@ export function showsOn(furniture: PageFurniture, page: number): boolean {
   return furniture.onFirstPage || page > 1;
 }
 
-export function isEmpty(furniture: PageFurniture): boolean {
-  return bandIsEmpty(furniture, 'header') && bandIsEmpty(furniture, 'footer');
+
+/* --- Magnétisme ------------------------------------------------------------
+   Poser un logo « à la marge » ou « au centre » à la souris seule est un jeu
+   d'adresse : au millimètre près, on n'y arrive pas, et deux éléments censés
+   être alignés ne le sont jamais tout à fait. L'aimantation fait le dernier
+   millimètre à notre place et MONTRE sur quoi elle s'appuie.
+
+   Module pur : l'appelant fournit les cibles en millimètres, il reçoit la
+   position corrigée et les repères à dessiner. */
+
+/** Une position remarquable sur laquelle un élément peut se caler. */
+export interface SnapTarget {
+  /** Position de la cible sur l'axe, en millimètres. */
+  mm: number;
+  /** Nature de la cible — sert à choisir la couleur du repère. */
+  kind: 'margin' | 'center' | 'edge' | 'block' | 'baseline';
+  /** Libellé annoncé dans le bandeau de position. */
+  label?: string;
 }
+
+export interface SnapOutcome {
+  /** Position corrigée du bord « bas » de l'élément (gauche ou haut). */
+  startMm: number;
+  /** Repères à tracer, en millimètres sur l'axe. */
+  guides: SnapTarget[];
+}
+
+/**
+ * Aimante un élément sur un axe.
+ *
+ * Les trois ancres de l'élément — bord bas, milieu, bord haut — sont candidates :
+ * c'est ce qui permet de centrer un logo sur la page aussi bien que de le caler
+ * sur la marge. On retient la correction la plus faible, puis on redonne TOUS
+ * les repères que cette correction satisfait, pour que l'aperçu montre le
+ * centrage et l'alignement au même instant quand les deux coïncident.
+ */
+export function snapAxis(
+  startMm: number,
+  sizeMm: number,
+  targets: readonly SnapTarget[],
+  thresholdMm: number,
+): SnapOutcome {
+  const ancres = [0, sizeMm / 2, sizeMm];
+
+  let meilleur: { delta: number; ecart: number } | null = null;
+  for (const cible of targets) {
+    for (const ancre of ancres) {
+      const delta = cible.mm - (startMm + ancre);
+      const ecart = Math.abs(delta);
+      if (ecart > thresholdMm) continue;
+      if (meilleur === null || ecart < meilleur.ecart) meilleur = { delta, ecart };
+    }
+  }
+
+  if (meilleur === null) return { startMm, guides: [] };
+
+  const corrige = startMm + meilleur.delta;
+  // Tolérance de 0,05 mm : la correction est exacte, mais l'arithmétique
+  // flottante ne l'est pas.
+  const guides = targets.filter((cible) =>
+    ancres.some((ancre) => Math.abs(cible.mm - (corrige + ancre)) < 0.05),
+  );
+
+  return { startMm: corrige, guides };
+}
+
+/* --- Gabarits --------------------------------------------------------------
+   Une bande vide est une page blanche : on sait ce qu'on veut, pas par où
+   commencer. Ces dispositions sont des points de départ modifiables, pas des
+   verrous — elles n'écrivent que la ligne de base et son alignement. */
+
+export interface FurniturePreset {
+  id: string;
+  label: string;
+  /** Aperçu textuel de la disposition, tel qu'il s'affichera. */
+  apercu: string;
+  band: FurnitureBand;
+  patch: Partial<PageFurniture>;
+}
+
+export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
+  {
+    id: 'header-titre',
+    label: 'Titre du document',
+    apercu: '{titre}',
+    band: 'header',
+    patch: { header: '{titre}', headerAlign: 'left' },
+  },
+  {
+    id: 'header-titre-date',
+    label: 'Titre et date',
+    apercu: '{titre} — {date}',
+    band: 'header',
+    patch: { header: '{titre} — {date}', headerAlign: 'center' },
+  },
+  {
+    id: 'header-confidentiel',
+    label: 'Mention de diffusion',
+    apercu: 'CONFIDENTIEL',
+    band: 'header',
+    patch: { header: 'CONFIDENTIEL', headerAlign: 'right' },
+  },
+  {
+    id: 'footer-numero',
+    label: 'Numéro seul',
+    apercu: 'Page 2 / 7',
+    band: 'footer',
+    patch: { footer: '', pageNumber: true, pageNumberFormat: 'page-sur', footerAlign: 'center' },
+  },
+  {
+    id: 'footer-titre-numero',
+    label: 'Titre et numéro',
+    apercu: '{titre} — 2 / 7',
+    band: 'footer',
+    patch: { footer: '{titre}', pageNumber: true, pageNumberFormat: 'fraction', footerAlign: 'right' },
+  },
+  {
+    id: 'footer-date',
+    label: 'Date et numéro',
+    apercu: '{date} — 2',
+    band: 'footer',
+    patch: { footer: '{date}', pageNumber: true, pageNumberFormat: 'simple', footerAlign: 'right' },
+  },
+];

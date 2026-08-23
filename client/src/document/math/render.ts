@@ -108,17 +108,3 @@ export function describeMathError(error: unknown): string {
   return `Formule invalide${suffix}.`;
 }
 
-/** Vérification rapide, sans charger le moteur : sert à l'état des boutons. */
-export function hasBalancedBraces(latex: string): boolean {
-  let depth = 0;
-  for (let i = 0; i < latex.length; i += 1) {
-    if (latex[i] === '\\') {
-      i += 1; // caractère échappé : \{ et \} ne comptent pas
-      continue;
-    }
-    if (latex[i] === '{') depth += 1;
-    if (latex[i] === '}') depth -= 1;
-    if (depth < 0) return false;
-  }
-  return depth === 0;
-}

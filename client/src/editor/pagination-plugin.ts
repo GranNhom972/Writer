@@ -122,11 +122,6 @@ export function computeLayout(blocks: readonly BlockBox[], geometry: PageGeometr
   return { reports, contentBottom };
 }
 
-/** Reports seuls — la forme utilisée partout où l'étendue n'importe pas. */
-export function computeSpacers(blocks: readonly BlockBox[], geometry: PageGeometry): Spacer[] {
-  return computeLayout(blocks, geometry).reports;
-}
-
 /**
  * Nombre de feuilles occupées par un contenu de hauteur donnée.
  *

@@ -20,6 +20,17 @@ export function Modal({ title, onClose, children, width = 640 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
 
+  /**
+   * Fermeture lue par référence.
+   *
+   * L'appelant passe presque toujours une fonction fléchée, donc une identité
+   * neuve à chaque rendu. En dépendre relançait l'effet à chaque frappe : le
+   * focus repartait sur le premier champ du dialogue, et la saisie devenait
+   * impossible. L'effet ne doit s'armer qu'à l'ouverture.
+   */
+  const fermerRef = useRef(onClose);
+  fermerRef.current = onClose;
+
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
@@ -28,7 +39,7 @@ export function Modal({ title, onClose, children, width = 640 }: ModalProps) {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        fermerRef.current();
         return;
       }
       if (event.key !== 'Tab' || !panel) return;
@@ -53,7 +64,7 @@ export function Modal({ title, onClose, children, width = 640 }: ModalProps) {
       document.removeEventListener('keydown', onKeyDown, true);
       previouslyFocused?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="modal-backdrop" onPointerDown={(event) => event.target === event.currentTarget && onClose()}>

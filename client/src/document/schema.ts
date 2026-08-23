@@ -539,8 +539,6 @@ export const writeSchema = new Schema({
   marks,
 });
 
-export type WriteSchema = typeof writeSchema;
-
 /** Polices proposées dans le ruban (portage du sélecteur de `SvxFontNameBox`). */
 export const FONT_FAMILIES = [
   'Arial',

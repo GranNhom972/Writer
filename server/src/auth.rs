@@ -146,7 +146,7 @@ fn verify_jwt(token: &str) -> AppResult<Identity> {
 
 fn base64_url_decode(input: &str) -> Result<Vec<u8>, ()> {
     let mut s = input.replace('-', "+").replace('_', "/");
-    while s.len() % 4 != 0 {
+    while !s.len().is_multiple_of(4) {
         s.push('=');
     }
     // Décodage standard base64 sans crate externe lourde

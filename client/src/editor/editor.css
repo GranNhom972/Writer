@@ -43,9 +43,9 @@
 
 .page-guide__number {
   position: absolute;
-  right: var(--space-3);
-  bottom: var(--space-3);
-  font-size: var(--text-xs);
+  right: var(--marge-droite, var(--space-3));
+  bottom: var(--pied-bas, var(--space-3));
+  font-size: var(--furniture-taille, var(--text-xs));
   color: var(--fg-disabled);
 }
 
@@ -55,11 +55,11 @@
    le dialogue (cf. app.css). */
 .page-guide__band {
   position: absolute;
-  left: var(--marge-gauche, 25mm);
-  /* La bande réagit au clic pour ouvrir son dialogue, alors que la pile de
-     cadres, elle, laisse tout passer vers le texte. */
+  left: 0;
+  width: 100%;
+  /* La bande réagit au double-clic pour ouvrir son dialogue, alors que la pile
+     de cadres, elle, laisse tout passer vers le texte. */
   pointer-events: auto;
-  cursor: pointer;
   /* Au-dessus du corps de texte : `.ProseMirror` porte `z-index: 1` et son
      rembourrage recouvre justement la zone des marges, donc la bande. Sans
      cela, le clic atterrit dans l'éditeur et la bande reste inatteignable. */
@@ -67,61 +67,69 @@
 }
 
 .page-guide__band--header {
-  top: var(--entete-haut, 12mm);
+  top: 0;
 }
 
 .page-guide__band--footer {
-  bottom: var(--pied-bas, 12mm);
+  bottom: 0;
 }
 
-.page-guide__band:hover .bande::before,
-.page-guide__band:focus-visible .bande::before {
-  /* Repère au survol : la bande est cliquable, il faut que ça se voie. */
-  content: '';
-  position: absolute;
-  inset: -2mm -1mm;
-  border-radius: var(--radius-xs);
-  background: var(--accent-subtle);
-}
-
-.page-guide__band:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+/* Repère au survol : la zone est éditable, il faut que ça se voie — mais sans
+   aplat plein, qui ferait passer l'en-tête pour une sélection. */
+.page-guide__band:hover {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
   border-radius: var(--radius-xs);
 }
 
-/* Bande vide : présente pour le clic, invisible tant qu'on ne la vise pas. Une
-   zone qu'on ne peut pas atteindre parce qu'elle n'a rien à montrer serait un
-   cul-de-sac — c'est pourtant là qu'on clique pour créer un en-tête. */
 .page-guide__band--vide {
   display: flex;
   align-items: center;
   border-radius: var(--radius-xs);
 }
 
-.page-guide__band-invite {
+/* Pastille d'accès. Le double-clic est la convention des traitements de texte,
+   mais il ne s'annonce pas tout seul : cette pastille le rend découvrable, et
+   donne au clavier et aux lecteurs d'écran une cible nommée. */
+.page-guide__acces {
+  position: absolute;
+  right: var(--space-4);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 var(--space-3);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
-  color: var(--fg-disabled);
+  color: var(--accent);
+  background: var(--bg-raised);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  box-shadow: var(--elevation-hover);
+  cursor: pointer;
   opacity: 0;
   transition: opacity var(--motion-fast) var(--motion-ease);
 }
 
-.page-guide__band--vide:hover,
-.page-guide__band--vide:focus-visible {
+.page-guide__band--header .page-guide__acces { top: 2mm; }
+.page-guide__band--footer .page-guide__acces { bottom: 2mm; }
+
+.page-guide__band:hover .page-guide__acces,
+.page-guide__acces:focus-visible {
+  opacity: 1;
+}
+
+.page-guide__acces:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.page-guide__acces:hover {
   background: var(--accent-subtle);
 }
 
-.page-guide__band--vide:hover .page-guide__band-invite,
-.page-guide__band--vide:focus-visible .page-guide__band-invite {
-  opacity: 1;
-  /* Une invite qu'on doit deviner ne sert à rien : au survol elle passe au
-     contraste du texte secondaire, pas à celui d'un libellé désactivé. */
-  color: var(--fg-secondary);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .page-guide__band-invite {
+  .page-guide__acces {
     transition: none;
   }
 }

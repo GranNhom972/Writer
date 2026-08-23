@@ -74,20 +74,20 @@ export function WriteEditor({
   const furnitureRef = useRef(furniture);
   furnitureRef.current = furniture;
   const geometrie = resolveGeometry(furniture);
-  /** Largeur utile d'une bande : la feuille, moins ses marges latérales. */
-  const utileMm = A4.widthMm - geometrie.marginLeftMm - geometrie.marginRightMm;
   const bandes = [
     {
       band: 'header' as const,
       libelle: 'En-tête de page',
       hauteurMm: geometrie.headerContentMm,
-      invite: 'Cliquer pour ajouter un en-tête',
+      invite: 'Ajouter un en-tête',
+      modifier: 'Modifier l’en-tête',
     },
     {
       band: 'footer' as const,
       libelle: 'Pied de page',
       hauteurMm: geometrie.footerContentMm,
-      invite: 'Cliquer pour ajouter un pied de page',
+      invite: 'Ajouter un pied de page',
+      modifier: 'Modifier le pied de page',
     },
   ];
   const signalerPages = useRef(onPageCountChange);
@@ -230,44 +230,48 @@ export function WriteEditor({
             >
               {/* En-tête et pied vivent dans le cadre de page, pas dans le flux :
                   c'est ce qui les rend identiques d'une page à l'autre. */}
-              {bandes.map(({ band, libelle, hauteurMm, invite }) => {
-                // La zone reste cliquable même vide : c'est précisément là qu'on
-                // clique pour créer un en-tête, comme dans un traitement de texte
-                // de bureau. Elle ne se montre qu'au survol.
+              {bandes.map(({ band, libelle, hauteurMm, invite, modifier }) => {
                 if (!visible) return null;
                 const vide = bandIsEmpty(furniture, band);
+                const ouvrable = editable && onEditFurniture !== undefined;
 
                 return (
                   <div
                     key={band}
                     className={`page-guide__band page-guide__band--${band}${vide ? ' page-guide__band--vide' : ''}`}
-                    style={{ width: `${utileMm}mm`, minHeight: `${Math.max(hauteurMm, 6)}mm` }}
-                    role="button"
-                    aria-label={
-                      vide ? `${libelle} — cliquer pour en ajouter un` : `${libelle} — cliquer pour modifier`
-                    }
-                    // Un élément focalisable sous `aria-hidden` serait un piège au
-                    // clavier : seules les bandes de la première page sont dans
-                    // l'ordre de tabulation, les autres restent cliquables.
-                    tabIndex={premiere ? 0 : -1}
-                    onClick={() => onEditFurniture?.(band)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        onEditFurniture?.(band);
-                      }
-                    }}
+                    style={{ width: `${A4.widthMm}mm`, minHeight: `${Math.max(hauteurMm, 6)}mm` }}
+                    // Double-clic, comme dans les traitements de texte de bureau.
+                    // Au simple clic, la bande volait tous les clics du haut de
+                    // page : elle couvre 20 mm de marge sur CHAQUE feuille, et
+                    // viser le début du texte ouvrait un dialogue.
+                    onDoubleClick={ouvrable ? () => onEditFurniture?.(band) : undefined}
+                    title={ouvrable ? `${libelle} — double-cliquer pour modifier` : undefined}
                   >
-                    {vide ? (
-                      <span className="page-guide__band-invite">{invite}</span>
-                    ) : (
+                    {!vide && (
                       <FurnitureBandView
                         furniture={furniture}
                         band={band}
                         contexte={contexte}
-                        usableMm={utileMm}
+                        usableMm={A4.widthMm}
                         heightMm={hauteurMm}
                       />
+                    )}
+
+                    {/* Pastille d'accès. Le double-clic seul serait invisible :
+                        cette pastille le rend découvrable, atteignable au clavier
+                        et nommable pour un lecteur d'écran. */}
+                    {ouvrable && (
+                      <button
+                        type="button"
+                        className="page-guide__acces"
+                        // Un élément focalisable sous `aria-hidden` serait un piège
+                        // au clavier : seules les bandes de la première page sont
+                        // dans l'ordre de tabulation, les autres restent cliquables.
+                        tabIndex={premiere ? 0 : -1}
+                        onClick={() => onEditFurniture?.(band)}
+                      >
+                        {vide ? invite : modifier}
+                      </button>
                     )}
                   </div>
                 );

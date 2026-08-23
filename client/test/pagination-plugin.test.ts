@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeLayout,
-  computeSpacers,
   countPages,
   type BlockBox,
   type PageGeometry,
@@ -21,6 +20,9 @@ const bloc = (pos: number, top: number, height: number, forcedBreak = false): Bl
   height,
   forcedBreak,
 });
+
+const computeSpacers = (blocks: readonly BlockBox[], geometry: PageGeometry) =>
+  computeLayout(blocks, geometry).reports;
 
 describe('cales de pagination', () => {
   it('ne pose aucune cale tant que tout tient sur la page', () => {
@@ -81,19 +83,19 @@ describe('cales de pagination', () => {
       bloc(3, 196, 2, true),
       bloc(4, 198, 50),
     ];
-    const cales = computeSpacers(blocs, A4);
+    const cales = computeLayout(blocs, A4).reports;
     expect(cales).toHaveLength(2);
     // Ce sont bien les blocs qui SUIVENT les sauts qui sont repoussés.
-    expect(cales.map((c) => c.pos)).toEqual([2, 4]);
+    expect(cales.map((c: { pos: number; height: number }) => c.pos)).toEqual([2, 4]);
   });
 
   it('refuse une géométrie absurde plutôt que de boucler', () => {
-    expect(computeSpacers([bloc(0, 0, 100)], { pageHeight: 100, marginTop: 60, marginBottom: 60 })).toEqual([]);
+    expect(computeLayout([bloc(0, 0, 100)], { pageHeight: 100, marginTop: 60, marginBottom: 60 }).reports).toEqual([]);
   });
 
   it('ne produit jamais de cale de hauteur négative', () => {
     const blocs = [bloc(0, 94, 4000)];
-    for (const cale of computeSpacers(blocs, A4)) {
+    for (const cale of computeLayout(blocs, A4).reports) {
       expect(cale.height).toBeGreaterThan(0);
     }
   });

@@ -156,15 +156,6 @@ function liftTaskItems(state: EditorState, dispatch?: (tr: Transaction) => void)
   return liftListItem(taskItem)(state, dispatch);
 }
 
-/** Coche/décoche une case ; `pos` est la position du nœud `task_item`. */
-export function toggleTask(pos: number): Command {
-  return (state, dispatch) => {
-    const node = state.doc.nodeAt(pos);
-    if (!node || node.type !== nodes['task_item']) return false;
-    dispatch?.(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, checked: !node.attrs['checked'] }));
-    return true;
-  };
-}
 
 /* -------------------------------------------------------------------------- */
 /* Marques paramétrées (police, taille, couleurs, lien)                        */
@@ -817,55 +808,6 @@ export function deleteTable(): Command {
       }
     }
     return false;
-  };
-}
-
-export function addTableRow(after = true): Command {
-  return (state, dispatch) => {
-    const { $from } = state.selection;
-    let rowDepth = -1;
-    for (let d = $from.depth; d > 0; d--) {
-      if ($from.node(d).type === nodes['table_row']) {
-        rowDepth = d;
-        break;
-      }
-    }
-    if (rowDepth === -1) return false;
-    const rowNode = $from.node(rowDepth);
-    const cellCount = rowNode.childCount;
-    const newCells: PMNode[] = [];
-    for (let i = 0; i < cellCount; i++) {
-      newCells.push(nodes['table_cell']!.createAndFill()!);
-    }
-    const newRow = nodes['table_row']!.create(null, newCells);
-    const insertPos = after ? $from.after(rowDepth) : $from.before(rowDepth);
-    if (dispatch) {
-      dispatch(state.tr.insert(insertPos, newRow).scrollIntoView());
-    }
-    return true;
-  };
-}
-
-export function deleteTableRow(): Command {
-  return (state, dispatch) => {
-    const { $from } = state.selection;
-    let rowDepth = -1;
-    let tableDepth = -1;
-    for (let d = $from.depth; d > 0; d--) {
-      if ($from.node(d).type === nodes['table_row']) rowDepth = d;
-      if ($from.node(d).type === nodes['table']) tableDepth = d;
-    }
-    if (rowDepth === -1 || tableDepth === -1) return false;
-    const table = $from.node(tableDepth);
-    if (table.childCount <= 1) {
-      return deleteTable()(state, dispatch);
-    }
-    const start = $from.before(rowDepth);
-    const end = $from.after(rowDepth);
-    if (dispatch) {
-      dispatch(state.tr.delete(start, end).scrollIntoView());
-    }
-    return true;
   };
 }
 

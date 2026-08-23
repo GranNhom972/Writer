@@ -709,9 +709,17 @@ export function App() {
             disabled: !canWrite,
           },
           {
-            label: 'En-tête et pied de page…',
+            label: 'En-tête de page…',
             run: () => {
               setFurnitureBand('header');
+              setFurnitureOpen(true);
+            },
+            disabled: !canWrite,
+          },
+          {
+            label: 'Pied de page…',
+            run: () => {
+              setFurnitureBand('footer');
               setFurnitureOpen(true);
             },
             disabled: !canWrite,
@@ -938,7 +946,13 @@ export function App() {
         imageButtonRef={imageButtonRef}
       />
 
-      <Ruler zoom={zoom} />
+      {/* Marges réelles, et non les 2,5 cm par défaut : la règle donnait la
+          même image quelles que soient les marges du document. */}
+      <Ruler
+        zoom={zoom}
+        leftMarginCm={furniture.marginLeftMm / 10}
+        rightMarginCm={furniture.marginRightMm / 10}
+      />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         <DocumentOutline

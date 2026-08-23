@@ -10,7 +10,7 @@ import {
   rgbToHsv,
   toHex,
 } from '../src/design/color/color';
-import { DOCUMENT_PALETTE, PALETTE_COLUMNS, describeColor } from '../src/design/color/palette';
+import { DOCUMENT_PALETTE, describeColor } from '../src/design/color/palette';
 
 describe('lecture d’une couleur saisie', () => {
   it('accepte les formes courtes, longues, avec ou sans dièse', () => {
@@ -88,7 +88,7 @@ describe('palette du document', () => {
   it('forme une grille régulière de 8 × 10', () => {
     expect(DOCUMENT_PALETTE).toHaveLength(8);
     for (const row of DOCUMENT_PALETTE) {
-      expect(row).toHaveLength(PALETTE_COLUMNS);
+      expect(row).toHaveLength(10);
     }
   });
 
@@ -106,7 +106,7 @@ describe('palette du document', () => {
   });
 
   it('assombrit bien chaque colonne du haut vers le bas', () => {
-    for (let column = 0; column < PALETTE_COLUMNS; column += 1) {
+    for (let column = 0; column < 10; column += 1) {
       // On ignore la première ligne (dégradé de gris, ordre inverse assumé).
       const luminances = DOCUMENT_PALETTE.slice(1).map((row) =>
         relativeLuminance(parseHex(row[column]!.value)!),

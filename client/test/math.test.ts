@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_MATH_MESSAGE,
   describeMathError,
-  hasBalancedBraces,
   renderMath,
 } from '../src/document/math/render';
 import { MATH_EXAMPLES, MATH_SNIPPETS } from '../src/document/math/snippets';
@@ -83,21 +82,6 @@ describe('messages d’erreur', () => {
   });
 });
 
-describe('vérification rapide des accolades', () => {
-  it('accepte les formules équilibrées', () => {
-    expect(hasBalancedBraces('\\frac{1}{2}')).toBe(true);
-    expect(hasBalancedBraces('\\sqrt{x^{2}}')).toBe(true);
-  });
-
-  it('rejette les déséquilibres', () => {
-    expect(hasBalancedBraces('\\frac{1}{')).toBe(false);
-    expect(hasBalancedBraces('x}')).toBe(false);
-  });
-
-  it('ignore les accolades échappées', () => {
-    expect(hasBalancedBraces('\\{ x \\}')).toBe(true);
-  });
-});
 
 describe('palette de modèles', () => {
   const all = MATH_SNIPPETS.flatMap((group) => group.snippets);

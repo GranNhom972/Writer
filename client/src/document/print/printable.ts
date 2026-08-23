@@ -33,6 +33,10 @@ export interface PrintableBlock {
   italic: boolean;
   underline: boolean;
   color: string;
+  cropTop?: number;
+  cropRight?: number;
+  cropBottom?: number;
+  cropLeft?: number;
 }
 
 export interface PrintableFurniture {
@@ -104,6 +108,29 @@ function blocImprime(bloc: PrintableBlock): string {
 
   if (bloc.kind === 'image') {
     if (!adresseSure(bloc.src)) return '';
+
+    const cL = bloc.cropLeft ?? 0;
+    const cR = bloc.cropRight ?? 0;
+    const cT = bloc.cropTop ?? 0;
+    const cB = bloc.cropBottom ?? 0;
+    const hasCrop = cL > 0 || cR > 0 || cT > 0 || cB > 0;
+
+    if (hasCrop) {
+      const cropW = Math.max(0.01, (100 - cL - cR) / 100);
+      const cropH = Math.max(0.01, (100 - cT - cB) / 100);
+      const visibleW = (bloc.widthMm * cropW).toFixed(2);
+      const visibleH = (bloc.heightMm * cropH).toFixed(2);
+      const imgL = (-bloc.widthMm * (cL / 100)).toFixed(2);
+      const imgT = (-bloc.heightMm * (cT / 100)).toFixed(2);
+
+      return (
+        `<div style="${position}width:${visibleW}mm;height:${visibleH}mm;overflow:hidden;">` +
+        `<img style="position:absolute;width:${bloc.widthMm}mm;height:${bloc.heightMm}mm;left:${imgL}mm;top:${imgT}mm;object-fit:fill;max-width:none;max-height:none;"` +
+        ` src="${echapperAttribut(bloc.src)}" alt="${echapperAttribut(bloc.alt)}">` +
+        `</div>`
+      );
+    }
+
     return (
       `<img style="${position}width:${bloc.widthMm}mm;height:${bloc.heightMm}mm;object-fit:contain"` +
       ` src="${echapperAttribut(bloc.src)}" alt="${echapperAttribut(bloc.alt)}">`

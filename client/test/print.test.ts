@@ -143,4 +143,45 @@ describe('mise en page transmise à l’impression', () => {
     const html = buildPrintHtml({ titre: 'x', contenuHtml: '', stylesCss: '' });
     expect(html).toContain(`padding: ${PAGE_A4.margeMm}mm`);
   });
+
+  it('génère un conteneur rogné avec décalage pour une image avec rognage', () => {
+    const html = buildPrintHtml({
+      titre: 'Document avec logo rogné',
+      contenuHtml: '',
+      stylesCss: '',
+      furniture: {
+        header: '',
+        footer: '',
+        blocks: [
+          {
+            band: 'header',
+            kind: 'image',
+            src: 'https://exemple.fr/logo.png',
+            alt: 'Logo',
+            text: '',
+            x: 0.1,
+            y: 5,
+            widthMm: 40,
+            heightMm: 20,
+            fontSizePt: 10,
+            bold: false,
+            italic: false,
+            underline: false,
+            color: '#000000',
+            cropTop: 10,
+            cropRight: 20,
+            cropBottom: 10,
+            cropLeft: 20,
+          },
+        ],
+      },
+    });
+
+    expect(html).toContain('overflow:hidden');
+    expect(html).toContain('width:24.00mm;height:16.00mm');
+    expect(html).toContain('src="https://exemple.fr/logo.png"');
+    expect(html).toContain('left:-8.00mm');
+    expect(html).toContain('top:-2.00mm');
+    expect(html).toContain('width:40mm;height:20mm');
+  });
 });

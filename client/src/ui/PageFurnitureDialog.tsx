@@ -6,22 +6,27 @@
  * ({page}, {titre}…) évitent d'apprendre une syntaxe : ils sont listés et
  * cliquables.
  *
- * Chaque bande a son propre éditeur, et cet éditeur EST l'aperçu : on y place
- * les éléments à la souris, sur la bande telle qu'elle sera imprimée. Un aperçu
- * séparé du rendu finit toujours par diverger de lui.
+ * Chaque bande a son propre atelier, et cet atelier EST l'aperçu : on y place
+ * les éléments à la souris, sur la feuille telle qu'elle sera imprimée. Un
+ * aperçu séparé du rendu finit toujours par diverger de lui.
+ *
+ * Le dialogue tient **l'annulation** pour tout ce qu'il contient. C'était
+ * auparavant l'affaire de l'atelier, qui n'en gardait que ses propres blocs : le
+ * retour arrière effaçait la bande d'en face, oubliait les marges et repartait
+ * de zéro au changement d'onglet.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal } from '../design/components/Modal';
 import {
-  FURNITURE_LIMITS,
+  bandIsEmpty,
   resolveGeometry,
-  type FurnitureAlign,
   type FurnitureBand,
   type PageFurniture,
 } from '../document/pageFurniture';
-import { A4 } from '../design/tokens';
 import { FurnitureBandEditor, type MajFurniture } from './FurnitureBandEditor';
+import { Button } from '../design/components/Button';
+import { A4 } from '../design/tokens';
 
 interface PageFurnitureDialogProps {
   valeur: PageFurniture;
@@ -37,64 +42,19 @@ interface PageFurnitureDialogProps {
   onClose: () => void;
 }
 
-interface MesureProps {
-  label: string;
-  valeur: number;
-  bornes: { min: number; max: number };
-  unite?: string;
-  onChange: (valeur: number) => void;
-}
+/**
+ * Durée pendant laquelle deux modifications de même nature n'en font qu'une
+ * dans l'historique.
+ *
+ * Un glissement produit une modification par déplacement du pointeur : sans
+ * regroupement, `Ctrl+Z` reculait d'un pixel à la fois et il fallait le marteler
+ * cent fois pour défaire un geste. Une pause d'une seconde marque en revanche
+ * une intention nouvelle — c'est la convention des éditeurs de texte.
+ */
+const FENETRE_FUSION_MS = 900;
 
-/** Champ de mesure borné : la saisie hors plage est ramenée, jamais refusée. */
-function Mesure({ label, valeur, bornes, unite = 'mm', onChange }: MesureProps) {
-  return (
-    <label className="furniture__mesure">
-      <span className="field__label">{label}</span>
-      <span className="furniture__mesure-champ">
-        <input
-          className="stepper__input"
-          type="number"
-          min={bornes.min}
-          max={bornes.max}
-          step={unite === 'pt' ? 1 : 0.5}
-          value={valeur}
-          onChange={(event) => {
-            const nombre = Number.parseFloat(event.target.value);
-            if (Number.isFinite(nombre)) {
-              onChange(Math.min(bornes.max, Math.max(bornes.min, nombre)));
-            }
-          }}
-        />
-        <span className="furniture__unite">{unite}</span>
-      </span>
-    </label>
-  );
-}
-
-function Alignement({
-  label,
-  valeur,
-  onChange,
-}: {
-  label: string;
-  valeur: FurnitureAlign;
-  onChange: (valeur: FurnitureAlign) => void;
-}) {
-  return (
-    <label className="furniture__mesure">
-      <span className="field__label">{label}</span>
-      <select
-        className="furniture__select"
-        value={valeur}
-        onChange={(event) => onChange(event.target.value as FurnitureAlign)}
-      >
-        <option value="left">Gauche</option>
-        <option value="center">Centré</option>
-        <option value="right">Droite</option>
-      </select>
-    </label>
-  );
-}
+/** Profondeur de l'historique. Au-delà, le plus ancien est oublié. */
+const PROFONDEUR_HISTORIQUE = 120;
 
 export function PageFurnitureDialog({
   valeur,
@@ -107,6 +67,7 @@ export function PageFurnitureDialog({
   onClose,
 }: PageFurnitureDialogProps) {
   const [brouillon, setBrouillon] = useState<PageFurniture>(valeur);
+  const [bandeActive, setBandeActive] = useState<FurnitureBand>(bandeInitiale);
   const [selection, setSelection] = useState<string | null>(null);
 
   /**
@@ -120,12 +81,20 @@ export function PageFurnitureDialog({
   const brouillonRef = useRef(brouillon);
   brouillonRef.current = brouillon;
 
-  const modifier = useCallback(
-    (maj: MajFurniture): void => {
-      const base = brouillonRef.current;
-      const suivant = { ...base, ...(typeof maj === 'function' ? maj(base) : maj) };
-      // Mise à jour immédiate de la référence : deux modifications dans le même
-      // tour doivent se composer, pas s'écraser.
+  /** État à l'ouverture : c'est là que ramène « Tout réinitialiser ». */
+  const ouverture = useRef(valeur);
+
+  // Historique complet du mobilier — les deux bandes, les marges et les options
+  // comprises. En référence et non en état : il est lu pendant les gestes, où un
+  // rendu de retard suffirait à empiler des pas incohérents.
+  const pile = useRef<PageFurniture[]>([valeur]);
+  const curseur = useRef(0);
+  const derniereCle = useRef<string | null>(null);
+  const derniereDate = useRef(0);
+  const [jalons, setJalons] = useState({ index: 0, total: 1 });
+
+  const publier = useCallback(
+    (suivant: PageFurniture): void => {
       brouillonRef.current = suivant;
       setBrouillon(suivant);
       // Application immédiate : le document est l'aperçu, comme pour les tableaux.
@@ -134,139 +103,196 @@ export function PageFurnitureDialog({
     [onChange],
   );
 
+  const modifier = useCallback(
+    (maj: MajFurniture, fusion?: string): void => {
+      const base = brouillonRef.current;
+      const suivant = { ...base, ...(typeof maj === 'function' ? maj(base) : maj) };
+      publier(suivant);
+
+      const maintenant = Date.now();
+      const fusionne =
+        fusion !== undefined &&
+        fusion === derniereCle.current &&
+        maintenant - derniereDate.current < FENETRE_FUSION_MS;
+
+      if (fusionne) {
+        pile.current[curseur.current] = suivant;
+      } else {
+        const tronquee = pile.current.slice(0, curseur.current + 1);
+        tronquee.push(suivant);
+        // Le plus ancien pas est oublié plutôt que de laisser la pile enfler
+        // sans borne : un dialogue ouvert longtemps ne DOIT pas retenir la
+        // mémoire d'une session entière.
+        const debordement = Math.max(0, tronquee.length - PROFONDEUR_HISTORIQUE);
+        pile.current = tronquee.slice(debordement);
+        curseur.current = pile.current.length - 1;
+      }
+
+      derniereCle.current = fusion ?? null;
+      derniereDate.current = maintenant;
+      setJalons({ index: curseur.current, total: pile.current.length });
+    },
+    [publier],
+  );
+
+  const deplacerDansHistorique = useCallback(
+    (pas: -1 | 1): void => {
+      const cible = curseur.current + pas;
+      const etat = pile.current[cible];
+      if (!etat) return;
+      curseur.current = cible;
+      derniereCle.current = null;
+      publier(etat);
+      setJalons({ index: cible, total: pile.current.length });
+    },
+    [publier],
+  );
+
+  const annuler = useCallback(() => deplacerDansHistorique(-1), [deplacerDansHistorique]);
+  const retablir = useCallback(() => deplacerDansHistorique(1), [deplacerDansHistorique]);
+
+  /** Ferme le geste : la modification suivante ouvrira un pas neuf. */
+  const cloreGeste = useCallback((): void => {
+    derniereCle.current = null;
+  }, []);
+
+  // Ctrl+Z / Ctrl+Maj+Z / Ctrl+Y. Capturés au niveau du dialogue : ils valent
+  // aussi bien dans un champ de saisie que sur la surface de travail.
+  useEffect(() => {
+    const auClavier = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const touche = event.key.toLowerCase();
+      if (touche === 'z') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.shiftKey) retablir();
+        else annuler();
+      } else if (touche === 'y') {
+        event.preventDefault();
+        event.stopPropagation();
+        retablir();
+      }
+    };
+    window.addEventListener('keydown', auClavier, true);
+    return () => window.removeEventListener('keydown', auClavier, true);
+  }, [annuler, retablir]);
+
   const contexteApercu = { page: Math.min(2, pages), pages, titre: titreDocument };
   const geometrie = resolveGeometry(brouillon);
-  const utileMm = A4.widthMm - geometrie.marginLeftMm - geometrie.marginRightMm;
+  const isHeader = bandeActive === 'header';
 
-  // La bande cliquée passe en premier : c'est celle qu'on venait modifier.
-  const ordre: FurnitureBand[] =
-    bandeInitiale === 'footer' ? ['footer', 'header'] : ['header', 'footer'];
+  const changerDeBande = (band: FurnitureBand): void => {
+    setBandeActive(band);
+    setSelection(null);
+    cloreGeste();
+  };
+
+  /** Onglets pilotables aux flèches, comme l'exige le motif `tablist`. */
+  const auClavierDesOnglets = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    changerDeBande(isHeader ? 'footer' : 'header');
+  };
+
+  const retirer = (): void => {
+    setSelection(null);
+    modifier((precedent) =>
+      isHeader
+        ? { header: '', blocks: precedent.blocks.filter((b) => b.band !== 'header') }
+        : {
+            footer: '',
+            pageNumber: false,
+            blocks: precedent.blocks.filter((b) => b.band !== 'footer'),
+          },
+    );
+  };
+
+  const vide = bandIsEmpty(brouillon, bandeActive);
+  const autreVide = bandIsEmpty(brouillon, isHeader ? 'footer' : 'header');
 
   return (
-    <Modal title="En-tête et pied de page" onClose={onClose} width={640}>
+    <Modal title="En-tête et pied de page" onClose={onClose} width={1120}>
       <div className="furniture">
-        {ordre.map((band) => (
+        {/* Les onglets disent aussi ce que contient la bande d'en face : sans
+            cela, on ne sait pas qu'un pied existe sans aller voir. */}
+        <div
+          className="furniture__tabs"
+          role="tablist"
+          aria-label="Bande à modifier"
+          onKeyDown={auClavierDesOnglets}
+        >
+          {(['header', 'footer'] as const).map((band) => {
+            const actif = band === bandeActive;
+            const bandeVide = actif ? vide : autreVide;
+            return (
+              <button
+                key={band}
+                type="button"
+                role="tab"
+                id={`furniture-tab-${band}`}
+                aria-selected={actif}
+                aria-controls="furniture-panneau"
+                tabIndex={actif ? 0 : -1}
+                className={`furniture__tab${actif ? ' furniture__tab--active' : ''}`}
+                onClick={() => changerDeBande(band)}
+              >
+                {band === 'header' ? 'En-tête' : 'Pied de page'}
+                <span className={`furniture__pastille${bandeVide ? '' : ' furniture__pastille--pleine'}`}>
+                  {bandeVide ? 'vide' : 'défini'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div id="furniture-panneau" role="tabpanel" aria-labelledby={`furniture-tab-${bandeActive}`}>
           <FurnitureBandEditor
-            key={band}
-            band={band}
+            key={bandeActive}
+            band={bandeActive}
             furniture={brouillon}
             contexte={contexteApercu}
-            usableMm={utileMm}
-            heightMm={band === 'header' ? geometrie.headerContentMm : geometrie.footerContentMm}
+            usableMm={A4.widthMm}
+            heightMm={isHeader ? geometrie.headerContentMm : geometrie.footerContentMm}
             selectedId={selection}
             onSelect={setSelection}
             onChange={modifier}
+            historique={{
+              annuler,
+              retablir,
+              peutAnnuler: jalons.index > 0,
+              peutRetablir: jalons.index < jalons.total - 1,
+              cloreGeste,
+            }}
             docId={docId}
             token={token}
           />
-        ))}
-
-        <section className="furniture__section">
-          <h3 className="table-props__title">Format</h3>
-
-          <div className="furniture__grid">
-            <Mesure
-              label="En-tête, depuis le haut"
-              valeur={brouillon.headerMm}
-              bornes={FURNITURE_LIMITS.distanceMm}
-              onChange={(headerMm) => modifier({ headerMm })}
-            />
-            <Alignement
-              label="Alignement de l’en-tête"
-              valeur={brouillon.headerAlign}
-              onChange={(headerAlign) => modifier({ headerAlign })}
-            />
-            <Mesure
-              label="Pied, depuis le bas"
-              valeur={brouillon.footerMm}
-              bornes={FURNITURE_LIMITS.distanceMm}
-              onChange={(footerMm) => modifier({ footerMm })}
-            />
-            <Alignement
-              label="Alignement du pied"
-              valeur={brouillon.footerAlign}
-              onChange={(footerAlign) => modifier({ footerAlign })}
-            />
-            <Mesure
-              label="Taille du texte"
-              unite="pt"
-              valeur={brouillon.fontSizePt}
-              bornes={FURNITURE_LIMITS.fontSizePt}
-              onChange={(fontSizePt) => modifier({ fontSizePt })}
-            />
-          </div>
-        </section>
-
-        <section className="furniture__section">
-          <h3 className="table-props__title">Marges du document</h3>
-
-          <div className="furniture__grid">
-            <Mesure
-              label="Haut"
-              valeur={brouillon.marginTopMm}
-              bornes={FURNITURE_LIMITS.marginMm}
-              onChange={(marginTopMm) => modifier({ marginTopMm })}
-            />
-            <Mesure
-              label="Bas"
-              valeur={brouillon.marginBottomMm}
-              bornes={FURNITURE_LIMITS.marginMm}
-              onChange={(marginBottomMm) => modifier({ marginBottomMm })}
-            />
-            <Mesure
-              label="Gauche"
-              valeur={brouillon.marginLeftMm}
-              bornes={FURNITURE_LIMITS.marginMm}
-              onChange={(marginLeftMm) => modifier({ marginLeftMm })}
-            />
-            <Mesure
-              label="Droite"
-              valeur={brouillon.marginRightMm}
-              bornes={FURNITURE_LIMITS.marginMm}
-              onChange={(marginRightMm) => modifier({ marginRightMm })}
-            />
-          </div>
-
-          <p className="table-props__hint">
-            Si l’en-tête ou le pied dépasse la marge, celle-ci est repoussée
-            automatiquement : le texte ne peut pas passer dessous.
-          </p>
-        </section>
-
-        <div className="furniture__options">
-          <label className="furniture__check">
-            <input
-              type="checkbox"
-              checked={brouillon.pageNumber}
-              onChange={(event) => modifier({ pageNumber: event.target.checked })}
-            />
-            Numéroter les pages
-          </label>
-          <label className="furniture__check">
-            <input
-              type="checkbox"
-              checked={!brouillon.onFirstPage}
-              onChange={(event) => modifier({ onFirstPage: !event.target.checked })}
-            />
-            Masquer sur la première page
-          </label>
         </div>
 
         <footer className="furniture__actions">
-          <button
-            type="button"
-            className="btn"
+          {/* Destructif, donc à distance de « Terminé » — et rattrapable par
+              Ctrl+Z, ce que le libellé rappelle. */}
+          <Button
+            variant="ghost"
+            onClick={retirer}
+            disabled={vide}
+            title="Vide la bande — Ctrl+Z la rétablit"
+          >
+            {isHeader ? 'Vider l’en-tête' : 'Vider le pied de page'}
+          </Button>
+          <Button
+            variant="ghost"
             onClick={() => {
               setSelection(null);
-              modifier({ header: '', footer: '', pageNumber: false, blocks: [] });
+              modifier(() => ouverture.current);
             }}
+            title="Revient à l’état du document à l’ouverture de ce dialogue"
           >
-            Tout retirer
-          </button>
+            Tout réinitialiser
+          </Button>
           <span className="titlebar__spacer" />
-          <button type="button" className="btn btn--primary" onClick={onClose}>
+          <Button variant="primary" onClick={onClose}>
             Terminé
-          </button>
+          </Button>
         </footer>
       </div>
     </Modal>

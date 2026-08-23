@@ -327,7 +327,7 @@ pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
 /// Base64 standard sans dépendance externe (usage : exposer un vecteur d'état court).
 fn base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b = [
             chunk[0],

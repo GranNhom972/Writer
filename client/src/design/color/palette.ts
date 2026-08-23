@@ -87,8 +87,6 @@ function hueRow(level: (typeof LEVELS)[number]): Swatch[] {
 /** Grille complète : 8 lignes × 10 colonnes. */
 export const DOCUMENT_PALETTE: readonly Swatch[][] = [greyRow(), ...LEVELS.map(hueRow)];
 
-export const PALETTE_COLUMNS = 10;
-
 /** Surligneurs : teintes claires uniquement, pour rester lisibles sous du texte. */
 export const HIGHLIGHT_PALETTE: readonly Swatch[][] = [
   [
