@@ -1,0 +1,569 @@
+/* Jetons repris de `01_DIRECTIVE_UX_ERGONOMIE.md` §2, pour rester cohérent
+   avec l'application Write existante. */
+:root {
+  --bg-canvas: #f1f2f4;
+  --bg-app: #ffffff;
+  --bg-sunken: #f7f8f9;
+  --bg-page: #ffffff;
+
+  --fg-primary: #16191d;
+  --fg-secondary: #545b64;
+  --fg-disabled: #9aa1ab;
+
+  --border-subtle: #e3e5e8;
+  --border-strong: #c4c8ce;
+
+  --accent: #1a56db;
+  --accent-subtle: #e8effc;
+  --focus-ring: #0b5cd5;
+
+  --selection: rgba(26, 86, 219, 0.22);
+
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --text-sm: 12px;
+  --text-md: 13px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+
+  --radius: 6px;
+  --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  color: var(--fg-primary);
+  background: var(--bg-canvas);
+}
+
+/*
+ * L'application entière tient dans la hauteur de la fenêtre, et **seule** la
+ * surface du document défile. Donner `height: 100vh` à l'éditeur alors qu'une
+ * barre d'application le surmonte produisait deux barres de défilement
+ * imbriquées : celle du document et celle de la page.
+ */
+.writer-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.writer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  /* Sans cela, un enfant qui déborde empêche l'élément flexible de rétrécir,
+     et c'est la page entière qui défile. */
+  min-height: 0;
+}
+
+/* --------------------------------------------------------------- barre d'outils */
+
+.writer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.writer-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: var(--space-2);
+  margin-right: var(--space-2);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.writer-toolbar__group:last-child {
+  border-right: none;
+}
+
+.writer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--fg-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.writer-button:hover:not(:disabled) {
+  background: var(--bg-sunken);
+}
+
+.writer-button:disabled {
+  color: var(--fg-disabled);
+  cursor: default;
+}
+
+.writer-button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent-subtle);
+}
+
+.writer-button:focus-visible,
+.writer-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.writer-button--bold { font-weight: 700; }
+.writer-button--italic { font-style: italic; }
+.writer-button--underline { text-decoration: underline; }
+.writer-button--strike { text-decoration: line-through; }
+
+.writer-select {
+  height: 30px;
+  padding: 0 var(--space-1);
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+/* ------------------------------------------------------------------- surface */
+
+.writer-surface {
+  position: relative;
+  flex: 1;
+  padding: var(--space-4) 0 48px;
+  overflow: auto;
+  /* Le curseur en I sur toute la surface : le document est cliquable partout. */
+  cursor: text;
+}
+
+.writer-pages {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* La colonne fait la largeur d'une feuille : c'est cette marge automatique
+     qui la centre dans la surface, `align-items` ne centrant que son contenu.
+     L'écart entre feuilles est posé en style en ligne (cf. PAGE_GAP_PX) : la
+     position de la zone de saisie en dépend, une seconde valeur ici finirait
+     par diverger. */
+  margin: 0 auto;
+  /* Origine des transformations de zoom en haut, pour que la première page
+     reste visible quel que soit le facteur. */
+  transform-origin: top center;
+}
+
+.writer-page {
+  position: relative;
+  flex: none;
+  background: var(--bg-page);
+  box-shadow: var(--shadow-page);
+}
+
+.writer-page__content {
+  position: absolute;
+  overflow: visible;
+}
+
+/* Repères de marge : discrets, non imprimés. */
+.writer-page__margins {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed var(--border-subtle);
+}
+
+/* --------------------------------------------------------------------- texte */
+
+.writer-line {
+  position: absolute;
+  white-space: pre;
+  /*
+   * Crénage et ligatures désactivés — décision structurante, pas cosmétique.
+   * Le moteur calcule la largeur d'une ligne en additionnant les avances de
+   * chaque grappe. Si le navigateur appliquait un crénage, la somme ne vaudrait
+   * plus la largeur rendue, et l'écart se cumulerait le long de la ligne :
+   * le curseur, placé par le moteur, dériverait des glyphes, peints par le
+   * navigateur. Les désactiver rend les deux calculs identiques par
+   * construction.
+   */
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: 'kern' 0, 'liga' 0, 'clig' 0, 'calt' 0;
+  text-rendering: optimizeSpeed;
+}
+
+.writer-tab {
+  display: inline-block;
+}
+
+/* -------------------------------------------------------- formules mathématiques */
+
+.writer-math {
+  display: inline-flex;
+  vertical-align: -0.15em;
+  align-items: baseline;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  padding: 0;
+  margin: 0;
+  line-height: normal;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: auto;
+  box-sizing: content-box;
+  width: max-content;
+  max-width: 100%;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.writer-math:hover {
+  background-color: var(--accent-subtle, rgba(26, 86, 219, 0.08));
+  box-shadow: 0 0 0 1.5px var(--accent, #1a56db);
+}
+
+.writer-math:active {
+  background-color: var(--accent-subtle, rgba(26, 86, 219, 0.16));
+  box-shadow: 0 0 0 2px var(--accent, #1a56db);
+}
+
+.writer-math--inline {
+  display: inline-flex;
+  vertical-align: -0.15em;
+  align-items: baseline;
+  padding: 0;
+  margin: 0;
+}
+
+.writer-math--display {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  padding: 0;
+  margin: 0;
+}
+
+.writer-math .katex {
+  font-size: 1.22em;
+  white-space: nowrap;
+  text-rendering: auto;
+  line-height: normal;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  margin: 0;
+}
+
+.writer-math .katex-display {
+  display: inline-flex !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  text-align: center;
+  width: auto !important;
+}
+
+.writer-math .katex-display > .katex {
+  display: inline-flex !important;
+  text-align: center;
+  white-space: nowrap !important;
+  width: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.writer-math .katex-html {
+  display: inline-flex !important;
+  align-items: baseline;
+  white-space: nowrap !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.writer-math--display .katex {
+  font-size: 1.38em;
+}
+
+.writer-math--display .katex-html {
+  align-items: center;
+}
+
+.katex-fallback {
+  color: var(--fg-primary);
+}
+
+.katex-error {
+  color: var(--danger, #e53e3e);
+}
+
+.writer-caret {
+  position: absolute;
+  width: 2px;
+  background: var(--fg-primary);
+  pointer-events: none;
+  animation: writer-blink 1.06s step-end infinite;
+}
+
+/* Le curseur cesse de clignoter quand l'éditeur perd le focus : un curseur qui
+   clignote dans une fenêtre inactive laisse croire qu'on peut y taper. */
+.writer-caret--idle {
+  animation: none;
+  opacity: 0.35;
+}
+
+@keyframes writer-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .writer-caret { animation: none; }
+}
+
+.writer-selection {
+  position: absolute;
+  background: var(--selection);
+  pointer-events: none;
+}
+
+/*
+ * Occurrences de la recherche.
+ *
+ * Deux teintes distinctes, et pas seulement deux intensités : distinguer
+ * l'occurrence courante par la seule opacité la rendrait invisible aux yeux
+ * qui perçoivent mal les contrastes (directive UX §2.1). La courante reçoit en
+ * plus un contour, information non chromatique.
+ */
+.writer-search {
+  position: absolute;
+  background: rgba(181, 71, 8, 0.22);
+  pointer-events: none;
+}
+
+.writer-search--current {
+  background: rgba(181, 71, 8, 0.42);
+  outline: 1.5px solid var(--warning, #b54708);
+  outline-offset: -1px;
+}
+
+/* Zone de saisie invisible : elle porte le focus, reçoit les frappes et sert
+   d'ancre à la fenêtre de composition des méthodes de saisie asiatiques. D'où
+   sa position au curseur plutôt qu'un `display: none`, qui la rendrait
+   inatteignable. */
+.writer-input,
+.writer-input:focus,
+.writer-input:focus-visible {
+  position: absolute;
+  width: 1px;
+  height: 1em;
+  padding: 0;
+  margin: 0;
+  color: transparent !important;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  resize: none;
+  overflow: hidden;
+  caret-color: transparent !important;
+  white-space: pre;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: 2;
+}
+
+/* ---------------------------------------------------------------- tableaux */
+
+.writer-table-cell {
+  position: absolute;
+  border: 1px solid var(--border-strong);
+}
+
+/* ---------------------------------------------------------------- barre d'état */
+
+.writer-status {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+  background: var(--bg-app);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.writer-status__spacer {
+  flex: 1;
+}
+
+/* -------------------------------------------------- en-tête et pied de page */
+
+.writer-page__furniture-header,
+.writer-page__furniture-footer {
+  position: absolute;
+  transition: background-color 0.15s ease, outline 0.15s ease;
+  user-select: none;
+  display: flex;
+  align-items: center;
+}
+
+.writer-page__furniture-header:hover,
+.writer-page__furniture-footer:hover {
+  background-color: rgba(26, 86, 219, 0.04);
+  outline: 1px dashed rgba(26, 86, 219, 0.45);
+  outline-offset: -1px;
+}
+
+.page-guide__acces {
+  position: absolute;
+  right: 16px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: #1a56db;
+  background: #ffffff;
+  border: 1px solid #1a56db;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform: translateY(-2px);
+}
+
+.page-guide__acces--header {
+  top: 8px;
+}
+
+.page-guide__acces--footer {
+  bottom: 8px;
+}
+
+.writer-page__furniture-header:hover .page-guide__acces,
+.writer-page__furniture-footer:hover .page-guide__acces,
+.page-guide__acces:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.page-guide__acces:hover {
+  background: #ebf5ff;
+  color: #1e429f;
+  border-color: #1e429f;
+}
+
+/* ------------------------------------------------------------------ impression */
+
+@media print {
+  /* Supprime la marge de page par défaut du navigateur : les marges du document
+     sont déjà dans la géométrie de chaque feuille A4. */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  /* Masque l'ensemble du chrome applicatif, menus, barres, règle, dialogues et modales */
+  .titlebar,
+  .menubar,
+  .ribbon,
+  .ruler,
+  .ruler-container,
+  .writer-toolbar,
+  .writer-status,
+  .writer-input,
+  .writer-caret,
+  .writer-selection,
+  .writer-search,
+  .writer-page__margins,
+  .document-outline,
+  .findbar,
+  .find-replace-panel,
+  .command-palette,
+  .modal-backdrop,
+  .modal,
+  .popover,
+  .toast,
+  .start-form,
+  .btn,
+  .print-preview-overlay,
+  [role='status'],
+  input,
+  textarea,
+  select,
+  button {
+    display: none !important;
+  }
+
+  /* Déverrouille les conteneurs scrollables et flex pour l'impression multi-pages */
+  html,
+  body,
+  .shell,
+  .writer,
+  .writer-surface,
+  .writer-pages {
+    display: block !important;
+    position: static !important;
+    overflow: visible !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    transform: none !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Chaque feuille A4 est imprimée sans ombre et génère un saut de page propre */
+  .writer-page {
+    position: relative !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    margin: 0 auto !important;
+    break-after: page !important;
+    page-break-after: always !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .writer-page:last-child {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+
+  /* Désactive les styles interactifs sur les en-têtes et pieds de page */
+  .writer-page__furniture-header,
+  .writer-page__furniture-footer {
+    cursor: default !important;
+  }
+}
