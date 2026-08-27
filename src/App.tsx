@@ -4,19 +4,38 @@
  * Moteur 100 % pur en TypeScript et React 18 sans aucune bibliothèque de rich-text externe.
  */
 
-import { useCallback, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   createEmptyDocument,
   createParagraph,
   createTable,
 } from './domain/document/document';
-import { makeRun } from './domain/document/runs';
+import { makeRun, runFormatting } from './domain/document/runs';
 import type { WriterDocumentState } from './domain/document/types';
 import { exportOdt, openOdt } from './domain/odf/package';
-import { downloadPdf } from './domain/pdf';
-import { paginateDocument } from './domain/engine/paginate';
-import { createMeasurer } from './domain/engine/measure';
-import { WriterEditor } from './ui/editor/WriterEditor';
+import { printDocument } from './domain/pdf';
+import { WriterEditor, type CollabBinding } from './ui/editor/WriterEditor';
+import { useCollab } from './ui/editor/useCollab';
+import { ShareDialog, type Invitation } from './ui/dialogs/ShareDialog';
+import {
+  ApiError,
+  dataUrlToBlob,
+  getSession,
+  inviteParticipant,
+  joinSession,
+  shareDocument,
+  uploadAsset,
+  type SessionJoin,
+  type SessionSummary,
+} from './domain/collab/api';
+import { readCloudServLink, readShareLink, readTicketClaims } from './domain/collab/session';
+import { collectImageRuns, isImageRun } from './domain/document/images';
+import {
+  isParagraph,
+  isTable,
+  type DocumentBlock,
+  type DocumentSelection,
+} from './domain/document/types';
 
 const LOREM =
   'Le moteur de mise en page reprend la démarche de StarWriter : le texte ' +
@@ -90,17 +109,148 @@ function demoDocument(): WriterDocumentState {
   return doc;
 }
 
+/** Message lisible d'une erreur d'API : les 5xx ne disent jamais leur détail. */
+function messageErreur(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.isOffline ? 'serveur injoignable' : error.message;
+  }
+  return (error as Error).message;
+}
+
 export function App(): JSX.Element {
   const [doc, setDoc] = useState<WriterDocumentState>(demoDocument);
   const [generation, setGeneration] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  /* ------------------------------------------------------------- partage */
+
+  const [join, setJoin] = useState<SessionJoin | null>(null);
+  const [session, setSession] = useState<SessionSummary | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  /** Adresse locale : celle du lien de partage, ou une valeur de travail. */
+  const [ownerEmail, setOwnerEmail] = useState('moi@exemple.fr');
+
+  // La commande d'application distante vient de l'éditeur, qui possède l'état.
+  const applyRemoteRef = useRef<
+    | ((
+        transform: (doc: WriterDocumentState) => WriterDocumentState,
+        remapSelection?: (selection: DocumentSelection) => DocumentSelection,
+      ) => void)
+    | null
+  >(null);
+
+  /**
+   * Document **vivant**, tel que l'éditeur le tient à cet instant.
+   *
+   * `doc` n'est que l'état initial : l'éditeur en prend une copie au montage et
+   * ne la relit plus. Partager, exporter ou imprimer en se fiant à `doc`
+   * enverrait le document tel qu'il était à l'ouverture — sans une seule des
+   * frappes qui ont suivi.
+   */
+  const liveDocRef = useRef<WriterDocumentState>(doc);
+
+  const collabState = useCollab({
+    join,
+    onRemoteDocument: (apply, remapSelection) => applyRemoteRef.current?.(apply, remapSelection),
+  });
+
+  /** L'éditeur publie à chaque changement : on en profite pour tenir la réf. */
+  const publish = useCallback(
+    (current: WriterDocumentState) => {
+      liveDocRef.current = current;
+      collabState.publish(current);
+    },
+    [collabState],
+  );
+
+  /**
+   * Ouverture par un lien de partage : `?session=…&email=…`.
+   *
+   * On rejoint **avant** d'afficher quoi que ce soit d'autre : le document du
+   * partage remplace celui de démonstration, et le montrer d'abord ferait
+   * clignoter un contenu qui n'est pas le bon.
+   */
+  /**
+   * Ouverture depuis CloudServ : `#doc=<uuid>&token=<billet>`.
+   *
+   * Aucun appel réseau préalable — contrairement au partage géré par Writer, où
+   * il faut d'abord rejoindre pour connaître sa permission. Ici c'est CloudServ
+   * qui a tranché : le billet **est** la réponse, signé et lié à ce document.
+   *
+   * Le fragment est effacé aussitôt lu. Il resterait sinon dans la barre
+   * d'adresse et dans l'historique du navigateur, où un billet n'a rien à faire.
+   */
+  useEffect(() => {
+    const lien = readCloudServLink(window.location.hash);
+    if (!lien) return;
+
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+    const claims = readTicketClaims(lien.token);
+    if (!claims) {
+      setMessage('Billet d’accès illisible : rouvrez le document depuis CloudServ.');
+      return;
+    }
+
+    setJoin({
+      token_session: '',
+      doc_id: lien.docId,
+      title: '',
+      user_id: claims.userId,
+      email: claims.displayName,
+      permission: claims.permission,
+      access_token: lien.token,
+      auth_mode: 'jwt',
+      sync_path: `/api/v1/sync/${lien.docId}`,
+      events_path: '',
+      editor_path: '',
+    });
+    setMessage(
+      claims.permission === 'write'
+        ? 'Document CloudServ ouvert. Vos modifications sont enregistrées régulièrement dans votre Drive.'
+        : 'Document CloudServ ouvert en lecture seule.',
+    );
+  }, []);
+
+  useEffect(() => {
+    const lien = readShareLink(window.location.search);
+    if (!lien) return;
+
+    let annule = false;
+    void (async () => {
+      try {
+        const resultat = await joinSession(lien.tokenSession, lien.email);
+        if (annule) return;
+        setJoin(resultat);
+        setOwnerEmail(resultat.email);
+        setSession(await getSession(lien.tokenSession).catch(() => null));
+        setMessage(
+          resultat.permission === 'write'
+            ? `Document partagé « ${resultat.title} » ouvert.`
+            : `Document partagé « ${resultat.title} » ouvert en lecture seule.`,
+        );
+      } catch (error) {
+        if (annule) return;
+        const detail =
+          error instanceof ApiError && error.status === 403
+            ? "Vous n'êtes pas sur la liste des participants de ce partage."
+            : (error as Error).message;
+        setMessage(`Ouverture du partage impossible : ${detail}`);
+      }
+    })();
+
+    return () => {
+      annule = true;
+    };
+  }, []);
+
   const onOpen = useCallback(async (file: File) => {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const result = await openOdt(bytes, { title: file.name.replace(/\.odt$/i, '') });
       setDoc(result.document);
+      liveDocRef.current = result.document;
       setGeneration((value) => value + 1);
       setMessage(
         result.warnings.length > 0
@@ -113,7 +263,7 @@ export function App(): JSX.Element {
   }, []);
 
   const onSave = useCallback(async (currentDoc?: WriterDocumentState) => {
-    const docToSave = currentDoc ?? doc;
+    const docToSave = currentDoc ?? liveDocRef.current;
     const bytes = await exportOdt(docToSave);
     const blob = new Blob([bytes as BlobPart], {
       type: 'application/vnd.oasis.opendocument.text',
@@ -125,22 +275,197 @@ export function App(): JSX.Element {
     link.click();
     URL.revokeObjectURL(url);
     setMessage('Document enregistré au format OpenDocument (.odt).');
-  }, [doc]);
+  }, []);
 
+  /**
+   * Export PDF et impression empruntent le même chemin : la boîte du
+   * navigateur. L'export choisit la destination « Enregistrer au format
+   * PDF », l'impression une imprimante — le rendu, lui, est identique.
+   *
+   * Le titre vient du document vivant, pas de l'état initial : renommer le
+   * document doit renommer le fichier proposé.
+   */
   const onExportPdf = useCallback(() => {
-    try {
-      const measurer = createMeasurer();
-      const layout = paginateDocument(doc, { measurer });
-      downloadPdf(doc, layout);
-      setMessage('Document exporté au format PDF (.pdf).');
-    } catch (error) {
-      setMessage(`Échec de l'export PDF : ${(error as Error).message}`);
-    }
-  }, [doc]);
+    printDocument(liveDocRef.current.meta.title);
+    setMessage('Dans la boîte d’impression, choisissez la destination « Enregistrer au format PDF ».');
+  }, []);
 
   const onPrint = useCallback(() => {
-    window.print();
+    printDocument(liveDocRef.current.meta.title);
   }, []);
+
+  /**
+   * Dépose sur le serveur toutes les images encore en `data:`.
+   *
+   * Une image insérée hors ligne vit dans le document sous forme de `data:` —
+   * plusieurs centaines de kilooctets dans le corps d'un paragraphe. La laisser
+   * là la ferait repartir sur le réseau **à chaque frappe** dans ce paragraphe,
+   * pour chaque participant. On la transfère donc une fois, et le run ne porte
+   * plus qu'une adresse.
+   *
+   * Une image qui refuse de partir reste en `data:` : le partage fonctionne
+   * quand même, il est seulement plus lourd. Refuser tout le partage pour une
+   * image serait disproportionné.
+   */
+  const televerserImages = useCallback(
+    async (source: WriterDocumentState, token: string, docId: string): Promise<WriterDocumentState> => {
+      const adresses = new Set<string>();
+      const parcourir = (blocks: readonly DocumentBlock[]): void => {
+        for (const block of blocks) {
+          if (isTable(block)) {
+            for (const row of block.rows) {
+              for (const cell of row.cells) parcourir(cell.blocks);
+            }
+            continue;
+          }
+          // Un sommaire ne porte pas d'image : ses lignes sont engendrées à la
+          // pagination et n'existent pas dans l'AST téléversé.
+          if (!isParagraph(block)) continue;
+          for (const { run } of collectImageRuns(block.runs)) {
+            if (run.imageSrc?.startsWith('data:')) adresses.add(run.imageSrc);
+          }
+        }
+      };
+      parcourir(source.blocks);
+      if (adresses.size === 0) return source;
+
+      const remplacement = new Map<string, string>();
+      await Promise.all(
+        [...adresses].map(async (dataUrl) => {
+          const blob = dataUrlToBlob(dataUrl);
+          if (!blob) return;
+          try {
+            const depose = await uploadAsset(token, docId, blob);
+            remplacement.set(dataUrl, depose.url);
+          } catch {
+            /* image conservée en data: — le partage reste possible */
+          }
+        }),
+      );
+      if (remplacement.size === 0) return source;
+
+      const reecrire = (blocks: readonly DocumentBlock[]): DocumentBlock[] =>
+        blocks.map((block) => {
+          if (isTable(block)) {
+            return {
+              ...block,
+              rows: block.rows.map((row) => ({
+                ...row,
+                cells: row.cells.map((cell) => ({
+                  ...cell,
+                  blocks: reecrire(cell.blocks) as typeof cell.blocks,
+                })),
+              })),
+            };
+          }
+          if (!isParagraph(block)) return block;
+          if (!block.runs.some(isImageRun)) return block;
+          return {
+            ...block,
+            runs: block.runs.map((run) => {
+              const cible = run.imageSrc ? remplacement.get(run.imageSrc) : undefined;
+              return cible ? makeRun(run.text, { ...runFormatting(run), imageSrc: cible }) : run;
+            }),
+          };
+        });
+
+      return { ...source, blocks: reecrire(source.blocks) };
+    },
+    [],
+  );
+
+  const onShare = useCallback(
+    async (tokenSession: string, invitations: Invitation[]) => {
+      // Le partage porte le document **tel qu'il est à cet instant**, images
+      // comprises : celui qui rejoint doit voir ce que l'on voit, pas un
+      // document vide qu'il faudrait ensuite rattraper.
+      const courant = liveDocRef.current;
+      const cree = await shareDocument({
+        tokenSession,
+        title: courant.meta.title || 'Document sans titre',
+        participants: invitations,
+        document: courant,
+      });
+
+      const rejoint = await joinSession(tokenSession, ownerEmail);
+      setJoin(rejoint);
+      setSession(cree);
+      setShareOpen(false);
+
+      // Les images partent **après** la création : elles ont besoin du `doc_id`,
+      // que seul le partage vient de produire. La réécriture des adresses passe
+      // par l'éditeur, seul détenteur du document vivant — `setDoc` ne ferait
+      // rien, l'éditeur ne relisant pas son document initial.
+      if (rejoint.access_token) {
+        const allege = await televerserImages(courant, rejoint.access_token, rejoint.doc_id);
+        if (allege !== courant) {
+          applyRemoteRef.current?.(() => allege);
+        }
+      }
+
+      // L'adresse porte désormais le partage : rafraîchir la page rouvre le
+      // document partagé, et le lien est copiable depuis la barre du navigateur.
+      window.history.replaceState(null, '', rejoint.editor_path);
+      setMessage(`Document partagé avec ${invitations.length} personne(s).`);
+    },
+    [ownerEmail, televerserImages],
+  );
+
+  const onInvite = useCallback(
+    async (invitation: Invitation) => {
+      if (!join?.access_token) throw new Error('Document non partagé.');
+      const { session: misAJour } = await inviteParticipant(
+        join.access_token,
+        join.token_session,
+        invitation.email,
+        invitation.permission,
+      );
+      setSession(misAJour);
+      setMessage(`${invitation.email} a été ajouté au partage.`);
+    },
+    [join],
+  );
+
+  const uploadImage = useCallback(
+    async (dataUrl: string): Promise<string | null> => {
+      const token = collabState.token;
+      const docId = collabState.docId;
+      if (!token || !docId) return null;
+
+      const blob = dataUrlToBlob(dataUrl);
+      if (!blob) return null;
+      try {
+        return (await uploadAsset(token, docId, blob)).url;
+      } catch (error) {
+        // Le dépôt a échoué : l'image reste en `data:`. Elle s'affiche, elle
+        // s'exporte, elle se partage — seulement plus lourdement.
+        setMessage(`Image conservée dans le document : ${messageErreur(error)}`);
+        return null;
+      }
+    },
+    [collabState.token, collabState.docId],
+  );
+
+  const collab = useMemo<CollabBinding>(
+    () => ({
+      status: collabState.status,
+      peers: collabState.peers,
+      self: collabState.self,
+      pending: collabState.pending,
+      rejection: collabState.rejection,
+      canWrite: collabState.canWrite,
+      shared: join !== null,
+      publish,
+      setCursor: collabState.setCursor,
+      clearRejection: collabState.clearRejection,
+      onOpenShare: () => setShareOpen(true),
+      uploadImage,
+      bindApplyRemote: (apply) => {
+        applyRemoteRef.current = apply;
+      },
+    }),
+    [collabState, join, publish, uploadImage],
+  );
 
   const handleTitleCommit = useCallback((newTitle: string) => {
     setDoc((prev) => ({
@@ -186,12 +511,25 @@ export function App(): JSX.Element {
       <WriterEditor
         key={generation}
         initialDocument={doc}
+        collab={collab}
         onTitleChange={handleTitleCommit}
         onOpen={() => fileRef.current?.click()}
         onSave={onSave}
         onPrint={onPrint}
         onExportPdf={onExportPdf}
       />
+
+      {shareOpen && (
+        <ShareDialog
+          documentTitle={liveDocRef.current.meta.title || 'Document sans titre'}
+          session={session}
+          ownerEmail={ownerEmail}
+          canInvite={collabState.canWrite}
+          onShare={onShare}
+          onInvite={onInvite}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
 
       <input
         ref={fileRef}

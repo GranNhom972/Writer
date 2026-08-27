@@ -32,14 +32,39 @@ import {
   replaceParagraph,
 } from '../../domain/document/document';
 import { normalizeUrl } from '../../domain/document/url';
+import {
+  clampSize,
+  cropFormatting,
+  imageAttributes,
+  isImageRun,
+  makeImageRun,
+  type ImageAttributes,
+} from '../../domain/document/images';
 import type {
   DocumentPosition,
+  DocumentSelection,
+  FlyAnchor,
+  FlySurround,
   ListKind,
   ParagraphNode,
   RunFormatting,
   TextRun,
+  TocNode,
   WriterDocumentState,
 } from '../../domain/document/types';
+import {
+  deleteCommentThread,
+  editComment,
+  replyToComment,
+  resolveCommentThread,
+} from '../../domain/document/comments';
+import { removeBookmark } from '../../domain/document/bookmarks';
+import {
+  acceptAllRedlines,
+  applyRedline,
+  rejectAllRedlines,
+} from '../../domain/document/redline';
+import { updateToc, type TocOptions } from '../../domain/document/tox';
 import {
   formattingAt,
   insertTextInRuns,
@@ -70,17 +95,30 @@ import {
   clearRunFormat,
   createEditorState,
   deleteBackward,
+  deleteCurrentTableColumn,
+  deleteCurrentTableRow,
   deleteForward,
   deleteSelection,
   extractFragment,
   insertBlockPageBreak,
+  insertFootnote,
   insertFragment,
   insertLineBreak,
+  insertTableColumnLeft,
+  insertTableColumnRight,
+  insertTableOfContents,
+  insertTableRowAbove,
+  insertTableRowBelow,
   insertText,
+  mergeSelectedCells,
   selectAll,
   selectionText,
+  bookmarkSelection,
+  commentSelection,
   setHeading,
+  setReviewMode,
   setSelection,
+  splitCurrentCell,
   splitParagraph,
   toggleList,
   toggleListChecked,
@@ -128,6 +166,7 @@ export interface WriterCommands {
   setHeadingLevel: (level: 0 | 1 | 2 | 3 | 4 | 5 | 6) => void;
   setAlignment: (alignment: ParagraphNode['alignment']) => void;
   setLineSpacing: (spacing: number) => void;
+  setFirstLineIndentPt: (pt: number | null) => void;
   toggleSpaceBefore: () => void;
   toggleSpaceAfter: () => void;
   indent: (direction: 1 | -1) => void;
@@ -140,14 +179,79 @@ export interface WriterCommands {
   setLink: (url: string) => boolean;
   removeLink: () => void;
   insertTable: (rows: number, cols: number) => void;
+  insertTableRowAbove: () => void;
+  insertTableRowBelow: () => void;
+  deleteTableRow: () => void;
+  insertTableColumnLeft: () => void;
+  insertTableColumnRight: () => void;
+  deleteTableColumn: () => void;
+  insertFootnote: (text: string) => void;
+  /** Fusionne les cellules sélectionnées (`SwDoc::MergeTbl`). */
+  mergeCells: () => void;
+  /** Scinde la cellule courante (`SwDoc::SplitTbl`). */
+  splitCell: (direction: 'horizontal' | 'vertical', count?: number) => void;
+  /** Insère une table des matières après le bloc courant (`SwTOXBase`). */
+  insertTableOfContents: (options?: TocOptions) => void;
+  /** Modifie la définition d'un sommaire déjà posé. */
+  updateToc: (tocId: string, patch: Partial<Omit<TocNode, 'id' | 'type'>>) => void;
+
+  /* -- Commentaires (`SwPostItMgr`) -------------------------------------- */
+  addComment: (author: string, text: string) => void;
+  replyToComment: (threadId: string, author: string, text: string) => void;
+  resolveComment: (threadId: string, resolved: boolean) => void;
+  deleteComment: (threadId: string) => void;
+  editComment: (commentId: string, text: string) => void;
+
+  /* -- Signets (`SwBookmark`) -------------------------------------------- */
+  setBookmark: (name: string) => void;
+  removeBookmark: (name: string) => void;
+
+  /* -- Suivi des modifications (`SwRedline`) ----------------------------- */
+  /** Active le mode révision au nom d'un auteur, ou le coupe avec `null`. */
+  setReviewMode: (author: string | null) => void;
+  acceptRedline: (redlineId: string) => void;
+  rejectRedline: (redlineId: string) => void;
+  acceptAllRedlines: () => void;
+  rejectAllRedlines: () => void;
+
+  /** Ancrage et habillage du cadre image situé à cet offset (`SwFmtSurround`). */
+  setImageWrap: (
+    blockId: string,
+    offset: number,
+    anchor: FlyAnchor,
+    surround: FlySurround,
+  ) => void;
+
   insertMath: (latex: string, display: boolean) => void;
   updateMath: (blockId: string, latex: string, display: boolean) => void;
   deleteMath: (blockId: string) => void;
+  /** Insère une image au curseur, ancrée « comme caractère » (`SwFlyCntFrm`). */
+  insertImage: (attributes: ImageAttributes) => void;
+  /** Réécrit source, dimensions et texte alternatif du cadre situé à cet offset. */
+  updateImage: (blockId: string, offset: number, attributes: ImageAttributes) => void;
+  deleteImage: (blockId: string, offset: number) => void;
   goToBlock: (blockId: string) => void;
   undo: () => void;
   redo: () => void;
   selectAll: () => void;
   replaceDocument: (doc: WriterDocumentState) => void;
+  /**
+   * Applique une modification venue du réseau.
+   *
+   * Distincte de `replaceDocument`, qui repart d'une session neuve : ici
+   * l'historique local et le curseur sont **conservés**. Défaire son propre
+   * travail après qu'un collègue a écrit ailleurs doit rester possible, et
+   * `Ctrl+Z` ne doit jamais annuler la frappe de quelqu'un d'autre.
+   *
+   * `remapSelection` reporte le curseur : quelqu'un qui écrit **avant** le
+   * point décale le texte sous celui-ci, et le laisser où il était ferait taper
+   * à côté. Le simple recadrage aux bornes du document ne suffit pas — l'offset
+   * y reste valide, seulement il ne désigne plus le même caractère.
+   */
+  applyRemote: (
+    transform: (doc: WriterDocumentState) => WriterDocumentState,
+    remapSelection?: (selection: DocumentSelection) => DocumentSelection,
+  ) => void;
 }
 
 export interface WriterController {
@@ -184,6 +288,75 @@ export interface WriterController {
   };
 }
 
+/**
+ * Cadre image couvrant cet offset.
+ *
+ * On accepte l'offset du **début** du cadre comme celui de sa fin : le rendu
+ * annonce le premier, alors qu'un curseur posé juste après l'image donne le
+ * second. Exiger l'un des deux ferait échouer la retouche une fois sur deux.
+ */
+function imageRunAt(
+  runs: readonly TextRun[],
+  offset: number,
+): { index: number; offset: number } | null {
+  let consumed = 0;
+  for (let index = 0; index < runs.length; index += 1) {
+    const run = runs[index]!;
+    const start = consumed;
+    const end = consumed + run.text.length;
+    if (isImageRun(run) && offset >= start && offset <= end) return { index, offset: start };
+    consumed = end;
+  }
+  return null;
+}
+
+/** Attributs du premier cadre image du paragraphe, pour ouvrir l'atelier. */
+export function imageDraftAt(
+  runs: readonly TextRun[],
+  offset: number,
+): (ImageAttributes & { offset: number }) | null {
+  const cible = imageRunAt(runs, offset);
+  if (!cible) return null;
+  const attributs = imageAttributes(runs[cible.index]!);
+  return attributs ? { ...attributs, offset: cible.offset } : null;
+}
+
+/**
+ * Ramène une sélection dans les limites d'un document qui a changé sous elle.
+ *
+ * Un participant distant peut supprimer le paragraphe où l'on a le curseur, ou
+ * en raccourcir un. Sans ce recadrage, le moteur chercherait un bloc qui
+ * n'existe plus et le curseur disparaîtrait de l'écran.
+ */
+function clampSelection(
+  doc: WriterDocumentState,
+  selection: DocumentSelection,
+): DocumentSelection {
+  const index = paragraphIndex(doc);
+
+  const recadrer = (position: DocumentPosition): DocumentPosition => {
+    const node = index.byId.get(position.blockId);
+    if (!node) {
+      // Bloc disparu : on se replie sur le premier paragraphe, seul point
+      // toujours valide d'un document non vide.
+      const premier = index.order[0];
+      return premier ? { blockId: premier, offset: 0 } : position;
+    }
+    const longueur = paragraphText(node.paragraph).length;
+    if (position.offset <= longueur) return position;
+    return { ...position, offset: longueur };
+  };
+
+  const anchor = recadrer(selection.anchor);
+  const focus = recadrer(selection.focus);
+  return {
+    ...selection,
+    anchor,
+    focus,
+    isCollapsed: anchor.blockId === focus.blockId && anchor.offset === focus.offset,
+  };
+}
+
 const INDENT_STEP_PT = 36; // 1,27 cm — le pas de tabulation par défaut de Writer.
 /** Bornes de corps de police, reprises de l'application Write. */
 export const MIN_FONT_SIZE_PT = 6;
@@ -195,12 +368,44 @@ const MAX_ZOOM = 2;
  * Actions que le contrôleur déclenche mais n'implémente pas : elles ouvrent une
  * fenêtre du navigateur ou un dialogue, ce qui n'est pas de son ressort.
  */
+/**
+ * Une transaction a-t-elle le droit d'aboutir ?
+ *
+ * Règle unique de la lecture seule, isolée ici pour être vérifiable sans monter
+ * un éditeur : ce qui laisse le document identique — déplacer le curseur,
+ * sélectionner pour copier — passe toujours ; ce qui le change ne passe que si
+ * l'on a le droit d'écrire.
+ *
+ * La décision se prend sur le document lui-même, jamais sur le nom de la
+ * commande : une commande oubliée dans une liste serait une modification qui
+ * passe, et personne ne s'en apercevrait avant que le serveur ne la rejette en
+ * silence.
+ */
+export function transactionAutorisee(
+  lectureSeule: boolean,
+  avant: EditorState,
+  apres: EditorState,
+): boolean {
+  return !lectureSeule || apres.doc === avant.doc;
+}
+
 export interface WriterHooks {
+  /**
+   * Interdit toute modification du document, sans rien figer d'autre.
+   *
+   * Le badge « Lecture seule » et le refus de publication ne suffisaient pas :
+   * la frappe restait acceptée localement, s'affichait, puis disparaissait à la
+   * fermeture — on croyait avoir écrit. Refuser à la source est la seule façon
+   * de ne pas mentir à celui qui tape.
+   */
+  readOnly?: boolean;
   onPrint?: () => void;
   onOpenFindReplace?: () => void;
   onOpenLink?: () => void;
   onOpenMath?: () => void;
   onEditMath?: (blockId: string, latex: string, display: boolean) => void;
+  onOpenImage?: () => void;
+  onEditImage?: (blockId: string, offset: number) => void;
 }
 
 export function useWriterInput(
@@ -216,6 +421,10 @@ export function useWriterInput(
   const [fontsTick, setFontsTick] = useState(0);
 
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Lu au moment de l'appel, pas à la création de `run` : la permission peut
+  // changer en cours de séance (révocation d'un partage).
+  const lectureSeuleRef = useRef(false);
+  lectureSeuleRef.current = hooks.readOnly === true;
   const composing = useRef(false);
   const dragging = useRef(false);
 
@@ -269,6 +478,9 @@ export function useWriterInput(
     ) => {
       setSession((current) => {
         const next = transform(current.state);
+        if (!transactionAutorisee(lectureSeuleRef.current, current.state, next)) {
+          return current;
+        }
         return commit(current, label, next, groupingOf?.(current.state, next) ?? null);
       });
     },
@@ -358,6 +570,7 @@ export function useWriterInput(
       },
       setAlignment: (alignment) => patchParagraph('Alignement', { alignment: alignment ?? null }),
       setLineSpacing: (spacing) => patchParagraph('Interligne', { lineSpacing: spacing }),
+      setFirstLineIndentPt: (pt) => patchParagraph('Retrait première ligne', { firstLineIndentPt: pt }),
 
       toggleSpaceBefore: () => {
         setSession((current) => {
@@ -497,6 +710,178 @@ export function useWriterInput(
         });
         focus();
       },
+
+      insertTableRowAbove: () => {
+        run('Insérer une ligne au-dessus', (state) => insertTableRowAbove(state));
+        focus();
+      },
+
+      insertTableRowBelow: () => {
+        run('Insérer une ligne au-dessous', (state) => insertTableRowBelow(state));
+        focus();
+      },
+
+      deleteTableRow: () => {
+        run('Supprimer la ligne', (state) => deleteCurrentTableRow(state));
+        focus();
+      },
+
+      insertTableColumnLeft: () => {
+        run('Insérer une colonne à gauche', (state) => insertTableColumnLeft(state));
+        focus();
+      },
+
+      insertTableColumnRight: () => {
+        run('Insérer une colonne à droite', (state) => insertTableColumnRight(state));
+        focus();
+      },
+
+      deleteTableColumn: () => {
+        run('Supprimer la colonne', (state) => deleteCurrentTableColumn(state));
+        focus();
+      },
+
+      insertFootnote: (text) => {
+        run('Insérer une note de bas de page', (state) => insertFootnote(state, text));
+        focus();
+      },
+
+      mergeCells: () => {
+        run('Fusionner les cellules', (state) => mergeSelectedCells(state));
+        focus();
+      },
+
+      splitCell: (direction, count = 2) => {
+        run('Scinder la cellule', (state) => splitCurrentCell(state, direction, count));
+        focus();
+      },
+
+      insertTableOfContents: (options) => {
+        run('Insérer une table des matières', (state) => insertTableOfContents(state, options));
+        focus();
+      },
+
+      updateToc: (tocId, patch) => {
+        run('Modifier la table des matières', (state) => ({
+          ...state,
+          doc: updateToc(state.doc, tocId, patch),
+        }));
+        focus();
+      },
+
+      addComment: (author, text) => {
+        run('Ajouter un commentaire', (state) => commentSelection(state, author, text).state);
+        focus();
+      },
+
+      replyToComment: (threadId, author, text) => {
+        run('Répondre au commentaire', (state) => ({
+          ...state,
+          doc: replyToComment(state.doc, threadId, author, text),
+        }));
+      },
+
+      resolveComment: (threadId, resolved) => {
+        run(resolved ? 'Résoudre le commentaire' : 'Rouvrir le commentaire', (state) => ({
+          ...state,
+          doc: resolveCommentThread(state.doc, threadId, resolved),
+        }));
+      },
+
+      deleteComment: (threadId) => {
+        run('Supprimer le commentaire', (state) => ({
+          ...state,
+          doc: deleteCommentThread(state.doc, threadId),
+        }));
+      },
+
+      editComment: (commentId, text) => {
+        run('Modifier le commentaire', (state) => ({
+          ...state,
+          doc: editComment(state.doc, commentId, text),
+        }));
+      },
+
+      setBookmark: (name) => {
+        run('Poser un signet', (state) => bookmarkSelection(state, name));
+        focus();
+      },
+
+      removeBookmark: (name) => {
+        run('Retirer le signet', (state) => ({ ...state, doc: removeBookmark(state.doc, name) }));
+        focus();
+      },
+
+      setReviewMode: (author) => {
+        // Le basculement ne touche pas au document : il ne passe donc pas par
+        // `run`, qui empilerait une transaction annulable sans rien à annuler.
+        setSession((current) => ({
+          ...current,
+          state: setReviewMode(current.state, author ? { author } : null),
+        }));
+        focus();
+      },
+
+      acceptRedline: (redlineId) => {
+        run('Accepter la modification', (state) => ({
+          ...state,
+          doc: applyRedline(state.doc, redlineId, 'accept'),
+        }));
+      },
+
+      rejectRedline: (redlineId) => {
+        run('Rejeter la modification', (state) => ({
+          ...state,
+          doc: applyRedline(state.doc, redlineId, 'reject'),
+        }));
+      },
+
+      acceptAllRedlines: () => {
+        run('Accepter toutes les modifications', (state) => ({
+          ...state,
+          doc: acceptAllRedlines(state.doc),
+        }));
+      },
+
+      rejectAllRedlines: () => {
+        run('Rejeter toutes les modifications', (state) => ({
+          ...state,
+          doc: rejectAllRedlines(state.doc),
+        }));
+      },
+
+      setImageWrap: (blockId, offset, anchor, surround) => {
+        run('Habillage de l\'image', (state) => {
+          const node = paragraphIndex(state.doc).byId.get(blockId)?.paragraph;
+          if (!node) return state;
+
+          const runs = node.runs.map((candidate, index) => {
+            const start = node.runs.slice(0, index).reduce((sum, r) => sum + r.text.length, 0);
+            if (!isImageRun(candidate) || start !== offset) return candidate;
+
+            const formatting = { ...runFormatting(candidate) };
+            if (anchor === 'as-char') {
+              // Retour dans le flux : la géométrie flottante n'a plus de sens et
+              // la laisser ressortirait au prochain basculement.
+              delete formatting.imageAnchor;
+              delete formatting.imageSurround;
+              delete formatting.imageXPt;
+              delete formatting.imageYPt;
+              delete formatting.imageWrapMarginPt;
+            } else {
+              formatting.imageAnchor = anchor;
+              formatting.imageSurround = surround;
+              formatting.imageXPt = formatting.imageXPt ?? 0;
+              formatting.imageYPt = formatting.imageYPt ?? 0;
+            }
+            return makeRun(candidate.text, formatting);
+          });
+
+          return { ...state, doc: replaceParagraph(state.doc, blockId, { ...node, runs }) };
+        });
+        focus();
+      },
+
       insertMath: (latex, display) => {
         setSession((current) => {
           const position = current.state.selection.focus;
@@ -655,6 +1040,108 @@ export function useWriterInput(
         focus();
       },
 
+      /* ------------------------------------------------------------ images */
+
+      insertImage: (attributes) => {
+        setSession((current) => {
+          if (!attributes.src) return current;
+
+          // Une image remplace la sélection, comme le ferait une frappe : c'est
+          // ce que fait `SwFEShell::Insert` quand un `SwPaM` n'est pas replié.
+          const base = current.state.selection.isCollapsed
+            ? current.state
+            : deleteSelection(current.state);
+          const position = base.selection.focus;
+          const node = paragraphIndex(base.doc).byId.get(position.blockId);
+          if (!node) return current;
+
+          const cadre = makeImageRun(attributes);
+          const runs = insertTextInRuns(
+            node.paragraph.runs,
+            position.offset,
+            cadre.text,
+            runFormatting(cadre),
+          );
+          const doc = replaceParagraph(base.doc, position.blockId, { ...node.paragraph, runs });
+
+          return commit(current, 'Insérer une image', {
+            ...base,
+            doc,
+            selection: collapsedSelection({
+              blockId: position.blockId,
+              offset: position.offset + cadre.text.length,
+            }),
+            // Sans cette remise à zéro, la frappe suivante hériterait du cadre et
+            // produirait une seconde image.
+            pendingFormat: null,
+          });
+        });
+        focus();
+      },
+
+      updateImage: (blockId, offset, attributes) => {
+        setSession((current) => {
+          const node = paragraphIndex(current.state.doc).byId.get(blockId);
+          if (!node) return current;
+
+          const cible = imageRunAt(node.paragraph.runs, offset);
+          if (!cible) return current;
+
+          // Le cadre est **reconstruit** plutôt que corrigé clé par clé : un
+          // rognage retiré doit voir ses quatre valeurs disparaître, et une
+          // fusion de l'ancien formatage les laisserait en place.
+          const runs = [...node.paragraph.runs];
+          const conserve = runFormatting(runs[cible.index]!);
+          for (const cle of ['imageAlt', 'imageCropTopPct', 'imageCropRightPct', 'imageCropBottomPct', 'imageCropLeftPct'] as const) {
+            delete conserve[cle];
+          }
+          runs[cible.index] = makeRun(runs[cible.index]!.text, {
+            ...conserve,
+            imageSrc: attributes.src,
+            imageWidthPt: clampSize(attributes.widthPt),
+            imageHeightPt: clampSize(attributes.heightPt),
+            ...(attributes.alt ? { imageAlt: attributes.alt } : {}),
+            ...cropFormatting(attributes.crop),
+          });
+
+          const doc = replaceParagraph(current.state.doc, blockId, {
+            ...node.paragraph,
+            runs: normalizeRuns(runs),
+          });
+          return commit(current, 'Modifier l’image', {
+            ...current.state,
+            doc,
+            selection: collapsedSelection({
+              blockId,
+              offset: cible.offset + runs[cible.index]!.text.length,
+            }),
+          });
+        });
+        focus();
+      },
+
+      deleteImage: (blockId, offset) => {
+        setSession((current) => {
+          const node = paragraphIndex(current.state.doc).byId.get(blockId);
+          if (!node) return current;
+
+          const cible = imageRunAt(node.paragraph.runs, offset);
+          if (!cible) return current;
+
+          const runs = node.paragraph.runs.filter((_, index) => index !== cible.index);
+          const doc = replaceParagraph(current.state.doc, blockId, {
+            ...node.paragraph,
+            runs: normalizeRuns(runs, formattingAt(node.paragraph.runs, cible.offset)),
+          });
+          return commit(current, 'Supprimer l’image', {
+            ...current.state,
+            doc,
+            selection: collapsedSelection({ blockId, offset: cible.offset }),
+          });
+        });
+        focus();
+      },
+
       goToBlock: (blockId) => {
         move((state) => setSelection(state, collapsedSelection({ blockId, offset: 0 })));
         focus();
@@ -678,6 +1165,29 @@ export function useWriterInput(
       replaceDocument: (doc) => {
         setSession(createSession(createEditorState(doc)));
         focus();
+      },
+      applyRemote: (transform, remapSelection) => {
+        setSession((current) => {
+          const doc = transform(current.state.doc);
+          if (doc === current.state.doc) return current;
+
+          const selection = remapSelection
+            ? remapSelection(current.state.selection)
+            : current.state.selection;
+
+          // La modification distante n'entre **pas** dans l'historique local :
+          // `Ctrl+Z` défait ce que l'on a fait soi-même, jamais ce qu'un autre
+          // a écrit. C'est aussi pourquoi on écrit `state` directement plutôt
+          // que de passer par `commit`.
+          return {
+            ...current,
+            state: {
+              ...current.state,
+              doc,
+              selection: clampSelection(doc, selection),
+            },
+          };
+        });
       },
     }),
     [run, move, patchRun, patchParagraph, focus],

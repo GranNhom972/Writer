@@ -7,8 +7,10 @@
  * dépendance externe.
  */
 
-import type { WriterDocumentState } from '../document/types';
+import { isParagraph, type WriterDocumentState } from '../document/types';
 import type { DocumentLayout, PlacedParagraph, PlacedTable } from '../engine/paginate';
+import type { LayoutSegment } from '../engine/lineBreak';
+import { hasCrop, imageCrop, visibleFraction } from '../document/images';
 import {
   showsOn,
   resolveGeometry,
@@ -166,23 +168,85 @@ function parseColorToRgb(colorStr: string | undefined): [number, number, number]
   return [0, 0, 0];
 }
 
+const latin1 = (text: string): Uint8Array => {
+  // Un PDF est une suite d'octets, pas de l'UTF-8 : tout ce que l'on écrit est
+  // déjà réduit à l'ASCII par `encodeWinAnsiText`, et les rares octets hauts
+  // (l'entête binaire) doivent passer **tels quels**. `TextEncoder` les
+  // recoderait sur deux octets et décalerait toute la table `xref`.
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i += 1) bytes[i] = text.charCodeAt(i) & 0xff;
+  return bytes;
+};
+
 /** Constructeur de document PDF bas niveau. */
 class PdfDocumentBuilder {
-  private objects: string[] = [];
+  /**
+   * Objets indirects, en **octets**.
+   *
+   * Un flux d'image est binaire : le garder en chaîne obligerait à le recoder à
+   * l'assemblage, et la longueur annoncée dans `/Length` ne vaudrait plus celle
+   * du fichier — un PDF que les lecteurs refusent d'ouvrir.
+   */
+  private objects: Uint8Array[] = [];
   private offsets: number[] = [];
   private fontMap = new Map<PdfFontKey, number>();
+  private imageMap = new Map<string, number>();
 
   constructor() {}
 
   /** Alloue un nouvel identifiant d'objet indirect. */
   newObject(): number {
-    this.objects.push('');
+    this.objects.push(new Uint8Array(0));
     return this.objects.length;
   }
 
   /** Définit le contenu d'un objet indirect. */
   setObject(id: number, content: string): void {
-    this.objects[id - 1] = content;
+    this.objects[id - 1] = latin1(content);
+  }
+
+  /**
+   * Définit un objet flux dont la charge utile est binaire.
+   *
+   * `/Length` est calculé ici, sur les octets réels : c'est la seule valeur
+   * qu'un lecteur utilise pour retrouver la fin du flux.
+   */
+  setStreamObject(id: number, dictionary: string, payload: Uint8Array): void {
+    const head = latin1(`<< ${dictionary} /Length ${payload.length} >>\nstream\n`);
+    const tail = latin1('\nendstream');
+    const bytes = new Uint8Array(head.length + payload.length + tail.length);
+    bytes.set(head, 0);
+    bytes.set(payload, head.length);
+    bytes.set(tail, head.length + payload.length);
+    this.objects[id - 1] = bytes;
+  }
+
+  /**
+   * Enregistre une image JPEG comme XObject, ou rend celui déjà posé.
+   *
+   * `/DCTDecode` transporte les octets JPEG **sans les retoucher** : c'est le
+   * même codec des deux côtés, il n'y a donc ni décodage ni perte à l'export.
+   * Une image répétée — un logo en tête de chaque section — n'est écrite qu'une
+   * fois, et référencée par toutes les pages qui la portent.
+   */
+  getImageObject(src: string, jpegBytes: Uint8Array, widthPx: number, heightPx: number): number {
+    const existing = this.imageMap.get(src);
+    if (existing !== undefined) return existing;
+
+    const id = this.newObject();
+    this.setStreamObject(
+      id,
+      `/Type /XObject /Subtype /Image /Width ${widthPx} /Height ${heightPx} ` +
+        `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
+      jpegBytes,
+    );
+    this.imageMap.set(src, id);
+    return id;
+  }
+
+  /** Les XObjects d'image déclarés, pour le dictionnaire `/Resources`. */
+  getAllImages(): Map<string, number> {
+    return this.imageMap;
   }
 
   /** Enregistre ou récupère l'identifiant d'objet d'une police Base 14. */
@@ -204,39 +268,127 @@ class PdfDocumentBuilder {
     return this.fontMap;
   }
 
-  /** Assemble l'ensemble des objets et génère le fichier PDF final en `Uint8Array`. */
+  /**
+   * Assemble l'ensemble des objets et génère le fichier PDF final.
+   *
+   * Les décalages de la table `xref` sont comptés **en octets écrits**, jamais
+   * en caractères : les deux diffèrent dès qu'un octet dépasse 0x7F, et un
+   * `startxref` faux rend le fichier illisible aux lecteurs stricts.
+   */
   build(): Uint8Array {
-    let output = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+    const parts: Uint8Array[] = [];
+    let written = 0;
+    const push = (bytes: Uint8Array): void => {
+      parts.push(bytes);
+      written += bytes.length;
+    };
+
+    push(latin1('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'));
     this.offsets = [];
 
     for (let i = 0; i < this.objects.length; i++) {
-      const objId = i + 1;
-      const content = this.objects[i];
-      const offset = output.length;
-      this.offsets.push(offset);
-      output += `${objId} 0 obj\n${content}\nendobj\n`;
+      this.offsets.push(written);
+      push(latin1(`${i + 1} 0 obj\n`));
+      push(this.objects[i]!);
+      push(latin1('\nendobj\n'));
     }
 
-    const startXref = output.length;
-    output += `xref\n0 ${this.objects.length + 1}\n`;
-    output += '0000000000 65535 f \r\n';
-
+    const startXref = written;
+    let trailer = `xref\n0 ${this.objects.length + 1}\n`;
+    trailer += '0000000000 65535 f \r\n';
     for (const offset of this.offsets) {
-      const offsetStr = offset.toString().padStart(10, '0');
-      output += `${offsetStr} 00000 n \r\n`;
+      trailer += `${offset.toString().padStart(10, '0')} 00000 n \r\n`;
     }
+    trailer += `trailer\n<< /Size ${this.objects.length + 1}\n   /Root 1 0 R\n   /Info 2 0 R\n>>\n`;
+    trailer += `startxref\n${startXref}\n%%EOF\n`;
+    push(latin1(trailer));
 
-    output += `trailer\n<< /Size ${this.objects.length + 1}\n   /Root 1 0 R\n   /Info 2 0 R\n>>\n`;
-    output += `startxref\n${startXref}\n%%EOF\n`;
-
-    const encoder = new TextEncoder();
-    return encoder.encode(output);
+    const out = new Uint8Array(written);
+    let at = 0;
+    for (const part of parts) {
+      out.set(part, at);
+      at += part.length;
+    }
+    return out;
   }
 }
 
 export interface PdfExportOptions {
   author?: string;
   creator?: string;
+  /**
+   * Images du document, déjà décodées en JPEG et indexées par `imageSrc`.
+   *
+   * Le décodage est laissé à l'appelant (`domain/image/raster.ts`) : c'est lui
+   * qui a le navigateur sous la main. Ce module reste pur — il place des octets,
+   * il n'en fabrique pas. Une image absente de la table laisse un cadre vide,
+   * l'export continue.
+   */
+  images?: ReadonlyMap<string, { jpegBytes: Uint8Array; widthPx: number; heightPx: number }>;
+}
+
+/**
+ * Peint un cadre image dans le flux d'une page.
+ *
+ * La matrice `cm` d'un XObject d'image mappe le carré unité sur le rectangle
+ * voulu : `largeur 0 0 hauteur x y cm` suivi de `/Ixx Do`. L'ordonnée est celle
+ * du **bas** du cadre, le repère PDF ayant son origine en bas de page.
+ *
+ * Le cadre est posé sur la ligne de base et monte de toute sa hauteur — la même
+ * règle qu'à l'écran (`SwFlyCntFrm`), donc le PDF et l'éditeur montrent la même
+ * page.
+ */
+function paintImage(
+  pdf: PdfDocumentBuilder,
+  images: PdfExportOptions['images'],
+  seg: LayoutSegment,
+  xPt: number,
+  baselineYPt: number,
+): string {
+  const src = seg.formatting.imageSrc;
+  if (!src) return '';
+
+  const raster = images?.get(src);
+  const widthPt = (seg.formatting.imageWidthPt ?? 0);
+  const heightPt = (seg.formatting.imageHeightPt ?? 0);
+  if (widthPt <= 0 || heightPt <= 0) return '';
+
+  if (!raster) {
+    // Image indisponible : un cadre gris clair, à la place exacte qu'occupait
+    // l'image. Ne rien tracer déplacerait le reste de la page, ce qui serait
+    // plus trompeur qu'un trou visible.
+    let out = 'q\n0.85 0.85 0.85 RG 0.5 w\n';
+    out += `${xPt.toFixed(2)} ${baselineYPt.toFixed(2)} ${widthPt.toFixed(2)} ${heightPt.toFixed(2)} re S\nQ\n`;
+    return out;
+  }
+
+  const id = pdf.getImageObject(src, raster.jpegBytes, raster.widthPx, raster.heightPx);
+  const crop = imageCrop(seg.formatting);
+
+  let out = 'q\n';
+
+  if (hasCrop(crop)) {
+    // Rognage : le PDF n'a pas de notion de découpe d'image, mais il a un
+    // **chemin de rognage**. On restreint le tracé au cadre (`re W n`), puis on
+    // place l'image entière, agrandie et décalée de sorte que la part conservée
+    // tombe exactement dans ce cadre. Ce qui dépasse est écarté par le chemin.
+    const visible = visibleFraction(crop);
+    const pleineLargeurPt = widthPt / visible.width;
+    const pleineHauteurPt = heightPt / visible.height;
+
+    out += `${xPt.toFixed(2)} ${baselineYPt.toFixed(2)} ${widthPt.toFixed(2)} ${heightPt.toFixed(2)} re W n\n`;
+
+    // L'origine du repère PDF est en **bas** à gauche : c'est donc le retrait
+    // du **bas** qui décale l'image vers le bas, et non celui du haut.
+    const decalageX = xPt - crop.leftPct * pleineLargeurPt;
+    const decalageY = baselineYPt - crop.bottomPct * pleineHauteurPt;
+    out += `${pleineLargeurPt.toFixed(2)} 0 0 ${pleineHauteurPt.toFixed(2)} ${decalageX.toFixed(2)} ${decalageY.toFixed(2)} cm\n`;
+  } else {
+    out += `${widthPt.toFixed(2)} 0 0 ${heightPt.toFixed(2)} ${xPt.toFixed(2)} ${baselineYPt.toFixed(2)} cm\n`;
+  }
+
+  out += `/I${id} Do\nQ\n`;
+  return out;
 }
 
 /**
@@ -259,6 +411,7 @@ export function exportToPdfBytes(
   const pagesTreeId = pdf.newObject(); // 3
 
   const pageObjectIds: number[] = [];
+  const pageStreams: { pageObjId: number; contentObjId: number }[] = [];
   const pageCount = layout.pages.length;
   const geometry = layout.geometry;
 
@@ -479,6 +632,17 @@ export function exportToPdfBytes(
           for (const seg of line.segments) {
             if (seg.isTab || !seg.text) continue;
 
+            if (seg.formatting.imageSrc) {
+              stream += paintImage(
+                pdf,
+                options?.images,
+                seg,
+                contentLeftPt + (placed.leftPx + line.leftPx + seg.leftPx) * PX_TO_PT,
+                baselineYPt,
+              );
+              continue;
+            }
+
             const fontKey = resolveBase14Font(seg.font.fontFamily, seg.font.bold, seg.font.italic);
             const fontObjId = pdf.getFontObject(fontKey);
             const fontSizePt = seg.font.fontSizePx * PX_TO_PT;
@@ -550,6 +714,17 @@ export function exportToPdfBytes(
                 for (const seg of line.segments) {
                   if (seg.isTab || !seg.text) continue;
 
+                  if (seg.formatting.imageSrc) {
+                    stream += paintImage(
+                      pdf,
+                      options?.images,
+                      seg,
+                      cellLeftPt + cell.paddingPx * PX_TO_PT + line.leftPx * PX_TO_PT + seg.leftPx * PX_TO_PT,
+                      baselineYPt,
+                    );
+                    continue;
+                  }
+
                   const fontKey = resolveBase14Font(seg.font.fontFamily, seg.font.bold, seg.font.italic);
                   const fontObjId = pdf.getFontObject(fontKey);
                   const fontSizePt = seg.font.fontSizePx * PX_TO_PT;
@@ -573,16 +748,25 @@ export function exportToPdfBytes(
     }
 
     // Définition de l'objet contenu de la page
-    const streamBytesLength = new TextEncoder().encode(stream).length;
-    pdf.setObject(contentObjId, `<< /Length ${streamBytesLength} >>\nstream\n${stream}\nendstream`);
+    pdf.setStreamObject(contentObjId, '', latin1(stream));
+    pageStreams.push({ pageObjId, contentObjId });
+  }
 
-    // Dictionnaire de ressources de polices
-    let fontResources = '';
-    for (const [, id] of pdf.getAllFonts().entries()) {
-      fontResources += `      /F${id} ${id} 0 R\n`;
-    }
+  // Les dictionnaires de ressources sont écrits **après** toutes les pages :
+  // une police ou une image découverte à la page 12 doit figurer aussi dans les
+  // ressources de la page 1 si elle y apparaît. Les déclarer toutes partout est
+  // permis par la spécification et évite un second parcours du document.
+  let fontResources = '';
+  for (const [, id] of pdf.getAllFonts().entries()) {
+    fontResources += `      /F${id} ${id} 0 R\n`;
+  }
+  let imageResources = '';
+  for (const [, id] of pdf.getAllImages().entries()) {
+    imageResources += `      /I${id} ${id} 0 R\n`;
+  }
+  const xObjectEntry = imageResources ? `      /XObject <<\n${imageResources}      >>\n` : '';
 
-    // Définition de l'objet Page
+  for (const { pageObjId, contentObjId } of pageStreams) {
     pdf.setObject(
       pageObjId,
       `<< /Type /Page\n` +
@@ -591,6 +775,7 @@ export function exportToPdfBytes(
         `   /Contents ${contentObjId} 0 R\n` +
         `   /Resources <<\n` +
         `      /Font <<\n${fontResources}      >>\n` +
+        xObjectEntry +
         `   >>\n` +
         `>>`,
     );
@@ -640,13 +825,39 @@ export function exportToPdfBlob(
   return new Blob([bytes as BlobPart], { type: 'application/pdf' });
 }
 
+/**
+ * Toutes les adresses d'image du document, sans doublon.
+ *
+ * Sert à l'appelant pour ne décoder qu'une fois chaque image avant l'export.
+ */
+export function collectImageSources(doc: WriterDocumentState): string[] {
+  const sources = new Set<string>();
+  const visiter = (runs: readonly { imageSrc?: string }[]): void => {
+    for (const run of runs) if (run.imageSrc) sources.add(run.imageSrc);
+  };
+
+  for (const block of doc.blocks) {
+    if (block.type === 'table') {
+      for (const row of block.rows) {
+        for (const cell of row.cells) {
+          for (const paragraph of cell.blocks) visiter(paragraph.runs);
+        }
+      }
+      continue;
+    }
+    if (isParagraph(block)) visiter(block.runs);
+  }
+  return [...sources];
+}
+
 /** Déclenche le téléchargement du document sous forme de fichier `.pdf`. */
 export function downloadPdf(
   doc: WriterDocumentState,
   layout: DocumentLayout,
   filename?: string,
+  options?: PdfExportOptions,
 ): void {
-  const blob = exportToPdfBlob(doc, layout);
+  const blob = exportToPdfBlob(doc, layout, options);
   const targetName = filename || `${doc.meta.title || 'document'}.pdf`;
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

@@ -16,14 +16,23 @@
 import {
   containerKeyOf,
   createParagraph,
+  deleteTableColumn,
+  deleteTableRow,
+  gridColumnsOf,
+  insertBlockAfter,
   insertParagraphAfter,
+  insertTableColumn,
+  insertTableRow,
+  mergeTableCells,
   newId,
   paragraphIndex,
   paragraphText,
   removeBlocks,
   ROOT_CONTAINER,
   replaceParagraph,
+  splitTableCell,
   touch,
+  type CellRect,
 } from '../document/document';
 import {
   applyFormattingToRange,
@@ -39,16 +48,18 @@ import {
   splitRunsAt,
   type RunFormatPatch,
 } from '../document/runs';
-import type {
-  DocumentPosition,
-  DocumentSelection,
-  ListKind,
-  ParagraphNode,
-  RunFormatting,
-  TextRun,
-  WriterDocumentState,
+import {
+  isTable,
+  MAX_LIST_LEVEL,
+  type DocumentBlock,
+  type DocumentPosition,
+  type DocumentSelection,
+  type ListKind,
+  type ParagraphNode,
+  type RunFormatting,
+  type TextRun,
+  type WriterDocumentState,
 } from '../document/types';
-import { MAX_LIST_LEVEL } from '../document/types';
 import {
   clampPosition,
   collapsedSelection,
@@ -59,6 +70,15 @@ import {
   samePosition,
   type HorizontalGranularity,
 } from './cursor';
+import {
+  markDeleted,
+  markInserted,
+  pruneOrphanRedlines,
+  type RedlineAuthor,
+} from '../document/redline';
+import { addComment, pruneOrphanComments } from '../document/comments';
+import { setBookmark } from '../document/bookmarks';
+import { createToc, type TocOptions } from '../document/tox';
 
 /**
  * État complet de l'éditeur.
@@ -72,6 +92,16 @@ export interface EditorState {
   doc: WriterDocumentState;
   selection: DocumentSelection;
   pendingFormat: RunFormatPatch | null;
+  /**
+   * Mode révision. Transposition de `REDLINE_ON` d'`IDocumentRedlineAccess`.
+   *
+   * Quand il est actif, aucune édition ne détruit : une frappe pose un
+   * `REDLINE_INSERT`, une suppression un `REDLINE_DELETE` sans retirer le
+   * texte. `null` — la valeur par défaut — rend à l'éditeur son comportement
+   * habituel, ce qui garantit qu'aucun document existant ne change de
+   * comportement du seul fait que ce champ existe.
+   */
+  review?: RedlineAuthor | null;
 }
 
 export function createEditorState(doc: WriterDocumentState): EditorState {
@@ -96,7 +126,11 @@ export function activeFormatting(state: EditorState): RunFormatting {
       ? commonFormatting(paragraph.runs, start.offset, end.offset)
       : commonFormatting(paragraph.runs, start.offset, runsLength(paragraph.runs));
 
-  return state.pendingFormat ? patchFormatting(base, state.pendingFormat) : base;
+  const cleaned = { ...base };
+  delete cleaned.footnoteText;
+  delete cleaned.footnoteId;
+
+  return state.pendingFormat ? patchFormatting(cleaned, state.pendingFormat) : cleaned;
 }
 
 /* -------------------------------------------------------------- suppression */
@@ -105,6 +139,9 @@ export function activeFormatting(state: EditorState): RunFormatting {
 export function deleteSelection(state: EditorState): EditorState {
   const { doc, selection } = state;
   if (selection.isCollapsed) return state;
+
+  // Mode révision : rien ne disparaît, on signe la demande de suppression.
+  if (state.review) return markSelectionDeleted(state, state.review);
 
   const { start, end } = normalizeSelection(doc, selection);
   const index = paragraphIndex(doc);
@@ -234,13 +271,30 @@ export function insertText(state: EditorState, text: string): EditorState {
   const node = paragraphIndex(base.doc).byId.get(position.blockId);
   if (!node) return state;
 
-  const inherited = formattingAt(node.paragraph.runs, position.offset);
+  const rawInherited = formattingAt(node.paragraph.runs, position.offset);
+  const inherited: RunFormatting = { ...rawInherited };
+  delete inherited.footnoteText;
+  delete inherited.footnoteId;
+
   const formatting = state.pendingFormat
     ? patchFormatting(inherited, state.pendingFormat)
     : inherited;
 
   const runs = insertTextInRuns(node.paragraph.runs, position.offset, text, formatting);
-  const doc = replaceParagraph(base.doc, position.blockId, { ...node.paragraph, runs });
+  let doc = replaceParagraph(base.doc, position.blockId, { ...node.paragraph, runs });
+
+  // Mode révision : la frappe est signée après coup. L'insertion elle-même ne
+  // change pas — c'est bien la propriété qu'on veut, une seule façon d'insérer
+  // du texte quel que soit le mode.
+  if (state.review) {
+    doc = markInserted(
+      doc,
+      position.blockId,
+      position.offset,
+      position.offset + text.length,
+      state.review,
+    );
+  }
 
   return {
     doc,
@@ -249,6 +303,63 @@ export function insertText(state: EditorState, text: string): EditorState {
       offset: position.offset + text.length,
     }),
     // Le formatage armé est consommé par la frappe : il ne survit pas au-delà.
+    pendingFormat: null,
+    ...(state.review !== undefined ? { review: state.review } : {}),
+  };
+}
+
+/**
+ * Marque la sélection comme supprimée sans retirer le texte.
+ *
+ * Sur plusieurs paragraphes, chacun est marqué sur sa part et **aucun n'est
+ * fusionné** : tant que la révision n'est pas acceptée, la coupure de
+ * paragraphe existe encore. `SwDoc::DeleteAndJoin` sous `REDLINE_ON` fait le
+ * même choix, et c'est le seul qui permette au rejet de tout restaurer.
+ *
+ * Le curseur se replie en **fin** de sélection et non au début : le texte est
+ * toujours là, revenir à son début donnerait l'impression que rien ne s'est
+ * passé.
+ */
+function markSelectionDeleted(state: EditorState, who: RedlineAuthor): EditorState {
+  const { doc, selection } = state;
+  const { start, end } = normalizeSelection(doc, selection);
+  const index = paragraphIndex(doc);
+
+  const startRank = index.order.indexOf(start.blockId);
+  const endRank = index.order.indexOf(end.blockId);
+  if (startRank < 0 || endRank < 0) return state;
+
+  let next = doc;
+  let removedInStart = 0;
+
+  for (let rank = startRank; rank <= endRank; rank += 1) {
+    const blockId = index.order[rank];
+    if (!blockId) continue;
+    const paragraph = paragraphIndex(next).byId.get(blockId)?.paragraph;
+    if (!paragraph) continue;
+
+    const length = runsLength(paragraph.runs);
+    const from = rank === startRank ? start.offset : 0;
+    const to = rank === endRank ? end.offset : length;
+    if (to <= from) continue;
+
+    const result = markDeleted(next, blockId, from, to, who);
+    next = result.doc;
+    if (rank === startRank) {
+      // Le texte que l'auteur venait lui-même d'insérer a bel et bien disparu :
+      // le curseur doit en tenir compte, sinon il se poserait au-delà de la fin.
+      for (const range of result.removedRanges) removedInStart += range.end - range.start;
+    }
+  }
+
+  const focusBlockId = endRank === startRank ? start.blockId : end.blockId;
+  const focusOffset =
+    endRank === startRank ? Math.max(start.offset, end.offset - removedInStart) : end.offset;
+
+  return {
+    ...state,
+    doc: pruneOrphanComments(pruneOrphanRedlines(next)),
+    selection: collapsedSelection({ blockId: focusBlockId, offset: focusOffset }),
     pendingFormat: null,
   };
 }
@@ -767,4 +878,272 @@ export function isEmptySelection(state: EditorState): boolean {
 /** Run unique portant un texte et un formatage — utilitaire des tests et de l'import. */
 export function runOf(text: string, formatting: RunFormatting = {}): TextRun {
   return makeRun(text, formatting);
+}
+
+/* --------------------------------------------------- notes de bas de page */
+
+function toSuperscript(n: number): string {
+  const digits = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+  return String(n)
+    .split('')
+    .map((d) => digits[Number(d)] ?? d)
+    .join('');
+}
+
+/** Compte le nombre total de notes de bas de page dans le document. */
+export function countFootnotes(doc: WriterDocumentState): number {
+  let count = 0;
+  const { order, byId } = paragraphIndex(doc);
+  for (const id of order) {
+    const node = byId.get(id)?.paragraph;
+    if (!node) continue;
+    for (const run of node.runs) {
+      if (run.footnoteText !== undefined) count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Insère un appel de note de bas de page au curseur.
+ * Transposition de `SwFtnFrm` / `SwDoc::Insert(SwFmtFtn)`.
+ */
+export function insertFootnote(state: EditorState, text: string): EditorState {
+  const footnoteContent = text.trim();
+  if (!footnoteContent) return state;
+
+  const base = state.selection.isCollapsed ? state : deleteSelection(state);
+  const position = base.selection.focus;
+  const node = paragraphIndex(base.doc).byId.get(position.blockId);
+  if (!node) return state;
+
+  const totalFn = countFootnotes(base.doc);
+  const marker = toSuperscript(totalFn + 1);
+  const fnId = newId('fn');
+
+  const inherited = formattingAt(node.paragraph.runs, position.offset);
+  const formatting: RunFormatting = {
+    ...inherited,
+    footnoteText: footnoteContent,
+    footnoteId: fnId,
+  };
+
+  const runs = insertTextInRuns(node.paragraph.runs, position.offset, marker, formatting);
+  const doc = replaceParagraph(base.doc, position.blockId, { ...node.paragraph, runs });
+
+  return {
+    doc,
+    selection: collapsedSelection({
+      blockId: position.blockId,
+      offset: position.offset + marker.length,
+    }),
+    pendingFormat: null,
+  };
+}
+
+/* ---------------------------------------------------- opérations de tableau */
+
+export function currentTableLocation(state: EditorState): {
+  tableId: string;
+  rowIndex: number;
+  cellIndex: number;
+} | null {
+  const position = state.selection.focus;
+  const location = paragraphIndex(state.doc).byId.get(position.blockId);
+  if (!location || !location.cell) return null;
+  const block = state.doc.blocks[location.blockIndex];
+  if (!block || !isTable(block)) return null;
+  return {
+    tableId: block.id,
+    rowIndex: location.cell.rowIndex,
+    cellIndex: location.cell.cellIndex,
+  };
+}
+
+export function insertTableRowAbove(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const doc = insertTableRow(state.doc, loc.tableId, loc.rowIndex, 'above');
+  return { ...state, doc };
+}
+
+export function insertTableRowBelow(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const doc = insertTableRow(state.doc, loc.tableId, loc.rowIndex, 'below');
+  return { ...state, doc };
+}
+
+export function deleteCurrentTableRow(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const doc = deleteTableRow(state.doc, loc.tableId, loc.rowIndex);
+  const nextFirst = paragraphIndex(doc).order[0] ?? '';
+  return { ...state, doc, selection: collapsedSelection({ blockId: nextFirst, offset: 0 }) };
+}
+
+export function insertTableColumnLeft(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const doc = insertTableColumn(state.doc, loc.tableId, loc.cellIndex, 'left');
+  return { ...state, doc };
+}
+
+export function insertTableColumnRight(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const doc = insertTableColumn(state.doc, loc.tableId, loc.cellIndex, 'right');
+  return { ...state, doc };
+}
+
+export function deleteCurrentTableColumn(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const doc = deleteTableColumn(state.doc, loc.tableId, loc.cellIndex);
+  const nextFirst = paragraphIndex(doc).order[0] ?? '';
+  return { ...state, doc, selection: collapsedSelection({ blockId: nextFirst, offset: 0 }) };
+}
+
+/* --------------------------------------- fusion et scission de cellules */
+
+/**
+ * Rectangle de cellules couvert par la sélection courante.
+ *
+ * Une sélection de tableau, dans Writer comme ici, n'est pas une sélection de
+ * texte : `SwCursorShell::IsTableMode` bascule sur un `SwCellFrm` de départ et
+ * un d'arrivée, et le rectangle en est le **plus petit englobant**. C'est ce
+ * que reconstruit cette fonction à partir des deux extrémités du `SwPaM`.
+ *
+ * Le calcul se fait en **colonnes de grille** et non en indices de cellule :
+ * après une fusion, `row.cells[2]` n'occupe plus la colonne 2, et confondre
+ * les deux fusionnerait le mauvais rectangle.
+ */
+export function selectedCellRect(state: EditorState): {
+  tableId: string;
+  rect: CellRect;
+} | null {
+  const index = paragraphIndex(state.doc);
+  const anchor = index.byId.get(state.selection.anchor.blockId);
+  const focus = index.byId.get(state.selection.focus.blockId);
+  if (!anchor?.cell || !focus?.cell) return null;
+  if (anchor.blockIndex !== focus.blockIndex) return null;
+
+  const block = state.doc.blocks[anchor.blockIndex];
+  if (!block || !isTable(block)) return null;
+
+  const anchorRow = block.rows[anchor.cell.rowIndex];
+  const focusRow = block.rows[focus.cell.rowIndex];
+  if (!anchorRow || !focusRow) return null;
+
+  const anchorCol = gridColumnsOf(anchorRow)[anchor.cell.cellIndex] ?? 0;
+  const focusCol = gridColumnsOf(focusRow)[focus.cell.cellIndex] ?? 0;
+
+  return {
+    tableId: block.id,
+    rect: {
+      fromRow: Math.min(anchor.cell.rowIndex, focus.cell.rowIndex),
+      toRow: Math.max(anchor.cell.rowIndex, focus.cell.rowIndex),
+      fromCol: Math.min(anchorCol, focusCol),
+      toCol: Math.max(anchorCol, focusCol),
+    },
+  };
+}
+
+/** Fusionne les cellules sélectionnées (`SwDoc::MergeTbl`). */
+export function mergeSelectedCells(state: EditorState): EditorState {
+  const selected = selectedCellRect(state);
+  if (!selected) return state;
+
+  const doc = mergeTableCells(state.doc, selected.tableId, selected.rect);
+  if (doc === state.doc) return state;
+
+  // Le curseur se pose dans la cellule maîtresse : les autres n'existent plus
+  // pour la navigation, l'y laisser le rendrait inatteignable.
+  const master = paragraphIndex(doc);
+  const block = doc.blocks.find((candidate) => candidate.id === selected.tableId);
+  const cell =
+    block && isTable(block)
+      ? block.rows[selected.rect.fromRow]?.cells.find((candidate) => !candidate.covered)
+      : undefined;
+  const target = cell?.blocks[0]?.id ?? master.order[0] ?? '';
+
+  return { ...state, doc, selection: collapsedSelection({ blockId: target, offset: 0 }) };
+}
+
+/** Scinde la cellule courante (`SwDoc::SplitTbl`). */
+export function splitCurrentCell(
+  state: EditorState,
+  direction: 'horizontal' | 'vertical',
+  count = 2,
+): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const doc = splitTableCell(state.doc, loc.tableId, loc.rowIndex, loc.cellIndex, direction, count);
+  return doc === state.doc ? state : { ...state, doc };
+}
+
+/* -------------------------------------------------- table des matières */
+
+/**
+ * Insère une table des matières après le bloc courant.
+ *
+ * Le bloc inséré ne contient **aucune entrée** : elles sont dérivées à chaque
+ * pagination (cf. `engine/tox.ts`). C'est ce qui garantit qu'un sommaire ne
+ * peut pas mentir sur le contenu du document — il n'a rien à mentir *avec*.
+ */
+export function insertTableOfContents(state: EditorState, options: TocOptions = {}): EditorState {
+  const toc = createToc(options);
+  const doc = insertBlockAfter(state.doc, state.selection.focus.blockId, toc as DocumentBlock);
+  return { ...state, doc };
+}
+
+/* --------------------------------------------- commentaires et signets */
+
+/** Pose un commentaire sur la sélection (`SwEditShell::InsertPostIt`). */
+export function commentSelection(
+  state: EditorState,
+  author: string,
+  text: string,
+  options: { initials?: string; now?: string } = {},
+): { state: EditorState; threadId: string } {
+  const { start, end } = normalizeSelection(state.doc, state.selection);
+  // Un commentaire sans plage n'a rien à ancrer : Writer refuse aussi.
+  if (state.selection.isCollapsed || start.blockId !== end.blockId) {
+    return { state, threadId: '' };
+  }
+
+  const { doc, threadId } = addComment(
+    state.doc,
+    { blockId: start.blockId, startOffset: start.offset, endOffset: end.offset },
+    author,
+    text,
+    options,
+  );
+
+  return { state: doc === state.doc ? state : { ...state, doc }, threadId };
+}
+
+/** Pose un signet sur la sélection (`IDocumentMarkAccess::makeMark`). */
+export function bookmarkSelection(state: EditorState, name: string): EditorState {
+  const { start, end } = normalizeSelection(state.doc, state.selection);
+  if (start.blockId !== end.blockId) return state;
+
+  const doc = setBookmark(
+    state.doc,
+    { blockId: start.blockId, startOffset: start.offset, endOffset: end.offset },
+    name,
+  );
+  return doc === state.doc ? state : { ...state, doc };
+}
+
+/* -------------------------------------------------------- mode révision */
+
+/** Active ou désactive le suivi des modifications (`REDLINE_ON` / `REDLINE_NONE`). */
+export function setReviewMode(state: EditorState, who: RedlineAuthor | null): EditorState {
+  return { ...state, review: who };
+}
+
+/** Le suivi des modifications est-il actif ? */
+export function isReviewing(state: EditorState): boolean {
+  return state.review != null;
 }

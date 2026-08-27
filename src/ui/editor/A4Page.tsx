@@ -34,6 +34,7 @@ export interface A4PageProps {
   onToggleTask: (blockId: string) => void;
   onOpenFurniture?: (band: FurnitureBand) => void;
   onEditMath?: (blockId: string, latex: string, display: boolean) => void;
+  onEditImage?: (blockId: string, offset: number) => void;
   onPointerDown: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
@@ -84,6 +85,7 @@ export const A4Page = memo(function A4Page({
   onToggleTask,
   onOpenFurniture,
   onEditMath,
+  onEditImage,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -205,6 +207,36 @@ export const A4Page = memo(function A4Page({
           />
         ))}
 
+        {/*
+          Cadres flottants (`SwFlyFreeFrm`). Peints **avant** le texte, donc
+          dessous : c'est l'ordre de `SwRootFrm::Paint`, et il n'a de
+          conséquence visible que pour l'habillage `through`, où le texte doit
+          passer par-dessus l'image.
+        */}
+        {page.flies?.map((laid, index) => (
+          <div
+            key={`fly-${laid.fly.anchorBlockId}-${index}`}
+            className="writer-fly"
+            style={{
+              position: 'absolute',
+              left: `${laid.leftPx}px`,
+              top: `${laid.topPx}px`,
+              width: `${laid.widthPx}px`,
+              height: `${laid.heightPx}px`,
+              // Un cadre `through` laisse passer le clic : le texte qu'il
+              // recouvre doit rester sélectionnable.
+              pointerEvents: laid.fly.surround === 'through' ? 'none' : 'auto',
+            }}
+          >
+            <img
+              src={laid.fly.run.imageSrc ?? ''}
+              alt={laid.fly.run.imageAlt ?? ''}
+              draggable={false}
+              style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
+            />
+          </div>
+        ))}
+
         {page.blocks
           .filter((block): block is PlacedTable => block.kind === 'table')
           .map((table) => (
@@ -224,6 +256,7 @@ export const A4Page = memo(function A4Page({
                 layout={layout}
                 onToggleTask={onToggleTask}
                 onEditMath={onEditMath}
+                onEditImage={onEditImage}
               />
             </div>
           );
@@ -239,6 +272,41 @@ export const A4Page = memo(function A4Page({
             }}
           />
         ) : null}
+
+        {/*
+          Zone des notes de bas de page (`SwFtnContFrm`).
+
+          Sa hauteur est **réservée par la pagination** (`PageBuilder`) : le
+          corps du texte s'arrête au-dessus, et le bandeau ne recouvre donc plus
+          rien. `height` reprend cette hauteur exacte plutôt que de laisser la
+          boîte se dimensionner sur son contenu — les deux doivent coïncider,
+          sinon la réserve et le rendu divergeraient.
+        */}
+        {page.footnotes && page.footnotes.length > 0 && (
+          <div
+            className="writer-page__footnotes"
+            style={{
+              position: 'absolute',
+              height: page.footnoteAreaHeightPx ? `${page.footnoteAreaHeightPx}px` : undefined,
+              bottom: 0,
+              left: 0,
+              right: 0,
+              borderTop: '1px solid var(--border-strong, #ccc)',
+              paddingTop: '8px',
+              fontSize: '11px',
+              lineHeight: '1.4',
+              color: 'var(--text-muted, #555)',
+              pointerEvents: 'auto',
+            }}
+          >
+            {page.footnotes.map((fn) => (
+              <div key={fn.id} className="writer-footnote-entry" style={{ marginBottom: '2px' }}>
+                <sup style={{ fontWeight: 600, marginRight: '4px', color: 'var(--text-color, #111)' }}>{fn.index}</sup>
+                <span>{fn.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Pied de page physique interactif */}

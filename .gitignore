@@ -1,3 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Serveur Rust : binaires de compilation et données locales.
+server/target/
+server/data/

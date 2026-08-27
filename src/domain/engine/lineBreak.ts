@@ -30,6 +30,8 @@ import type {
 import { resolveBlockSpacing, resolveColor, resolveFont, resolveLineSpacing } from './style';
 import type { FontMetrics, FontSpec, TextMeasurer } from './measure';
 import { measureMathExact } from '../math/render';
+import { isImageFormatting } from '../document/images';
+import { nextClearY, usableBand, type FlyExclusion } from './flyLayout';
 
 /** Taquet de tabulation par défaut de Writer : 1,25 cm. */
 export const DEFAULT_TAB_STOP_PX = cmToPx(1.25);
@@ -120,6 +122,15 @@ export interface LayoutContext {
   tabStopPx?: number;
   /** Marqueur de liste, calculé en amont par `computeListMarkers`. */
   marker?: ListMarker | undefined;
+  /**
+   * Intervalles horizontaux interdits par les cadres flottants qui traversent
+   * ce paragraphe, dans son repère local (`SwTxtFly`, txtfly.cxx).
+   *
+   * Absent dans le cas courant — un document sans cadre flottant ne paie donc
+   * rien pour cette fonctionnalité, la boucle de remplissage retombant sur la
+   * largeur pleine sans un test de plus par caractère.
+   */
+  exclusions?: readonly FlyExclusion[] | undefined;
 }
 
 /** Mesures pré-calculées d'un paragraphe : avances par offset et fontes par run. */
@@ -311,7 +322,27 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
     fonts.push(font);
     colors.push(resolveColor(formatting, ctx));
 
-    if (formatting.mathLatex) {
+    if (isImageFormatting(formatting)) {
+      // Un cadre image n'a pas de ligne de base propre : `SwFlyCntFrm` est posé
+      // sur celle du texte et monte d'autant (`SwTxtFrm::CalcBaseOfstForFly`).
+      // Toute sa hauteur est donc de l'ascendance, la descente est nulle.
+      const widthPx = ptToPx(formatting.imageWidthPt ?? 0);
+      const heightPx = ptToPx(formatting.imageHeightPt ?? 0);
+      metrics.push({
+        ascentPx: heightPx,
+        descentPx: 0,
+        naturalLineHeightPx: heightPx,
+      });
+
+      // Le run vaut un seul caractère de substitution : toute sa largeur tombe
+      // sur cette unique avance, ce qui interdit au curseur de s'y insérer.
+      const charCount = Math.max(1, run.text.length);
+      const step = widthPx / charCount;
+      for (let i = 0; i < run.text.length; i += 1) {
+        runAt[offset + i] = runIndex;
+        cum[offset + i + 1] = cum[offset + i]! + step;
+      }
+    } else if (formatting.mathLatex) {
       const mathGeom = estimateMathMetrics(formatting.mathLatex, Boolean(formatting.mathDisplay), font);
       metrics.push({
         ascentPx: mathGeom.ascentPx,
@@ -389,7 +420,7 @@ function findBreakOpportunity(m: ParagraphMetrics, lineStart: number, cutPos: nu
       runIdxBefore !== undefined &&
       runIdxAfter !== undefined &&
       runIdxBefore === runIdxAfter &&
-      m.formats[runIdxBefore]?.mathLatex
+      (m.formats[runIdxBefore]?.mathLatex || isImageFormatting(m.formats[runIdxBefore]!))
     ) {
       continue;
     }
@@ -508,9 +539,13 @@ function breakInsideChunk(
   if (cutPos <= lineStart) cutPos = advanceOneGrapheme(text, lineStart);
   if (cutPos >= chunkEnd) return { endOffset: chunkEnd, nextOffset: chunkEnd };
 
-  // Si cutPos tombe au milieu d'un run mathématique, couper avant la formule si possible
+  // Si cutPos tombe au milieu d'un objet atomique — formule ou cadre image —
+  // couper **avant** l'objet plutôt qu'en son sein.
   const cutRunIdx = m.runAt[cutPos];
-  if (cutRunIdx !== undefined && m.formats[cutRunIdx]?.mathLatex) {
+  if (
+    cutRunIdx !== undefined &&
+    (m.formats[cutRunIdx]?.mathLatex || isImageFormatting(m.formats[cutRunIdx]!))
+  ) {
     let mathStart = cutPos;
     while (mathStart > 0 && m.runAt[mathStart - 1] === cutRunIdx) mathStart -= 1;
     if (mathStart > lineStart) {
@@ -648,6 +683,30 @@ function lineHeightOf(
   return { heightPx, ascentPx: ascent + (heightPx - natural) / 2 };
 }
 
+/** Aucun cadre : constante partagée pour éviter une allocation par paragraphe. */
+const EMPTY_EXCLUSIONS: readonly FlyExclusion[] = [];
+
+/**
+ * Nombre maximal de descentes successives sous des cadres bloquants.
+ *
+ * Garde-fou, pas une limite fonctionnelle : `nextClearY` progresse strictement,
+ * donc la boucle termine toujours. Elle borne le coût d'un document pathologique
+ * empilant des dizaines de cadres `surround: none` au même endroit.
+ */
+const MAX_FLY_DESCENTS = 64;
+
+/** Bande utile pour une ligne, ou la colonne entière en l'absence de cadre. */
+function resolveBand(
+  exclusions: readonly FlyExclusion[],
+  hasExclusions: boolean,
+  topPx: number,
+  heightPx: number,
+  contentWidthPx: number,
+): { leftPx: number; rightPx: number } | null {
+  if (!hasExclusions) return { leftPx: 0, rightPx: contentWidthPx };
+  return usableBand(exclusions, topPx, topPx + Math.max(1, heightPx), contentWidthPx);
+}
+
 /** Abscisse du bord gauche de la ligne, alignement appliqué. */
 function alignLine(
   alignment: Alignment,
@@ -696,20 +755,76 @@ export function layoutParagraph(
   let top = 0;
   let index = 0;
 
+  // Cadres flottants traversant ce paragraphe. Le cas courant — aucun — court-
+  // circuite tout le calcul de bande ci-dessous.
+  const exclusions = ctx.exclusions ?? EMPTY_EXCLUSIONS;
+  const hasExclusions = exclusions.length > 0;
+
   do {
     const isFirst = index === 0;
     const extraIndent = isFirst ? firstLineIndentPx : 0;
-    const available = Math.max(
-      1,
-      ctx.contentWidthPx - indentLeftPx - indentRightPx - extraIndent,
+
+    // Hauteur *probable* de la ligne, avant de savoir ce qu'elle contiendra :
+    // la bande utile dépend de l'extension verticale de la ligne, qui dépend de
+    // son contenu, qui dépend de la bande. Writer tranche la circularité de la
+    // même façon (`SwTxtFrm::FormatLine`) — on estime, on découpe, et on ne
+    // recommence qu'une fois si l'estimation s'est révélée trop basse.
+    let probeHeight = lineHeightOf(metrics, offset, Math.min(total, offset + 1), spacing).heightPx;
+    let band = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
+
+    // Aucune bande exploitable : la ligne descend sous le cadre qui la bloque.
+    let guard = 0;
+    while (band === null && guard < MAX_FLY_DESCENTS) {
+      const clear = nextClearY(exclusions, top, top + probeHeight);
+      if (clear === null || clear <= top) break;
+      top = clear;
+      band = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
+      guard += 1;
+    }
+
+    let bandLeftPx = band ? band.leftPx : 0;
+    let bandRightPx = band ? band.rightPx : ctx.contentWidthPx;
+
+    let lineLeftPx = Math.max(indentLeftPx, bandLeftPx);
+    let lineRightPx = Math.min(ctx.contentWidthPx - indentRightPx, bandRightPx);
+    let available = Math.max(1, lineRightPx - lineLeftPx - extraIndent);
+
+    let broken = breakLine(metrics, offset, available, tabStopPx);
+    let measured = lineHeightOf(
+      metrics,
+      offset,
+      Math.max(offset + 1, broken.endOffset),
+      spacing,
     );
 
-    const { endOffset, nextOffset } = breakLine(metrics, offset, available, tabStopPx);
+    // La ligne s'est révélée plus haute que l'estimation — une image en ligne,
+    // une formule — et croise donc peut-être un cadre que la bande ignorait.
+    // Une seule reprise suffit : la seconde estimation, elle, est exacte.
+    if (hasExclusions && measured.heightPx > probeHeight) {
+      probeHeight = measured.heightPx;
+      const retry = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
+      if (retry && (retry.leftPx !== bandLeftPx || retry.rightPx !== bandRightPx)) {
+        bandLeftPx = retry.leftPx;
+        bandRightPx = retry.rightPx;
+        lineLeftPx = Math.max(indentLeftPx, bandLeftPx);
+        lineRightPx = Math.min(ctx.contentWidthPx - indentRightPx, bandRightPx);
+        available = Math.max(1, lineRightPx - lineLeftPx - extraIndent);
+        broken = breakLine(metrics, offset, available, tabStopPx);
+        measured = lineHeightOf(
+          metrics,
+          offset,
+          Math.max(offset + 1, broken.endOffset),
+          spacing,
+        );
+      }
+    }
+
+    const { endOffset, nextOffset } = broken;
     const isLast = nextOffset >= total;
 
     const { segments, widthPx } = buildSegments(metrics, offset, endOffset, 0, tabStopPx);
-    const { heightPx, ascentPx } = lineHeightOf(metrics, offset, Math.max(offset + 1, endOffset), spacing);
-    const leftPx = alignLine(alignment, widthPx, available, indentLeftPx, extraIndent);
+    const { heightPx, ascentPx } = measured;
+    const leftPx = alignLine(alignment, widthPx, available, lineLeftPx, extraIndent);
 
     // Justification : l'espace en trop se répartit sur les blancs de la ligne.
     // La dernière ligne d'un paragraphe en est exclue, sinon un mot esseulé se

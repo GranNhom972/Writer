@@ -11,13 +11,16 @@
 import { A4_PORTRAIT } from './pageSetup';
 import { makeRun, runsText } from './runs';
 import {
+  isParagraph,
   isTable,
+  isToc,
   type DocumentBlock,
   type DocumentDefaults,
   type HeadingLevel,
   type ParagraphNode,
   type TableCellNode,
   type TableNode,
+  type TableRowNode,
   type WriterDocumentState,
 } from './types';
 
@@ -114,11 +117,17 @@ export function paragraphIndex(doc: WriterDocumentState): {
   const byId = new Map<string, ParagraphLocation>();
 
   doc.blocks.forEach((block, blockIndex) => {
-    if (!isTable(block)) {
+    // Un sommaire n'entre pas dans l'index : ses lignes n'existent qu'à la
+    // pagination, et un curseur ne doit pas pouvoir s'y poser — comme dans
+    // Writer, où le contenu d'un `SwTOXBase` est protégé en écriture.
+    if (isToc(block)) return;
+
+    if (isParagraph(block)) {
       order.push(block.id);
       byId.set(block.id, { paragraph: block, blockIndex });
       return;
     }
+    if (!isTable(block)) return;
     block.rows.forEach((row, rowIndex) => {
       row.cells.forEach((cell, cellIndex) => {
         cell.blocks.forEach((inner, innerIndex) => {
@@ -327,4 +336,470 @@ export function insertBlockAfter(
   const blocks = [...doc.blocks];
   blocks.splice(at, 0, block);
   return touch({ ...doc, blocks });
+}
+
+/**
+ * Insère une ligne dans un tableau, au-dessus ou au-dessous de `rowIndex`.
+ * Transposition de `SwDoc::InsertRow`.
+ */
+export function insertTableRow(
+  doc: WriterDocumentState,
+  tableId: string,
+  rowIndex: number,
+  position: 'above' | 'below',
+): WriterDocumentState {
+  const blocks = doc.blocks.map((block): DocumentBlock => {
+    if (!isTable(block) || block.id !== tableId) return block;
+    const targetRow = block.rows[rowIndex] ?? block.rows[0];
+    if (!targetRow) return block;
+
+    const colCount = Math.max(1, targetRow.cells.length);
+    const newCells: TableCellNode[] = targetRow.cells.map((cell) => ({
+      id: newId('tc'),
+      blocks: [createParagraph('')],
+      widthPercent: cell.widthPercent ?? 100 / colCount,
+      ...(cell.paddingPt !== undefined ? { paddingPt: cell.paddingPt } : {}),
+      ...(cell.borderColor !== undefined ? { borderColor: cell.borderColor } : {}),
+    }));
+
+    const newRow: TableRowNode = {
+      id: newId('tr'),
+      cells: newCells,
+    };
+
+    const insertIndex = position === 'above' ? Math.max(0, rowIndex) : rowIndex + 1;
+    const rows = [...block.rows];
+    rows.splice(insertIndex, 0, newRow);
+    return { ...block, rows };
+  });
+
+  return touch({ ...doc, blocks });
+}
+
+/**
+ * Supprime une ligne d'un tableau.
+ * Transposition de `SwDoc::DeleteRow`.
+ */
+export function deleteTableRow(
+  doc: WriterDocumentState,
+  tableId: string,
+  rowIndex: number,
+): WriterDocumentState {
+  let tableRemoved = false;
+  const blocks: DocumentBlock[] = [];
+
+  for (const block of doc.blocks) {
+    if (!isTable(block) || block.id !== tableId) {
+      blocks.push(block);
+      continue;
+    }
+    if (block.rows.length <= 1) {
+      tableRemoved = true;
+      continue;
+    }
+    const rows = block.rows.filter((_, idx) => idx !== rowIndex);
+    blocks.push({ ...block, rows });
+  }
+
+  if (tableRemoved && !blocks.some((b) => !isTable(b))) {
+    blocks.push(createParagraph(''));
+  }
+
+  return touch({ ...doc, blocks });
+}
+
+/**
+ * Insère une colonne dans un tableau, à gauche ou à droite de `colIndex`.
+ * Transposition de `SwDoc::InsertCol`.
+ */
+export function insertTableColumn(
+  doc: WriterDocumentState,
+  tableId: string,
+  colIndex: number,
+  position: 'left' | 'right',
+): WriterDocumentState {
+  const blocks = doc.blocks.map((block): DocumentBlock => {
+    if (!isTable(block) || block.id !== tableId) return block;
+    if (block.rows.length === 0) return block;
+
+    const oldCols = Math.max(1, block.rows[0]?.cells.length ?? 1);
+    const newCols = oldCols + 1;
+    const newWidthPercent = 100 / newCols;
+
+    const rows = block.rows.map((row) => {
+      const insertAt = position === 'left' ? Math.max(0, colIndex) : colIndex + 1;
+      const newCell: TableCellNode = {
+        id: newId('tc'),
+        blocks: [createParagraph('')],
+        widthPercent: newWidthPercent,
+      };
+      const cells = [...row.cells];
+      cells.splice(insertAt, 0, newCell);
+      return {
+        ...row,
+        cells: cells.map((c) => ({ ...c, widthPercent: newWidthPercent })),
+      };
+    });
+
+    return { ...block, rows };
+  });
+
+  return touch({ ...doc, blocks });
+}
+
+/**
+ * Supprime une colonne d'un tableau.
+ * Transposition de `SwDoc::DeleteCol`.
+ */
+export function deleteTableColumn(
+  doc: WriterDocumentState,
+  tableId: string,
+  colIndex: number,
+): WriterDocumentState {
+  let tableRemoved = false;
+  const blocks: DocumentBlock[] = [];
+
+  for (const block of doc.blocks) {
+    if (!isTable(block) || block.id !== tableId) {
+      blocks.push(block);
+      continue;
+    }
+    const firstRow = block.rows[0];
+    if (!firstRow || firstRow.cells.length <= 1) {
+      tableRemoved = true;
+      continue;
+    }
+
+    const newCols = firstRow.cells.length - 1;
+    const newWidthPercent = 100 / newCols;
+
+    const rows = block.rows.map((row) => {
+      const cells = row.cells.filter((_, idx) => idx !== colIndex);
+      return {
+        ...row,
+        cells: cells.map((c) => ({ ...c, widthPercent: newWidthPercent })),
+      };
+    });
+
+    blocks.push({ ...block, rows });
+  }
+
+  if (tableRemoved && !blocks.some((b) => !isTable(b))) {
+    blocks.push(createParagraph(''));
+  }
+
+  return touch({ ...doc, blocks });
+}
+
+/* ------------------------------------------------- fusion et scission de cellules */
+
+/**
+ * Rectangle de cellules, exprimé en indices de ligne et de colonne.
+ *
+ * Les colonnes sont comptées en **colonnes de grille** et non en positions dans
+ * `row.cells` : ces deux repères divergent dès qu'une fusion a eu lieu, et
+ * confondre les deux est la source d'erreur classique de tout code de tableau.
+ */
+export interface CellRect {
+  fromRow: number;
+  toRow: number;
+  fromCol: number;
+  toCol: number;
+}
+
+/**
+ * Colonne de grille où commence chaque cellule d'une ligne.
+ *
+ * ## L'invariant de grille, et pourquoi il tient
+ *
+ * Une fusion **conserve** les cellules absorbées sous forme de porteuses du
+ * drapeau `covered` (cf. `mergeTableCells`, transposition de `SwDoc::MergeTbl`).
+ * Chaque cellule du tableau — recouverte ou non — occupe donc exactement une
+ * colonne de grille, et `row.cells[i]` est la colonne `i`.
+ *
+ * `colSpan` ne sert alors qu'à la **largeur** peinte, jamais à l'arithmétique
+ * de grille. Compter les `colSpan` ici doublerait chaque colonne fusionnée :
+ * une fois pour la maîtresse, une fois pour sa porteuse.
+ *
+ * La fonction existe malgré sa simplicité parce que c'est le seul endroit où
+ * cet invariant est énoncé : tout code de tableau qui a besoin d'une colonne
+ * passe par elle, et la lit du même coup.
+ */
+export function gridColumnsOf(row: TableRowNode): number[] {
+  return row.cells.map((_, index) => index);
+}
+
+/** Nombre de colonnes de grille du tableau — la plus large de ses lignes. */
+export function tableColumnCount(table: TableNode): number {
+  let max = 0;
+  for (const row of table.rows) max = Math.max(max, row.cells.length);
+  return max;
+}
+
+/**
+ * Index dans `row.cells` de la cellule occupant une colonne de grille donnée.
+ *
+ * Identité, par l'invariant de `gridColumnsOf` — la fonction nomme l'intention
+ * plutôt que de laisser un `row.cells[column]` nu dont rien ne dirait pourquoi
+ * il est correct.
+ */
+function cellIndexAtColumn(row: TableRowNode, column: number): number {
+  return column >= 0 && column < row.cells.length ? column : -1;
+}
+
+/**
+ * Fusionne un rectangle de cellules. Transposition de `SwDoc::MergeTbl`
+ * (`sw/source/core/doc/tblrwcl.cxx`).
+ *
+ * Writer ne **supprime** pas les cellules absorbées : il les marque
+ * « recouvertes » (`SwTableBox` de `RowSpan` négatif, swtable.hxx:475) et les
+ * conserve dans leur ligne. La grille reste ainsi rectangulaire, ce dont
+ * dépendent la navigation au curseur, l'insertion ultérieure d'une colonne et
+ * la scission. On transpose ce choix avec le drapeau `covered`.
+ *
+ * Le contenu des cellules absorbées est **concaténé** dans la cellule maîtresse,
+ * comme le fait `SwDoc::MergeTbl` : fusionner ne doit jamais perdre du texte.
+ */
+export function mergeTableCells(
+  doc: WriterDocumentState,
+  tableId: string,
+  rect: CellRect,
+): WriterDocumentState {
+  const fromRow = Math.max(0, Math.min(rect.fromRow, rect.toRow));
+  const toRow = Math.max(rect.fromRow, rect.toRow);
+  const fromCol = Math.max(0, Math.min(rect.fromCol, rect.toCol));
+  const toCol = Math.max(rect.fromCol, rect.toCol);
+
+  // Un rectangle d'une seule cellule n'a rien à fusionner.
+  if (fromRow === toRow && fromCol === toCol) return doc;
+
+  let changed = false;
+
+  const blocks = doc.blocks.map((block): DocumentBlock => {
+    if (!isTable(block) || block.id !== tableId) return block;
+    if (fromRow >= block.rows.length) return block;
+
+    const lastRow = Math.min(toRow, block.rows.length - 1);
+    const masterRow = block.rows[fromRow];
+    if (!masterRow) return block;
+
+    const masterIndex = cellIndexAtColumn(masterRow, fromCol);
+    if (masterIndex < 0) return block;
+
+    // Contenu absorbé, dans l'ordre de lecture : ligne par ligne, colonne par
+    // colonne. Les paragraphes vides sont écartés — une fusion de six cellules
+    // vides ne doit pas produire six lignes blanches.
+    const absorbed: ParagraphNode[] = [];
+    for (let r = fromRow; r <= lastRow; r += 1) {
+      const row = block.rows[r];
+      if (!row) continue;
+      const starts = gridColumnsOf(row);
+      row.cells.forEach((cell, index) => {
+        const start = starts[index] ?? 0;
+        if (start < fromCol || start > toCol) return;
+        if (r === fromRow && index === masterIndex) return;
+        if (cell.covered) return;
+        for (const paragraph of cell.blocks) {
+          if (runsText(paragraph.runs).trim().length > 0) absorbed.push(paragraph);
+        }
+      });
+    }
+
+    const rows = block.rows.map((row, r) => {
+      if (r < fromRow || r > lastRow) return row;
+      const starts = gridColumnsOf(row);
+
+      const cells = row.cells.map((cell, index) => {
+        const start = starts[index] ?? 0;
+        if (start < fromCol || start > toCol) return cell;
+
+        if (r === fromRow && index === masterIndex) {
+          changed = true;
+          const merged: TableCellNode = {
+            ...cell,
+            colSpan: toCol - fromCol + 1,
+            rowSpan: lastRow - fromRow + 1,
+            blocks: [...cell.blocks, ...absorbed],
+          };
+          delete merged.covered;
+          return merged;
+        }
+
+        changed = true;
+        // La cellule recouverte garde son identité et un paragraphe vide : le
+        // curseur ne s'y rendra plus, mais une scission ultérieure la retrouve.
+        const covered: TableCellNode = {
+          ...cell,
+          covered: true,
+          blocks: [createParagraph('')],
+        };
+        delete covered.colSpan;
+        delete covered.rowSpan;
+        return covered;
+      });
+
+      return { ...row, cells };
+    });
+
+    return { ...block, rows };
+  });
+
+  return changed ? touch({ ...doc, blocks }) : doc;
+}
+
+/**
+ * Scinde une cellule fusionnée, ou une cellule simple, en `count` parts.
+ * Transposition de `SwDoc::SplitTbl` (`tblrwcl.cxx`).
+ *
+ * Scinder une cellule **fusionnée** revient à rendre leur autonomie aux
+ * cellules recouvertes : aucune cellule n'est créée, on retire seulement le
+ * drapeau. Scinder une cellule **simple** en demande de nouvelles.
+ *
+ * Le contenu reste dans la première part, comme dans Writer : le répartir
+ * demanderait de deviner où l'utilisateur voulait couper.
+ */
+export function splitTableCell(
+  doc: WriterDocumentState,
+  tableId: string,
+  rowIndex: number,
+  cellIndex: number,
+  direction: 'horizontal' | 'vertical',
+  count = 2,
+): WriterDocumentState {
+  const parts = Math.max(2, Math.floor(count));
+  let changed = false;
+
+  const blocks = doc.blocks.map((block): DocumentBlock => {
+    if (!isTable(block) || block.id !== tableId) return block;
+
+    const row = block.rows[rowIndex];
+    const cell = row?.cells[cellIndex];
+    if (!row || !cell) return block;
+
+    const colSpan = Math.max(1, cell.colSpan ?? 1);
+    const rowSpan = Math.max(1, cell.rowSpan ?? 1);
+    const isMerged = colSpan > 1 || rowSpan > 1;
+
+    if (isMerged) {
+      changed = true;
+      const startColumn = gridColumnsOf(row)[cellIndex] ?? 0;
+      const endColumn = startColumn + colSpan - 1;
+      const lastRow = Math.min(rowIndex + rowSpan - 1, block.rows.length - 1);
+
+      const rows = block.rows.map((current, r) => {
+        if (r < rowIndex || r > lastRow) return current;
+        const starts = gridColumnsOf(current);
+        const cells = current.cells.map((candidate, index) => {
+          if (r === rowIndex && index === cellIndex) {
+            const restored: TableCellNode = { ...candidate };
+            delete restored.colSpan;
+            delete restored.rowSpan;
+            return restored;
+          }
+          const start = starts[index] ?? 0;
+          if (start < startColumn || start > endColumn) return candidate;
+          if (!candidate.covered) return candidate;
+          const freed: TableCellNode = { ...candidate };
+          delete freed.covered;
+          return freed;
+        });
+        return { ...current, cells };
+      });
+
+      return { ...block, rows };
+    }
+
+    changed = true;
+
+    if (direction === 'horizontal') {
+      // Scission verticale du trait : la largeur de la cellule se partage entre
+      // les parts, les autres colonnes ne bougent pas.
+      const shareWidth = (cell.widthPercent ?? 100 / Math.max(1, row.cells.length)) / parts;
+      const rows = block.rows.map((current, r) => {
+        if (r !== rowIndex) {
+          // Les autres lignes gagnent autant de colonnes que la scission en
+          // crée. Elles reçoivent des **porteuses recouvertes** et non un
+          // `colSpan` étendu : sans elles, `row.cells[i]` cesserait d'être la
+          // colonne `i`, et tout le calcul de grille tomberait (cf.
+          // `gridColumnsOf`).
+          const target = current.cells[cellIndex];
+          if (!target) return current;
+
+          const porteuses: TableCellNode[] = Array.from({ length: parts - 1 }, () => ({
+            id: newId('tc'),
+            blocks: [createParagraph('')],
+            covered: true,
+          }));
+
+          const cells = current.cells.map((candidate, index) =>
+            index === cellIndex
+              ? { ...candidate, colSpan: Math.max(1, candidate.colSpan ?? 1) + parts - 1 }
+              : candidate,
+          );
+          cells.splice(cellIndex + 1, 0, ...porteuses);
+          return { ...current, cells };
+        }
+
+        const replacements: TableCellNode[] = [{ ...cell, widthPercent: shareWidth }];
+        for (let i = 1; i < parts; i += 1) {
+          replacements.push({
+            id: newId('tc'),
+            blocks: [createParagraph('')],
+            widthPercent: shareWidth,
+            ...(cell.paddingPt !== undefined ? { paddingPt: cell.paddingPt } : {}),
+            ...(cell.borderColor !== undefined ? { borderColor: cell.borderColor } : {}),
+          });
+        }
+
+        const cells = [...current.cells];
+        cells.splice(cellIndex, 1, ...replacements);
+        return { ...current, cells };
+      });
+
+      return { ...block, rows };
+    }
+
+    // Scission horizontale du trait : de nouvelles lignes s'intercalent, et
+    // toutes les autres cellules de la ligne d'origine s'étendent vers le bas
+    // pour ne pas laisser de trous.
+    const newRows: TableRowNode[] = [];
+    for (let i = 1; i < parts; i += 1) {
+      newRows.push({
+        id: newId('tr'),
+        cells: row.cells.map((candidate, index) => {
+          if (index === cellIndex) {
+            return {
+              id: newId('tc'),
+              blocks: [createParagraph('')],
+              ...(candidate.widthPercent !== undefined
+                ? { widthPercent: candidate.widthPercent }
+                : {}),
+              ...(candidate.paddingPt !== undefined ? { paddingPt: candidate.paddingPt } : {}),
+            };
+          }
+          return {
+            id: newId('tc'),
+            blocks: [createParagraph('')],
+            covered: true,
+            ...(candidate.widthPercent !== undefined
+              ? { widthPercent: candidate.widthPercent }
+              : {}),
+          };
+        }),
+      });
+    }
+
+    const rows = block.rows.map((current, r) => {
+      if (r !== rowIndex) return current;
+      const cells = current.cells.map((candidate, index) =>
+        index === cellIndex ? candidate : { ...candidate, rowSpan: parts },
+      );
+      return { ...current, cells };
+    });
+    rows.splice(rowIndex + 1, 0, ...newRows);
+
+    return { ...block, rows };
+  });
+
+  return changed ? touch({ ...doc, blocks }) : doc;
 }

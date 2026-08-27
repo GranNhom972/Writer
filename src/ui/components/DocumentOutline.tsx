@@ -48,6 +48,10 @@ export function DocumentOutline({
 
   return (
     <aside
+      // La classe n'est pas décorative : c'est par elle que la feuille
+      // `@media print` masque le plan. Sans elle, le panneau s'imprimait et
+      // décalait les pages A4 hors de la feuille.
+      className="document-outline"
       aria-label="Plan du document"
       style={{
         width: 260,

@@ -14,6 +14,9 @@
 
 import type {
   Alignment,
+  FlyAnchor,
+  FlySurround,
+  ListKind,
   ParagraphNode,
   RunFormatting,
   TableCellNode,
@@ -45,6 +48,25 @@ export type CellAttributes = Partial<
   Pick<TableCellNode, 'backgroundColor' | 'borderColor' | 'paddingPt'>
 >;
 
+/**
+ * Propriétés graphiques d'un cadre. Une seule est portée : `fo:clip`, le
+ * rognage — les autres (habillage, position flottante) supposent un cadre hors
+ * flux, que l'ancrage « comme caractère » n'a pas.
+ */
+export interface GraphicAttributes {
+  /** `fo:clip="rect(haut droite bas gauche)"`, tel quel. */
+  clip?: string;
+  /** `style:wrap` — mode d'habillage d'un cadre flottant (`SwFmtSurround`). */
+  surround?: FlySurround;
+  /** `fo:margin-left` du cadre : la marge d'habillage, en points. */
+  wrapMarginPt?: number;
+}
+
+export interface ColumnAttributes {
+  widthPt?: number;
+  relWidth?: number;
+}
+
 export interface OdfStyle {
   name: string;
   family: string;
@@ -52,11 +74,39 @@ export interface OdfStyle {
   text: RunFormatting;
   paragraph: ParagraphAttributes;
   cell: CellAttributes;
+  graphic: GraphicAttributes;
+  column: ColumnAttributes;
 }
 
 export type StyleTable = Map<string, OdfStyle>;
 
 /* ------------------------------------------------------------------ lecture */
+
+/**
+ * `style:wrap` d'ODF vers `SwSurround`.
+ *
+ * `dynamic` et `biggest` sont les deux formes du « côté le plus large » de
+ * Writer (`SURROUND_IDEAL`) : le modèle les ramène à `parallel`, dont c'est
+ * exactement le comportement quand les deux côtés sont libres.
+ */
+function readSurround(value: string | null): FlySurround | null {
+  switch (value) {
+    case 'none':
+      return 'none';
+    case 'run-through':
+      return 'through';
+    case 'parallel':
+    case 'dynamic':
+    case 'biggest':
+      return 'parallel';
+    case 'left':
+      return 'left';
+    case 'right':
+      return 'right';
+    default:
+      return null;
+  }
+}
 
 /** `fo:text-align` d'ODF vers l'alignement du modèle. */
 function readAlignment(value: string | null): Alignment | null {
@@ -203,6 +253,8 @@ export function collectStyles(root: Element | Document): StyleTable {
       text: {},
       paragraph: {},
       cell: {},
+      graphic: {},
+      column: {},
     };
 
     for (let c = 0; c < element.children.length; c += 1) {
@@ -213,6 +265,23 @@ export function collectStyles(root: Element | Document): StyleTable {
         Object.assign(style.paragraph, readParagraphProperties(child));
       } else if (kind === 'table-cell-properties') {
         Object.assign(style.cell, readCellProperties(child));
+      } else if (kind === 'graphic-properties') {
+        const clip = attr(child, NS.fo, 'clip');
+        if (clip) style.graphic.clip = clip;
+
+        const wrap = readSurround(attr(child, NS.style, 'wrap'));
+        if (wrap) style.graphic.surround = wrap;
+
+        const margin = parseLengthPt(attr(child, NS.fo, 'margin-left'));
+        if (margin !== null && margin >= 0) style.graphic.wrapMarginPt = margin;
+      } else if (kind === 'table-column-properties') {
+        const colWidth = parseLengthPt(attr(child, NS.style, 'column-width'));
+        if (colWidth !== null && colWidth > 0) style.column.widthPt = colWidth;
+        const relWidth = attr(child, NS.style, 'rel-column-width');
+        if (relWidth) {
+          const num = parseFloat(relWidth);
+          if (Number.isFinite(num) && num > 0) style.column.relWidth = num;
+        }
       }
     }
 
@@ -234,7 +303,13 @@ const MAX_STYLE_DEPTH = 16;
 export function resolveStyle(
   table: StyleTable,
   name: string | null | undefined,
-): { text: RunFormatting; paragraph: ParagraphAttributes; cell: CellAttributes } {
+): {
+  text: RunFormatting;
+  paragraph: ParagraphAttributes;
+  cell: CellAttributes;
+  graphic: GraphicAttributes;
+  column: ColumnAttributes;
+} {
   const chain: OdfStyle[] = [];
   let current = name ? table.get(name) : undefined;
   const seen = new Set<string>();
@@ -248,12 +323,16 @@ export function resolveStyle(
   const text: RunFormatting = {};
   const paragraph: ParagraphAttributes = {};
   const cell: CellAttributes = {};
+  const graphic: GraphicAttributes = {};
+  const column: ColumnAttributes = {};
   for (const style of chain) {
     Object.assign(text, style.text);
     Object.assign(paragraph, style.paragraph);
     Object.assign(cell, style.cell);
+    Object.assign(graphic, style.graphic);
+    Object.assign(column, style.column);
   }
-  return { text, paragraph, cell };
+  return { text, paragraph, cell, graphic, column };
 }
 
 /* ----------------------------------------------------------------- écriture */
@@ -265,12 +344,42 @@ export function resolveStyle(
  * déduplication, un document de mille mots en gras produirait mille styles, ce
  * que Writer refuse d'ouvrir passé un certain volume.
  */
+/** Profondeur déclarée dans un style de liste — `MAXLEVEL` de `swtypes.hxx`. */
+const MAX_ODF_LIST_LEVEL = 10;
+
+/** Puces par niveau, celles du style « List Bullet » de Writer. */
+const ODF_BULLETS = ['\u2022', '\u25E6', '\u25AA'] as const;
+
+/** Géométrie d'habillage à graver dans le style d'un cadre flottant. */
+export interface FrameFlyStyle {
+  anchor: FlyAnchor;
+  surround: FlySurround;
+  marginPt?: number;
+}
+
+/**
+ * `SwSurround` → `style:wrap` d'ODF.
+ *
+ * Les noms diffèrent sur deux valeurs et l'inversion est silencieuse : ODF dit
+ * `run-through` là où Writer dit `THROUGHT`, et `parallel` recouvre le
+ * `SURROUND_PARALLEL` du C++. Le reste se traduit mot pour mot.
+ */
+const ODF_WRAP: Record<FlySurround, string> = {
+  none: 'none',
+  through: 'run-through',
+  parallel: 'parallel',
+  left: 'left',
+  right: 'right',
+};
+
 export class AutomaticStyles {
   private readonly textStyles = new Map<string, string>();
   private readonly paragraphStyles = new Map<string, string>();
   private readonly tableStyles = new Map<string, string>();
   private readonly cellStyles = new Map<string, string>();
+  private readonly columnStyles = new Map<number, string>();
   private readonly declarations: string[] = [];
+  private readonly frameStyles = new Map<string, string>();
 
   /** Nom du style de texte pour ce formatage, ou `null` s'il est vide. */
   text(formatting: RunFormatting): string | null {
@@ -288,6 +397,100 @@ export class AutomaticStyles {
         `<style:text-properties ${key}/>` +
         `</style:style>`,
     );
+    return name;
+  }
+
+  /**
+   * Style du cadre d'une image ancrée « comme caractère ».
+   *
+   * Un seul suffit pour tout le document : la géométrie propre à chaque image
+   * est portée par `svg:width`/`svg:height` sur le cadre lui-même, et ce style
+   * ne dit que le reste — pas d'habillage (`run-through` sans `wrap`), aligné
+   * sur la ligne de base, sans bordure.
+   */
+  private readonly listStyles = new Map<ListKind, string>();
+
+  frame(clip?: string, fly?: FrameFlyStyle): string {
+    // Un style par valeur de rognage **et** par mode d'habillage : `fo:clip` et
+    // `style:wrap` sont tous deux portés par le style et non par le cadre, donc
+    // deux images qui en diffèrent ne peuvent pas partager le leur. Les images
+    // simples, elles, se partagent toujours `Fr1`.
+    const key = `${clip ?? ''}|${fly ? `${fly.anchor}:${fly.surround}:${fly.marginPt ?? ''}` : ''}`;
+    const existing = this.frameStyles.get(key);
+    if (existing) return existing;
+
+    const name = `Fr${this.frameStyles.size + 1}`;
+    this.frameStyles.set(key, name);
+
+    // Un cadre « comme caractère » s'aligne sur la ligne de base du texte ; un
+    // cadre flottant se positionne dans son ancre. Confondre les deux fait
+    // rouvrir le document avec les images empilées en haut de page.
+    const position = fly
+      ? `style:vertical-pos="from-top" style:vertical-rel="${fly.anchor === 'to-page' ? 'page-content' : 'paragraph'}" ` +
+        `style:horizontal-pos="from-left" style:horizontal-rel="${fly.anchor === 'to-page' ? 'page-content' : 'paragraph'}"`
+      : `style:vertical-pos="baseline" style:vertical-rel="baseline"`;
+
+    const wrap = `style:wrap="${fly ? ODF_WRAP[fly.surround] : 'none'}"`;
+    const margins =
+      fly && fly.marginPt !== undefined
+        ? ` fo:margin-left="${formatPt(fly.marginPt)}" fo:margin-right="${formatPt(fly.marginPt)}"` +
+          ` fo:margin-top="${formatPt(fly.marginPt)}" fo:margin-bottom="${formatPt(fly.marginPt)}"`
+        : '';
+
+    this.declarations.push(
+      `<style:style style:name="${name}" style:family="graphic">` +
+        `<style:graphic-properties ` +
+        `${position} ` +
+        `fo:padding="0cm" fo:border="none" ${wrap}` +
+        margins +
+        (clip ? ` fo:clip="${clip}"` : '') +
+        `/>` +
+        `</style:style>`,
+    );
+    return name;
+  }
+
+  /**
+   * Nom d'un style de liste, déclaré à la demande.
+   *
+   * ODF décrit une liste par un `<text:list-style>` portant **un élément par
+   * niveau** : c'est la seule chose qui distingue une puce d'un numéro, la
+   * balise `<text:list>` étant identique dans les deux cas. Sans ce style, une
+   * liste numérotée se rouvre en liste à puces.
+   *
+   * Un style par nature suffit — tous les niveaux d'une même liste partagent
+   * la sienne, comme dans le style « List Number » de Writer.
+   */
+  list(kind: ListKind): string {
+    const existing = this.listStyles.get(kind);
+    if (existing) return existing;
+
+    const name = `L${this.listStyles.size + 1}`;
+    this.listStyles.set(kind, name);
+
+    const niveaux: string[] = [];
+    for (let level = 1; level <= MAX_ODF_LIST_LEVEL; level += 1) {
+      // Le retrait croît d'un cran par niveau, comme `SwNumRule` par défaut.
+      const indent = `<style:list-level-properties text:space-before="${(level - 1) * 0.635}cm" text:min-label-width="0.635cm"/>`;
+
+      if (kind === 'ordered') {
+        niveaux.push(
+          `<text:list-level-style-number text:level="${level}" ` +
+            `style:num-suffix="." style:num-format="1">${indent}</text:list-level-style-number>`,
+        );
+      } else {
+        // Une liste de tâches s'exporte en puces : ODF 1.2 ne connaît pas la
+        // case à cocher, et une puce reste lisible partout. L'état coché
+        // voyage dans le texte du paragraphe.
+        const puce = ODF_BULLETS[(level - 1) % ODF_BULLETS.length];
+        niveaux.push(
+          `<text:list-level-style-bullet text:level="${level}" ` +
+            `text:bullet-char="${puce}">${indent}</text:list-level-style-bullet>`,
+        );
+      }
+    }
+
+    this.declarations.push(`<text:list-style style:name="${name}">${niveaux.join('')}</text:list-style>`);
     return name;
   }
 
@@ -354,6 +557,22 @@ export class AutomaticStyles {
     this.declarations.push(
       `<style:style style:name="${name}" style:family="table-cell">` +
         `<style:table-cell-properties ${properties}/>` +
+        `</style:style>`,
+    );
+    return name;
+  }
+
+  /** Style d'une colonne de tableau — largeur relative. */
+  column(relWidth: number): string {
+    const rounded = Math.round(relWidth * 100) / 100;
+    const existing = this.columnStyles.get(rounded);
+    if (existing) return existing;
+
+    const name = `Tc${this.columnStyles.size + 1}`;
+    this.columnStyles.set(rounded, name);
+    this.declarations.push(
+      `<style:style style:name="${name}" style:family="table-column">` +
+        `<style:table-column-properties style:rel-column-width="${Math.round(rounded * 655)}*"/>` +
         `</style:style>`,
     );
     return name;

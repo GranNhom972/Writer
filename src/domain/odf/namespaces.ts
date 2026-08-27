@@ -18,6 +18,17 @@ export const NS = {
   meta: 'urn:oasis:names:tc:opendocument:xmlns:meta:1.0',
   xlink: 'http://www.w3.org/1999/xlink',
   dc: 'http://purl.org/dc/elements/1.1/',
+  // `xml:id` sert d'identifiant de liste à ODF (`text:continue-list` le vise).
+  xml: 'http://www.w3.org/XML/1998/namespace',
+  /**
+   * Extensions LibreOffice.
+   *
+   * ODF 1.2 ne sait pas dire qu'un fil de commentaires est **clos** : la notion
+   * n'apparaît qu'en 1.3, et LibreOffice l'a d'abord portée ici. On écrit dans
+   * ce même espace de noms plutôt que d'inventer le nôtre — un lecteur tiers
+   * ignore un attribut inconnu, mais LibreOffice, lui, comprend celui-là.
+   */
+  loext: 'urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0',
   manifest: 'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0',
 } as const;
 
@@ -33,6 +44,7 @@ export const NS_DECLARATIONS = [
   `xmlns:meta="${NS.meta}"`,
   `xmlns:xlink="${NS.xlink}"`,
   `xmlns:dc="${NS.dc}"`,
+  `xmlns:loext="${NS.loext}"`,
 ].join(' ');
 
 /**
