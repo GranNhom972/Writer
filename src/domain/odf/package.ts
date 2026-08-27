@@ -15,7 +15,8 @@
  *     est compressée avant d'être écrite.
  */
 
-import { buildOdfPackage, ODT_MIMETYPE, type OdfPackageFiles } from './export';
+import { buildOdfPackage, ODT_MIMETYPE, type OdfPackage } from './export';
+import { isPicturePath, mediaTypeForPath, toDataUrl } from './pictures';
 import { importOdfContent, readOdfMetaTitle, type ImportResult } from './import';
 import type { WriterDocumentState } from '../document/types';
 
@@ -97,16 +98,23 @@ interface StagedEntry {
   uncompressedSize: number;
 }
 
-/** Écrit une archive `.odt` complète. */
-export async function writeOdt(files: OdfPackageFiles): Promise<Uint8Array> {
+/** Écrit une archive `.odt` complète, images comprises. */
+export async function writeOdt(pack: OdfPackage): Promise<Uint8Array> {
   const staged: StagedEntry[] = [];
+  const { files, pictures } = pack;
 
   // `mimetype` d'abord, non compressé : c'est ce qui rend le type détectable
   // sans dézipper.
-  staged.push(await stage('mimetype', files.mimetype, METHOD_STORE));
+  staged.push(await stage('mimetype', encoder.encode(files.mimetype), METHOD_STORE));
   for (const [name, content] of Object.entries(files)) {
     if (name === 'mimetype') continue;
-    staged.push(await stage(name, content, METHOD_DEFLATE));
+    staged.push(await stage(name, encoder.encode(content), METHOD_DEFLATE));
+  }
+
+  // PNG, JPEG, GIF et WebP sont **déjà** compressés : les repasser au deflate
+  // les alourdirait de l'en-tête du flux sans rien gagner. On les stocke tels quels.
+  for (const picture of pictures) {
+    staged.push(await stage(picture.path, picture.bytes, METHOD_STORE));
   }
 
   const locals: Uint8Array[] = [];
@@ -162,8 +170,7 @@ export async function writeOdt(files: OdfPackageFiles): Promise<Uint8Array> {
   return concat([...locals, ...centrals, end]);
 }
 
-async function stage(name: string, content: string, method: number): Promise<StagedEntry> {
-  const raw = encoder.encode(content);
+async function stage(name: string, raw: Uint8Array, method: number): Promise<StagedEntry> {
   const data = method === METHOD_DEFLATE ? await deflate(raw) : raw;
   return {
     name: encoder.encode(name),
@@ -193,13 +200,32 @@ function concat(parts: Uint8Array[]): Uint8Array {
  * quand un producteur a écrit ses tailles dans un descripteur différé.
  */
 export async function readOdtEntries(data: Uint8Array): Promise<Map<string, string>> {
+  return (await readOdtArchive(data)).texts;
+}
+
+/** Ce que porte une archive : ses fichiers XML, et ses images en `data:`. */
+export interface OdtArchive {
+  texts: Map<string, string>;
+  /** Chemin `Pictures/…` → `data:` complète, prête à poser dans un run. */
+  pictures: Map<string, string>;
+}
+
+/**
+ * Lit une archive `.odt` : entrées textuelles **et** images.
+ *
+ * Les images sont rendues en `data:` plutôt qu'en octets bruts parce que c'est
+ * la forme que porte le modèle hors ligne : le document rouvert est complet,
+ * sans dépendre d'un dépôt ni d'un réseau.
+ */
+export async function readOdtArchive(data: Uint8Array): Promise<OdtArchive> {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const endOffset = findEndOfCentralDirectory(view, data.length);
   if (endOffset < 0) throw new Error("Archive illisible : fin de répertoire central introuvable.");
 
   const count = view.getUint16(endOffset + 10, true);
   let cursor = view.getUint32(endOffset + 16, true);
-  const entries = new Map<string, string>();
+  const texts = new Map<string, string>();
+  const pictures = new Map<string, string>();
 
   for (let i = 0; i < count; i += 1) {
     if (cursor + 46 > data.length) break;
@@ -219,9 +245,8 @@ export async function readOdtEntries(data: Uint8Array): Promise<Map<string, stri
     if (uncompressedSize > MAX_ENTRY_BYTES) {
       throw new Error(`Entrée « ${name} » trop volumineuse : archive refusée.`);
     }
-    // Seuls les fichiers XML nous intéressent ; les images embarquées ne sont
-    // pas encore transcrites (cf. README).
-    if (!name.endsWith('.xml') && name !== 'mimetype') continue;
+    const estImage = isPicturePath(name);
+    if (!estImage && !name.endsWith('.xml') && name !== 'mimetype') continue;
 
     const localNameLength = view.getUint16(localOffset + 26, true);
     const localExtraLength = view.getUint16(localOffset + 28, true);
@@ -229,10 +254,13 @@ export async function readOdtEntries(data: Uint8Array): Promise<Map<string, stri
     const payload = data.subarray(start, start + compressedSize);
 
     const raw = method === METHOD_DEFLATE ? await inflate(payload) : payload;
-    entries.set(name, decoder.decode(raw));
+    // Une image n'est pas du texte : la décoder en UTF-8 la détruirait
+    // silencieusement, les octets invalides devenant U+FFFD.
+    if (estImage) pictures.set(name, toDataUrl(mediaTypeForPath(name), raw));
+    else texts.set(name, decoder.decode(raw));
   }
 
-  return entries;
+  return { texts, pictures };
 }
 
 function findEndOfCentralDirectory(view: DataView, length: number): number {
@@ -267,21 +295,22 @@ export async function openOdt(
   data: Uint8Array,
   options: { title?: string } = {},
 ): Promise<ImportResult> {
-  const entries = await readOdtEntries(data);
+  const { texts, pictures } = await readOdtArchive(data);
 
-  if (!isTextDocument(entries)) {
+  if (!isTextDocument(texts)) {
     throw new Error("Cette archive n'est pas un document texte OpenDocument.");
   }
 
-  const content = entries.get('content.xml');
+  const content = texts.get('content.xml');
   if (!content) throw new Error('Archive incomplète : `content.xml` absent.');
 
-  const stylesXml = entries.get('styles.xml');
-  const metaXml = entries.get('meta.xml');
+  const stylesXml = texts.get('styles.xml');
+  const metaXml = texts.get('meta.xml');
   const title = options.title ?? (metaXml ? readOdfMetaTitle(metaXml) : null);
 
   return importOdfContent(content, {
     ...(title !== null && title !== undefined ? { title } : {}),
     ...(stylesXml !== undefined ? { stylesXml } : {}),
+    pictures,
   });
 }

@@ -16,17 +16,67 @@
  */
 
 import { computeListMarkers } from '../document/lists';
+import { paragraphIndex } from '../document/document';
 import { pageGeometry, type PageGeometry } from '../document/pageSetup';
 import { ptToPx } from '../document/units';
-import { isTable, type ParagraphNode, type TableNode, type WriterDocumentState } from '../document/types';
+import {
+  isTable,
+  isToc,
+  type ParagraphNode,
+  type TableCellNode,
+  type TableNode,
+  type WriterDocumentState,
+} from '../document/types';
 import { layoutParagraph, type LayoutContext, type ParagraphLayout } from './lineBreak';
 import type { TextMeasurer } from './measure';
+import { expandToc } from './tox';
+import {
+  collectFlyFrames,
+  pageAnchoredExclusions,
+  paragraphExclusions,
+  type FlyFrame,
+} from './flyLayout';
 
 /** Valeurs par défaut du style « Standard » de Writer. */
 export const DEFAULT_ORPHANS = 2;
 export const DEFAULT_WIDOWS = 2;
 /** Marge intérieure d'une cellule quand elle n'en fixe pas (`SwTableBox`). */
 export const DEFAULT_CELL_PADDING_PT = 3;
+
+/* -- Zone de notes de bas de page (`SwFtnContFrm`) --------------------------
+ *
+ * Writer réduit la hauteur utile du corps de texte de la hauteur qu'occupent
+ * les notes appelées depuis cette page, filet de séparation compris
+ * (`SwFtnBossFrm::GetVarSpace`, ftnfrm.cxx). Sans cette réserve, les dernières
+ * lignes du corps se peindraient **sous** les notes.
+ */
+
+/** Corps d'une note : Writer descend de deux crans sous la taille du texte. */
+export const FOOTNOTE_FONT_SIZE_PT = 8;
+/** Interligne des notes, plus serrée que celle du corps. */
+export const FOOTNOTE_LINE_SPACING = 1.15;
+/** Filet de séparation et son air : hauteur fixe au-dessus de la première note. */
+export const FOOTNOTE_SEPARATOR_PX = 12;
+/** Air entre deux notes consécutives. */
+export const FOOTNOTE_GAP_PX = 2;
+
+export interface LaidOutFootnote {
+  index: number;
+  id: string;
+  text: string;
+  /** Hauteur réservée pour cette note, filet exclu. */
+  heightPx: number;
+}
+
+/** Un cadre flottant posé sur une page, prêt à peindre. */
+export interface LaidOutFly {
+  fly: FlyFrame;
+  /** Position sur la page, relative au haut de la zone de contenu. */
+  leftPx: number;
+  topPx: number;
+  widthPx: number;
+  heightPx: number;
+}
 
 export interface PlacedParagraph {
   kind: 'paragraph';
@@ -61,6 +111,12 @@ export interface PlacedCell {
   layouts: ParagraphLayout[];
   paragraphs: ParagraphNode[];
   paddingPx: number;
+  /** Colonnes couvertes par une fusion horizontale. */
+  colSpan?: number;
+  /** Lignes couvertes par une fusion verticale. */
+  rowSpan?: number;
+  /** Cellule absorbée par la fusion d'une voisine : ni mesurée, ni peinte. */
+  covered?: boolean;
 }
 
 export interface PlacedRow {
@@ -90,6 +146,12 @@ export interface LaidOutPage {
   blocks: PlacedBlock[];
   /** Hauteur réellement occupée — sert au banc d'essai de débordement. */
   usedHeightPx: number;
+  /** Notes de bas de page associées aux appels de notes placés sur cette page (SwFtnFrm). */
+  footnotes?: LaidOutFootnote[];
+  /** Hauteur totale réservée à la zone de notes, filet compris. */
+  footnoteAreaHeightPx?: number;
+  /** Cadres flottants à peindre sur cette page (`SwFlyFreeFrm`). */
+  flies?: LaidOutFly[];
 }
 
 export interface DocumentLayout {
@@ -99,6 +161,15 @@ export interface DocumentLayout {
   paragraphLayouts: Map<string, ParagraphLayout>;
   /** Où chaque paragraphe a été posé — un élément par page traversée. */
   placements: Map<string, { pageIndex: number; placed: PlacedParagraph }[]>;
+  /**
+   * Ligne de sommaire engendrée → identifiant du titre visé.
+   *
+   * Sans cette table, une ligne de table des matières ne serait qu'un
+   * paragraphe de texte : c'est elle qui la rend cliquable.
+   */
+  tocTargets: Map<string, string>;
+  /** Identifiants des paragraphes engendrés par un sommaire, donc non éditables. */
+  generatedBlockIds: Set<string>;
 }
 
 export interface PaginateOptions {
@@ -106,11 +177,23 @@ export interface PaginateOptions {
   tabStopPx?: number;
 }
 
-/** État de remplissage de la page courante. */
+/**
+ * État de remplissage de la page courante.
+ *
+ * Le compteur `y` avance avec le corps du texte ; `footnoteHeight` grandit par
+ * le bas à mesure que des appels de note sont posés. `remaining` est ce qui
+ * sépare les deux — c'est la transposition directe de `SwFtnBossFrm::GetVarSpace`
+ * (ftnfrm.cxx), où la hauteur disponible d'une page est sa hauteur utile moins
+ * celle qu'occupe déjà son conteneur de notes.
+ */
 class PageBuilder {
   readonly pages: LaidOutPage[] = [];
   private blocks: PlacedBlock[] = [];
   private y = 0;
+  private footnotes: LaidOutFootnote[] = [];
+  private footnoteIds = new Set<string>();
+  private footnoteHeight = 0;
+  private flies: LaidOutFly[] = [];
 
   constructor(private readonly contentHeightPx: number) {}
 
@@ -119,7 +202,7 @@ class PageBuilder {
   }
 
   get remaining(): number {
-    return this.contentHeightPx - this.y;
+    return this.contentHeightPx - this.y - this.footnoteHeight;
   }
 
   get isEmpty(): boolean {
@@ -131,15 +214,62 @@ class PageBuilder {
     this.y += heightPx;
   }
 
+  addFly(fly: LaidOutFly): void {
+    this.flies.push(fly);
+  }
+
+  /**
+   * Hauteur qu'ajouterait la prise en charge de ces notes, sans les prendre.
+   *
+   * Sert à la boucle de convergence de `placeParagraph` : retenir une ligne de
+   * plus peut faire descendre une note sur cette page, donc réduire la place
+   * disponible, donc retenir une ligne de moins.
+   */
+  peekFootnoteHeight(entries: readonly LaidOutFootnote[]): number {
+    let extra = 0;
+    let first = this.footnoteIds.size === 0;
+    for (const entry of entries) {
+      if (this.footnoteIds.has(entry.id)) continue;
+      if (first) {
+        extra += FOOTNOTE_SEPARATOR_PX;
+        first = false;
+      }
+      extra += entry.heightPx + FOOTNOTE_GAP_PX;
+    }
+    return extra;
+  }
+
+  /** Prend en charge ces notes sur la page courante (`SwFtnBossFrm::AppendFtn`). */
+  reserveFootnotes(entries: readonly LaidOutFootnote[]): void {
+    for (const entry of entries) {
+      if (this.footnoteIds.has(entry.id)) continue;
+      if (this.footnoteIds.size === 0) this.footnoteHeight += FOOTNOTE_SEPARATOR_PX;
+      this.footnoteIds.add(entry.id);
+      this.footnotes.push(entry);
+      this.footnoteHeight += entry.heightPx + FOOTNOTE_GAP_PX;
+    }
+  }
+
   /** Ferme la page courante et en ouvre une neuve. */
   break(): void {
-    this.pages.push({
+    const page: LaidOutPage = {
       index: this.pages.length,
       blocks: this.blocks,
       usedHeightPx: this.y,
-    });
+    };
+    if (this.footnotes.length > 0) {
+      page.footnotes = [...this.footnotes].sort((a, b) => a.index - b.index);
+      page.footnoteAreaHeightPx = this.footnoteHeight;
+    }
+    if (this.flies.length > 0) page.flies = this.flies;
+
+    this.pages.push(page);
     this.blocks = [];
     this.y = 0;
+    this.footnotes = [];
+    this.footnoteIds = new Set();
+    this.footnoteHeight = 0;
+    this.flies = [];
   }
 
   finish(): LaidOutPage[] {
@@ -153,10 +283,69 @@ class PageBuilder {
  *
  * Fonction pure : mêmes entrées, mêmes pages. C'est ce qui permet de la faire
  * tourner dans un Web Worker et de la tester sans navigateur.
+ *
+ * ## Deux passes, et pourquoi exactement deux
+ *
+ * Deux informations ne sont connues qu'**après** la mise en page, alors que la
+ * mise en page en dépend :
+ *
+ *   – le numéro de page d'un titre, dont une table des matières a besoin ;
+ *   – la page d'ancrage d'un cadre `to-page`, dont l'habillage a besoin.
+ *
+ * Writer résout la même circularité en régénérant puis en re-disposant
+ * (`SwDoc::UpdateTOX` suivi de `SwLayAction`). On fait de même, et la boucle
+ * s'arrête après deux passes **par construction** : ni le nombre de lignes d'un
+ * sommaire ni la géométrie d'un cadre ne dépendent des valeurs injectées. La
+ * seconde passe ne change donc que des chiffres, jamais des hauteurs — la
+ * troisième serait identique à la seconde.
+ *
+ * Un document sans sommaire ni cadre de page ne fait qu'une seule passe.
  */
 export function paginateDocument(
   doc: WriterDocumentState,
   options: PaginateOptions,
+): DocumentLayout {
+  const flies = collectFlyFrames(doc);
+  const hasPageFlies = flies.some((fly) => fly.anchor === 'to-page');
+  const hasToc = doc.blocks.some(isToc);
+
+  const first = layoutPass(doc, options, flies, new Map(), new Map());
+  if (!hasToc && !hasPageFlies) return first;
+
+  return layoutPass(doc, options, flies, headingPages(doc, first), anchorPages(first));
+}
+
+/** Page 1-indexée de chaque titre du flux principal, d'après une passe faite. */
+function headingPages(
+  doc: WriterDocumentState,
+  layout: DocumentLayout,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const block of doc.blocks) {
+    if (isTable(block) || isToc(block) || block.type !== 'heading') continue;
+    const placement = layout.placements.get(block.id)?.[0];
+    if (placement) out.set(block.id, placement.pageIndex + 1);
+  }
+  return out;
+}
+
+/** Page **0-indexée** portant l'ancre de chaque paragraphe. */
+function anchorPages(layout: DocumentLayout): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [blockId, entries] of layout.placements) {
+    const first = entries[0];
+    if (first) out.set(blockId, first.pageIndex);
+  }
+  return out;
+}
+
+/** Une passe complète de mise en page. */
+function layoutPass(
+  doc: WriterDocumentState,
+  options: PaginateOptions,
+  flies: readonly FlyFrame[],
+  headingPageNumbers: ReadonlyMap<string, number>,
+  flyAnchorPages: ReadonlyMap<string, number>,
 ): DocumentLayout {
   const geometry = pageGeometry(doc.pageSetup);
   const baseCtx: LayoutContext = {
@@ -173,11 +362,34 @@ export function paginateDocument(
 
   const paragraphLayouts = new Map<string, ParagraphLayout>();
   const placements = new Map<string, { pageIndex: number; placed: PlacedParagraph }[]>();
+  const tocTargets = new Map<string, string>();
+  const generatedBlockIds = new Set<string>();
   const builder = new PageBuilder(geometry.contentHeightPx);
+
+  const footnotes: FootnoteContext = {
+    refs: collectDocumentFootnotes(doc),
+    heights: new Map(),
+  };
+  footnotes.heights = measureFootnotes(footnotes.refs, options.measurer, doc, geometry);
 
   const layoutOf = (paragraph: ParagraphNode, ctx: LayoutContext): ParagraphLayout => {
     const marker = markers.get(paragraph.id);
-    return layoutParagraph(paragraph, marker ? { ...ctx, marker } : ctx);
+    const own = paragraphExclusions(flies, paragraph, ctx.contentWidthPx);
+    const fromPage = flyAnchorPages.size
+      ? pageAnchoredExclusions(
+          flies,
+          builder.pages.length,
+          flyAnchorPages,
+          builder.top,
+          ctx.contentWidthPx,
+        )
+      : [];
+    const exclusions = own.length + fromPage.length > 0 ? [...own, ...fromPage] : undefined;
+
+    let effective = ctx;
+    if (marker) effective = { ...effective, marker };
+    if (exclusions) effective = { ...effective, exclusions };
+    return layoutParagraph(paragraph, effective);
   };
 
   const record = (placed: PlacedParagraph): void => {
@@ -186,20 +398,215 @@ export function paginateDocument(
     placements.set(placed.blockId, list);
   };
 
-  for (const block of doc.blocks) {
+  // Un sommaire n'est pas un nœud de texte : il se développe en paragraphes
+  // concrets juste avant la mise en page, comme `SwDoc::UpdateTOX` peuple le
+  // `SwSection` d'un `SwTOXBase` avant que `SwLayAction` ne le dispose.
+  const stream = expandBlocks(doc, baseCtx, headingPageNumbers, tocTargets, generatedBlockIds);
+
+  for (const block of stream) {
     if (block.pageBreakBefore && !builder.isEmpty) builder.break();
 
     if (isTable(block)) {
-      placeTable(block, builder, baseCtx, geometry, paragraphLayouts, record, layoutOf);
+      placeTable(block, builder, baseCtx, geometry, paragraphLayouts, record, layoutOf, footnotes);
       continue;
     }
 
     const layout = layoutOf(block, baseCtx);
     paragraphLayouts.set(block.id, layout);
-    placeParagraph(block, layout, builder, geometry, record);
+    placeParagraph(block, layout, builder, geometry, record, footnotes);
   }
 
-  return { pages: builder.finish(), geometry, paragraphLayouts, placements };
+  const pages = builder.finish();
+
+  // Les cadres flottants se posent une fois les pages closes : leur page est
+  // celle de leur ancre, information qui n'existe qu'après placement.
+  attachFlies(pages, flies, placements, geometry);
+
+  return { pages, geometry, paragraphLayouts, placements, tocTargets, generatedBlockIds };
+}
+
+/**
+ * Développe les blocs de sommaire, laisse les autres intacts.
+ *
+ * Le document lui-même n'est pas modifié : la table des matières reste un
+ * `TocNode` compact dans l'AST, et seule la mise en page voit des paragraphes.
+ * C'est ce qui garantit qu'elle ne peut pas se désynchroniser du corps.
+ */
+function expandBlocks(
+  doc: WriterDocumentState,
+  ctx: LayoutContext,
+  headingPageNumbers: ReadonlyMap<string, number>,
+  tocTargets: Map<string, string>,
+  generatedBlockIds: Set<string>,
+): (ParagraphNode | TableNode)[] {
+  // Le type de retour exclut `TocNode` : après cette fonction, plus aucun bloc
+  // de sommaire ne subsiste, et le reste de la pagination n'a donc pas de cas
+  // supplémentaire à connaître.
+  if (!doc.blocks.some(isToc)) return doc.blocks as (ParagraphNode | TableNode)[];
+
+  const out: (ParagraphNode | TableNode)[] = [];
+  for (const block of doc.blocks) {
+    if (!isToc(block)) {
+      out.push(block);
+      continue;
+    }
+
+    const { paragraphs, targets } = expandToc(doc, block, headingPageNumbers, ctx);
+    for (const [lineId, targetId] of targets) tocTargets.set(lineId, targetId);
+
+    paragraphs.forEach((paragraph, index) => {
+      generatedBlockIds.add(paragraph.id);
+      // Le saut de page éventuel du sommaire est porté par sa première ligne :
+      // c'est elle qui ouvrira la nouvelle page.
+      out.push(index === 0 && block.pageBreakBefore ? { ...paragraph, pageBreakBefore: true } : paragraph);
+    });
+  }
+  return out;
+}
+
+/** Pose chaque cadre flottant sur la page de son ancre. */
+function attachFlies(
+  pages: LaidOutPage[],
+  flies: readonly FlyFrame[],
+  placements: ReadonlyMap<string, { pageIndex: number; placed: PlacedParagraph }[]>,
+  geometry: PageGeometry,
+): void {
+  if (flies.length === 0) return;
+
+  for (const fly of flies) {
+    const placement = placements.get(fly.anchorBlockId)?.[0];
+    if (!placement) continue;
+    const page = pages[placement.pageIndex];
+    if (!page) continue;
+
+    // Un cadre ancré au paragraphe se pose relativement à celui-ci ; un cadre
+    // ancré à la page se pose relativement au haut de la zone de contenu.
+    const topPx =
+      fly.anchor === 'to-para' ? placement.placed.topPx + fly.topPx : fly.topPx;
+
+    const laid: LaidOutFly = {
+      fly,
+      leftPx: Math.max(0, Math.min(fly.leftPx, geometry.contentWidthPx - fly.widthPx)),
+      topPx,
+      widthPx: fly.widthPx,
+      heightPx: fly.heightPx,
+    };
+    page.flies = page.flies ? [...page.flies, laid] : [laid];
+  }
+}
+
+/**
+ * Hauteur réservée par chaque note de bas de page.
+ *
+ * Une note est un paragraphe à part entière, disposé dans une colonne de la
+ * largeur de la page et dans un corps réduit (`SwFtnFrm` utilise le style
+ * « Footnote »). On la met donc en page pour de vrai plutôt que d'estimer : une
+ * note de trois lignes qu'on aurait comptée pour une déborderait de la feuille.
+ */
+function measureFootnotes(
+  refs: ReadonlyMap<string, FootnoteReference>,
+  measurer: TextMeasurer,
+  doc: WriterDocumentState,
+  geometry: PageGeometry,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  if (refs.size === 0) return out;
+
+  const ctx: LayoutContext = {
+    measurer,
+    defaults: { ...doc.defaults, fontSizePt: FOOTNOTE_FONT_SIZE_PT, lineSpacing: FOOTNOTE_LINE_SPACING },
+    contentWidthPx: geometry.contentWidthPx,
+  };
+
+  for (const ref of refs.values()) {
+    // Le numéro en exposant précède le texte et compte dans la largeur.
+    const paragraph: ParagraphNode = {
+      id: `__ftn_${ref.id}`,
+      type: 'paragraph',
+      runs: [{ text: `${ref.index}. ${ref.text}` }],
+      marginTopPt: 0,
+      marginBottomPt: 0,
+    };
+    out.set(ref.id, layoutParagraph(paragraph, ctx).contentHeightPx);
+  }
+
+  return out;
+}
+
+export interface FootnoteReference {
+  id: string;
+  index: number;
+  text: string;
+}
+
+/** Ce que la pagination doit savoir des notes : leur numéro et leur hauteur. */
+interface FootnoteContext {
+  refs: ReadonlyMap<string, FootnoteReference>;
+  heights: ReadonlyMap<string, number>;
+}
+
+/**
+ * Numérote les notes du document dans l'ordre de lecture.
+ *
+ * La numérotation est **globale et continue** (`FTNNUM_DOC`), le choix par
+ * défaut de Writer : elle ne dépend donc pas de la pagination, ce qui la rend
+ * stable d'une passe à l'autre. Une numérotation par page (`FTNNUM_PAGE`)
+ * imposerait au contraire de renuméroter après chaque changement de mise en
+ * page, et donc de re-paginer après avoir renuméroté.
+ */
+export function collectDocumentFootnotes(doc: WriterDocumentState): Map<string, FootnoteReference> {
+  const map = new Map<string, FootnoteReference>();
+  const { order, byId } = paragraphIndex(doc);
+  let counter = 1;
+  for (const id of order) {
+    const node = byId.get(id)?.paragraph;
+    if (!node) continue;
+    for (const run of node.runs) {
+      if (run.footnoteText && run.footnoteId && !map.has(run.footnoteId)) {
+        map.set(run.footnoteId, {
+          id: run.footnoteId,
+          index: counter,
+          text: run.footnoteText,
+        });
+        counter += 1;
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * Notes appelées par les lignes `[from, to)` d'un paragraphe.
+ *
+ * C'est la granularité qui compte : une note n'est due par une page que si
+ * **la ligne portant son appel** y a été posée. Compter le paragraphe entier
+ * réserverait sur la première page l'espace de notes appelées trois pages plus
+ * loin.
+ */
+function footnotesInLines(
+  layout: ParagraphLayout,
+  from: number,
+  to: number,
+  refs: ReadonlyMap<string, FootnoteReference>,
+  heights: ReadonlyMap<string, number>,
+): LaidOutFootnote[] {
+  const out: LaidOutFootnote[] = [];
+  const seen = new Set<string>();
+
+  for (let i = from; i < to; i += 1) {
+    const line = layout.lines[i];
+    if (!line) continue;
+    for (const segment of line.segments) {
+      const id = segment.formatting.footnoteId;
+      if (!id || seen.has(id)) continue;
+      const ref = refs.get(id);
+      if (!ref) continue;
+      seen.add(id);
+      out.push({ id: ref.id, index: ref.index, text: ref.text, heightPx: heights.get(id) ?? 0 });
+    }
+  }
+
+  return out;
 }
 
 /** Somme des hauteurs des lignes `[from, to)`. */
@@ -233,6 +640,7 @@ function placeParagraph(
   builder: PageBuilder,
   geometry: PageGeometry,
   record: (placed: PlacedParagraph) => void,
+  footnotes: FootnoteContext,
 ): void {
   const orphans = Math.max(0, paragraph.orphans ?? DEFAULT_ORPHANS);
   const widows = Math.max(0, paragraph.widows ?? DEFAULT_WIDOWS);
@@ -245,21 +653,25 @@ function placeParagraph(
     const marginTop = isContinuation ? 0 : layout.marginTopPx;
     const available = builder.remaining - marginTop;
 
-    // Tout le reste tient, marge basse comprise : cas nominal.
+    // Tout le reste tient, marge basse et notes appelées comprises.
     const restHeight = linesHeight(layout, cursor, totalLines);
-    if (available >= restHeight + layout.marginBottomPx) {
+    const restFootnotes = footnotesInLines(layout, cursor, totalLines, footnotes.refs, footnotes.heights);
+    const restFootnoteHeight = builder.peekFootnoteHeight(restFootnotes);
+
+    if (available >= restHeight + layout.marginBottomPx + restFootnoteHeight) {
       const placed = makePlaced(paragraph, layout, cursor, totalLines, builder.top, {
         marginTop,
         marginBottom: layout.marginBottomPx,
         isContinuation,
         continues: false,
       });
+      builder.reserveFootnotes(restFootnotes);
       record(placed);
       builder.push(placed, placed.heightPx);
       return;
     }
 
-    let fit = fittingLines(layout, cursor, Math.max(0, available));
+    let fit = fitWithFootnotes(layout, cursor, Math.max(0, available), builder, footnotes);
     const wouldRemain = totalLines - cursor - fit;
 
     // Veuves : trop peu de lignes partiraient sur la page suivante — on en
@@ -287,6 +699,9 @@ function placeParagraph(
       isContinuation,
       continues: true,
     });
+    builder.reserveFootnotes(
+      footnotesInLines(layout, cursor, cursor + fit, footnotes.refs, footnotes.heights),
+    );
     record(placed);
     builder.push(placed, placed.heightPx);
     builder.break();
@@ -309,6 +724,43 @@ function placeParagraph(
   }
 
   void geometry;
+}
+
+/**
+ * Nombre de lignes retenues, la place prise par leurs notes déduite.
+ *
+ * Le calcul est **circulaire** : retenir une ligne de plus peut faire descendre
+ * une note sur cette page, ce qui réduit la place disponible, ce qui peut
+ * obliger à retenir une ligne de moins. `SwTxtFrm::CalcFtnFlag` et
+ * `SwFtnBossFrm::MoveFtns` bouclent de la même façon.
+ *
+ * La suite converge : le nombre de lignes retenues décroît strictement à chaque
+ * tour, et il est borné par le bas par zéro. La garde compte donc des tours
+ * pour se protéger d'un cas pathologique, pas d'une divergence réelle.
+ */
+function fitWithFootnotes(
+  layout: ParagraphLayout,
+  from: number,
+  available: number,
+  builder: PageBuilder,
+  footnotes: FootnoteContext,
+): number {
+  let fit = fittingLines(layout, from, available);
+
+  if (footnotes.refs.size === 0) return fit;
+
+  for (let guard = 0; guard < 8 && fit > 0; guard += 1) {
+    const reserve = builder.peekFootnoteHeight(
+      footnotesInLines(layout, from, from + fit, footnotes.refs, footnotes.heights),
+    );
+    if (reserve === 0) return fit;
+
+    const next = fittingLines(layout, from, Math.max(0, available - reserve));
+    if (next >= fit) return next;
+    fit = next;
+  }
+
+  return fit;
 }
 
 function makePlaced(
@@ -357,6 +809,7 @@ function placeTable(
   paragraphLayouts: Map<string, ParagraphLayout>,
   record: (placed: PlacedParagraph) => void,
   layoutOf: (paragraph: ParagraphNode, ctx: LayoutContext) => ParagraphLayout,
+  footnotes: FootnoteContext,
 ): void {
   const measured = table.rows.map((row, rowIndex) =>
     measureRow(table, row.id, rowIndex, ctx, geometry, paragraphLayouts, layoutOf),
@@ -441,6 +894,20 @@ function placeTable(
       }
     }
 
+    // Une note appelée depuis une cellule est due par la page qui porte cette
+    // ligne de tableau, au même titre qu'une note appelée depuis le corps.
+    if (footnotes.refs.size > 0) {
+      for (const row of rows) {
+        for (const cell of row.cells) {
+          for (const layout of cell.layouts) {
+            builder.reserveFootnotes(
+              footnotesInLines(layout, 0, layout.lines.length, footnotes.refs, footnotes.heights),
+            );
+          }
+        }
+      }
+    }
+
     builder.push(placed, y);
     cursor += taken;
     isContinuation = true;
@@ -462,11 +929,40 @@ function measureRow(
   let left = 0;
   let height = 0;
 
-  const defaultPercent = 100 / Math.max(1, row.cells.length);
+  // La largeur par défaut se compte en **colonnes de grille** et non en nombre
+  // de cellules : après une fusion, une ligne peut n'avoir plus que deux
+  // cellules pour quatre colonnes, et diviser par deux les élargirait à tort.
+  const gridColumns = Math.max(1, gridWidthOf(row));
+  const defaultPercent = 100 / gridColumns;
 
   row.cells.forEach((cell, cellIndex) => {
+    const span = Math.max(1, cell.colSpan ?? 1);
+
+    // Cellule recouverte par une fusion (`SwTableBox` de RowSpan négatif) :
+    // elle garde sa place dans la grille mais n'est ni mesurée ni peinte.
+    if (cell.covered) {
+      cells.push({
+        cellId: cell.id,
+        rowIndex,
+        cellIndex,
+        leftPx: left,
+        widthPx: 0,
+        layouts: [],
+        paragraphs: [],
+        paddingPx: 0,
+        covered: true,
+      });
+      left += (geometry.contentWidthPx * defaultPercent * span) / 100;
+      return;
+    }
+
     const paddingPx = ptToPx(cell.paddingPt ?? DEFAULT_CELL_PADDING_PT);
-    const widthPx = (geometry.contentWidthPx * (cell.widthPercent ?? defaultPercent)) / 100;
+    // Une cellule fusionnée occupe la largeur de toutes les colonnes qu'elle
+    // couvre : c'est ce que rend `SwTableBox::GetFrmFmt()->GetFrmSize()` après
+    // un `MergeTbl`.
+    const percent = cell.widthPercent ?? defaultPercent * span;
+    const widthPx = (geometry.contentWidthPx * percent) / 100;
+
     const innerCtx: LayoutContext = {
       ...ctx,
       contentWidthPx: Math.max(1, widthPx - paddingPx * 2),
@@ -479,7 +975,12 @@ function measureRow(
     });
 
     const contentHeight = layouts.reduce((sum, layout) => sum + layout.heightPx, 0);
-    height = Math.max(height, contentHeight + paddingPx * 2);
+
+    // Une cellule fusionnée verticalement répartit sa hauteur sur les lignes
+    // qu'elle couvre : la lui imputer entière gonflerait la première ligne et
+    // laisserait les suivantes vides.
+    const rowSpan = Math.max(1, cell.rowSpan ?? 1);
+    height = Math.max(height, (contentHeight + paddingPx * 2) / rowSpan);
 
     cells.push({
       cellId: cell.id,
@@ -490,6 +991,8 @@ function measureRow(
       layouts,
       paragraphs: cell.blocks,
       paddingPx,
+      ...(span > 1 ? { colSpan: span } : {}),
+      ...(rowSpan > 1 ? { rowSpan } : {}),
     });
     left += widthPx;
   });
@@ -502,4 +1005,15 @@ function measureRow(
     cells,
     isHeader: row.isHeader === true,
   };
+}
+
+/**
+ * Nombre de colonnes de grille d'une ligne.
+ *
+ * Chaque cellule en occupe exactement une, recouvertes comprises : c'est
+ * l'invariant posé par `gridColumnsOf` (document.ts). Sommer les `colSpan`
+ * compterait deux fois chaque colonne fusionnée.
+ */
+function gridWidthOf(row: { cells: readonly TableCellNode[] }): number {
+  return row.cells.length;
 }

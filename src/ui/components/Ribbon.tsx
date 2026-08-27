@@ -50,13 +50,12 @@ const LISTS: readonly [ListKind, string, string, 'list-check' | 'list-bullet' | 
 export interface RibbonProps {
   controller: WriterController;
   onPrint: () => void;
-  onExportPdf?: () => void;
-  onOpenPrintPreview?: () => void;
   onOpenFindReplace: () => void;
   onToggleOutline: () => void;
   outlineOpen: boolean;
   onOpenPageSetup: () => void;
   onOpenMath?: () => void;
+  onOpenImage?: () => void;
   onOpenFurniture?: (band?: 'header' | 'footer') => void;
   linkButtonRef?: MutableRefObject<HTMLButtonElement | null>;
 }
@@ -64,13 +63,12 @@ export interface RibbonProps {
 export function Ribbon({
   controller,
   onPrint,
-  onExportPdf,
-  onOpenPrintPreview,
   onOpenFindReplace,
   onToggleOutline,
   outlineOpen,
   onOpenPageSetup,
   onOpenMath,
+  onOpenImage,
   onOpenFurniture,
   linkButtonRef,
 }: RibbonProps): JSX.Element {
@@ -110,25 +108,8 @@ export function Ribbon({
         >
           <Icon name="redo" />
         </ToggleButton>
-        {onExportPdf && (
-          <ToggleButton
-            label="Exporter au format PDF"
-            pressed={false}
-            onClick={onExportPdf}
-          >
-            <Icon name="export-pdf" />
-          </ToggleButton>
-        )}
-        {onOpenPrintPreview && (
-          <ToggleButton
-            label="Aperçu avant impression"
-            shortcut={shortcutLabel('Mod-Shift-o')}
-            pressed={false}
-            onClick={onOpenPrintPreview}
-          >
-            <Icon name="page-preview" />
-          </ToggleButton>
-        )}
+        {/* L'export PDF reste au menu Fichier : une icône de plus dans le ruban
+            ne le rendait pas plus accessible, seulement plus chargé. */}
         <ToggleButton label="Imprimer" shortcut={shortcutLabel('Mod-p')} pressed={false} onClick={onPrint}>
           <Icon name="print" />
         </ToggleButton>
@@ -340,6 +321,17 @@ export function Ribbon({
         <TableSizePicker label="Insérer un tableau" onInsert={commands.insertTable}>
           <Icon name="table" />
         </TableSizePicker>
+
+        {onOpenImage && (
+          <ToggleButton
+            label="Insérer une image"
+            shortcut={shortcutLabel('Mod-Shift-i')}
+            pressed={false}
+            onClick={onOpenImage}
+          >
+            <Icon name="image" />
+          </ToggleButton>
+        )}
 
         {onOpenMath && (
           <ToggleButton

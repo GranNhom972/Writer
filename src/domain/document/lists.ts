@@ -11,7 +11,14 @@
  * faudrait renuméroter toute la suite à chaque frappe.
  */
 
-import { isTable, MAX_LIST_LEVEL, type ListKind, type ParagraphNode, type WriterDocumentState } from './types';
+import {
+  isParagraph,
+  isTable,
+  MAX_LIST_LEVEL,
+  type ListKind,
+  type ParagraphNode,
+  type WriterDocumentState,
+} from './types';
 
 /**
  * Retrait par niveau, en points.
@@ -163,10 +170,13 @@ export function computeListMarkers(doc: WriterDocumentState): Map<string, ListMa
   };
 
   for (const block of doc.blocks) {
-    if (!isTable(block)) {
+    // Un sommaire n'a pas de numérotation propre : ses lignes sont engendrées à
+    // la pagination et n'entrent donc pas dans le compteur de listes.
+    if (isParagraph(block)) {
       visit(block);
       continue;
     }
+    if (!isTable(block)) continue;
     // Chaque cellule est un conteneur à part : une liste n'y continue pas celle
     // du corps du document, et deux cellules ne partagent pas de compteur.
     for (const row of block.rows) {

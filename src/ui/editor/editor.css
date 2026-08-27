@@ -217,6 +217,41 @@ body {
 
 /* -------------------------------------------------------- formules mathématiques */
 
+/* -- Cadre image ancré « comme caractère » (SwFlyCntFrm) -------------------
+ *
+ * Le cadre reçoit le pointeur pour s'ouvrir au clic, mais rien ici ne décide
+ * de sa taille : elle vient du moteur, en pixels, sur l'élément lui-même. Une
+ * règle de largeur en CSS ferait diverger le rendu du calcul de ligne.
+ */
+.writer-image {
+  cursor: pointer;
+  user-select: none;
+  pointer-events: auto;
+  border-radius: 2px;
+  outline-offset: 1px;
+}
+
+.writer-image:hover {
+  outline: 2px solid var(--accent, #2563eb);
+}
+
+.writer-image img {
+  /* Une image cassée ne doit pas afficher l'icône du navigateur par-dessus la
+     page : le cadre reste vide, à la taille que la pagination a réservée. */
+  color: transparent;
+  background: var(--bg-sunken, #f4f4f5);
+}
+
+@media print {
+  .writer-image:hover {
+    outline: none;
+  }
+
+  .writer-image img {
+    background: transparent;
+  }
+}
+
 .writer-math {
   display: inline-flex;
   vertical-align: -0.15em;
@@ -526,6 +561,8 @@ body {
   body,
   .shell,
   .writer,
+  .document-area,
+  .writer-workspace,
   .writer-surface,
   .writer-pages {
     display: block !important;
@@ -543,27 +580,92 @@ body {
     box-shadow: none !important;
   }
 
-  /* Chaque feuille A4 est imprimée sans ombre et génère un saut de page propre */
+  /* Chaque feuille A4 est imprimée sans ombre et tient sur une seule feuille */
   .writer-page {
     position: relative !important;
     box-shadow: none !important;
     border: none !important;
     background: #ffffff !important;
     margin: 0 auto !important;
-    break-after: page !important;
-    page-break-after: always !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
   }
 
-  .writer-page:last-child {
-    break-after: auto !important;
-    page-break-after: auto !important;
+  /* Le saut est posé **avant** chaque page sauf la première, et jamais après
+     la dernière : un `break-after` sur la dernière page fait sortir une
+     feuille blanche de plus. On ne peut pas le rattraper avec `:last-child` —
+     la zone de saisie `.writer-input`, masquée à l'impression mais bien
+     présente dans le DOM, reste le dernier enfant de `.writer-pages`. */
+  .writer-page + .writer-page {
+    break-before: page !important;
+    page-break-before: always !important;
   }
 
   /* Désactive les styles interactifs sur les en-têtes et pieds de page */
   .writer-page__furniture-header,
   .writer-page__furniture-footer {
     cursor: default !important;
+  }
+}
+
+/* --------------------------------------------- gouttière de commentaires
+ *
+ * `SwPostItMgr` pose ses bulles hors de la feuille, à droite. La bande vit
+ * donc à côté de la pile de pages et non dans la marge : un commentaire est un
+ * objet de relecture, il ne doit pas s'imprimer.
+ */
+
+.writer-comment-gutter {
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.writer-comment-band {
+  /* Hauteur donnée par les bulles, qui sont en position absolue : sans hauteur
+     minimale la bande serait plate et le conteneur ne réserverait rien. */
+  min-height: 100%;
+}
+
+.writer-comment--resolved p {
+  text-decoration: line-through;
+}
+
+.writer-comment--active {
+  z-index: 2;
+}
+
+/* ------------------------------------------------------ cadres flottants */
+
+.writer-fly {
+  /* Le cadre ne se sélectionne pas comme du texte : c'est un objet, et le
+     glisser doit le déplacer, pas peindre une sélection dessus. */
+  user-select: none;
+}
+
+.writer-fly img {
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------- notes de bas de page */
+
+.writer-page__footnotes {
+  /* La hauteur vient de la pagination (`footnoteAreaHeightPx`) : le contenu ne
+     doit jamais la dépasser, faute de quoi il déborderait sur la marge basse. */
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------- impression */
+
+@media print {
+  /* Ni les commentaires ni leur bande n'appartiennent au document imprimé. */
+  .writer-comment-gutter,
+  .writer-comment-band {
+    display: none !important;
+  }
+
+  /* Le surlignage d'ancre de commentaire non plus : il colorerait le fond d'un
+     texte qui, sur papier, n'a plus de bulle à laquelle renvoyer. */
+  .writer-page [style*='--comment-highlight'] {
+    background: transparent !important;
   }
 }

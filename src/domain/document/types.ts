@@ -38,7 +38,122 @@ export interface TextRun {
   mathLatex?: string;
   /** Vrai si la formule est affichée centrée sur sa propre ligne (display mode). */
   mathDisplay?: boolean;
+
+  /** Texte de la note de bas de page si ce run représente un appel de note (SwFtnFrm). */
+  footnoteText?: string;
+  /** Identifiant unique de la note. */
+  footnoteId?: string;
+
+  /* -- Image ancrée « comme caractère » ------------------------------------
+   *
+   * Writer range une image dans un cadre (`SwFlyFrm`, layout/fly.cxx). Quatre
+   * ancrages existent ; un seul coule **dans** la ligne : `FLY_AS_CHAR`, dont
+   * le cadre est un `SwFlyCntFrm` (layout/flycnt.cxx) traité par le formateur
+   * de texte comme une portion de largeur et de hauteur fixes.
+   *
+   * C'est cet ancrage-là qui est porté ici, et il l'est donc comme un attribut
+   * de run — pas comme un nœud à part. La conséquence est celle du C++ : une
+   * image se sélectionne, se copie, se supprime et se justifie exactement comme
+   * un caractère, sans que le curseur ni la pagination aient un cas de plus à
+   * connaître. Les trois autres ancrages (à la page, au paragraphe, au
+   * caractère avec habillage) demandent un cadre flottant hors flux : ils ne
+   * sont pas portés, cf. README.
+   */
+
+  /** Source de l'image : `data:` en local, adresse relative une fois déposée. */
+  imageSrc?: string;
+  /** Largeur du cadre, en points typographiques (`SwFmtFrmSize`). */
+  imageWidthPt?: number;
+  imageHeightPt?: number;
+  /** Texte alternatif (`SdrObject::SetTitle`), lu par les technologies d'assistance. */
+  imageAlt?: string;
+
+  /* -- Rognage (`SvxGrfCrop`, svx/inc/svx/grfcrop.hxx) ----------------------
+   *
+   * Writer conserve quatre **retraits**, un par bord, retranchés de l'image
+   * d'origine — et non un rectangle de découpe. La différence compte : rogner
+   * deux fois se compose alors naturellement, et l'image reste intacte, seul
+   * son cadrage change. On peut donc toujours revenir en arrière.
+   *
+   * Là où le C++ compte en 1/100 mm, on compte en **fraction de l'original**
+   * (0 à 1). La couche 1 ne connaît pas la taille en pixels de l'image — elle
+   * n'en connaît que l'adresse — et une fraction reste juste quelle que soit
+   * cette taille. La conversion en longueurs absolues n'a lieu qu'à l'export
+   * ODF, où `fo:clip` les exige.
+   *
+   * Les quatre valeurs sont des clés **distinctes** et non un objet : la
+   * comparaison de formatage (`sameFormatting`) se fait par `!==`, et deux
+   * objets de contenu identique n'y seraient jamais égaux — deux runs voisins
+   * cesseraient alors de fusionner.
+   */
+
+  imageCropTopPct?: number;
+  imageCropRightPct?: number;
+  imageCropBottomPct?: number;
+  imageCropLeftPct?: number;
+
+  /* -- Cadre flottant (`SwFlyFrm` libre, layout/fly.cxx) --------------------
+   *
+   * `FLY_AS_CHAR` ci-dessus coule dans la ligne. Les trois autres ancrages de
+   * Writer (`RndStdIds`, fmtanchr.hxx) sortent le cadre du flux : il se pose à
+   * une coordonnée, et le texte s'écoule *autour*. C'est `SwFlyFreeFrm`, dont
+   * la géométrie est calculée par `SwFlyFrm::MakeAll` puis retranchée de la
+   * largeur utile de chaque ligne traversée.
+   *
+   * Le mode d'habillage est celui de `SwFmtSurround` (fmtsrndenum.hxx:27) :
+   * `none` réserve toute la bande, `through` n'en réserve rien (le texte passe
+   * dessous), `parallel` évite le cadre des deux côtés, `left`/`right` ne
+   * gardent le texte que du côté nommé.
+   *
+   * Un run porteur d'`imageAnchor` autre que `as-char` reste un caractère
+   * U+FFFC dans la chaîne : c'est son **point d'ancrage**. Il ne consomme
+   * aucune largeur dans la ligne — sa géométrie est donnée par imageX/imageY.
+   */
+
+  /** `RndStdIds` : `as-char` coule dans la ligne, les autres flottent. */
+  imageAnchor?: FlyAnchor;
+  /** `SwFmtSurround` : mode d'habillage du texte autour du cadre flottant. */
+  imageSurround?: FlySurround;
+  /** Abscisse du cadre, en points, relative à son ancre (`SwFmtHoriOrient`). */
+  imageXPt?: number;
+  /** Ordonnée du cadre, en points, relative à son ancre (`SwFmtVertOrient`). */
+  imageYPt?: number;
+  /** Marge d'habillage autour du cadre (`SvxLRSpaceItem` du cadre), en points. */
+  imageWrapMarginPt?: number;
+
+  /* -- Ancres de commentaire, de signet et de révision ----------------------
+   *
+   * Ces trois-là suivent la même règle que le rognage plus haut : **une clé
+   * scalaire, jamais un objet ni un tableau**. `sameFormatting` compare par
+   * `!==`, et deux tableaux de contenu identique n'y seraient jamais égaux :
+   * deux runs voisins cesseraient de fusionner, et l'invariant `MergePortions`
+   * tomberait. Quand plusieurs commentaires couvrent le même run, leurs
+   * identifiants sont donc joints en une chaîne **triée** (cf. `commentIdsOf`).
+   */
+
+  /** `SwPostItField` : identifiants de commentaires, triés et joints par `,`. */
+  commentIds?: string;
+  /** `SwBookmark` : nom du signet dont la plage couvre ce run. */
+  bookmarkName?: string;
+  /** `SwRangeRedline` : identifiant de la modification suivie couvrant ce run. */
+  redlineId?: string;
+  /** `RedlineType_t` (IDocumentRedlineAccess.hxx:73) : nature de la modification. */
+  redlineType?: RedlineType;
 }
+
+/**
+ * Ancrage d'un cadre. Transposition de `RndStdIds` (`sw/inc/fmtanchr.hxx`).
+ *
+ * `as-char` (`FLY_AS_CHAR`) est le seul qui coule dans la ligne ; les autres
+ * font du cadre un `SwFlyFreeFrm` positionné hors flux.
+ */
+export type FlyAnchor = 'as-char' | 'to-para' | 'to-page';
+
+/** Mode d'habillage. Transposition de `SwSurround` (`sw/inc/fmtsrndenum.hxx:27`). */
+export type FlySurround = 'none' | 'through' | 'parallel' | 'left' | 'right';
+
+/** Nature d'une modification suivie (`IDocumentRedlineAccess.hxx:73-75`). */
+export type RedlineType = 'insert' | 'delete' | 'format';
 
 /**
  * Attributs de caractère d'un run, sans son texte.
@@ -61,6 +176,25 @@ export const RUN_FORMAT_KEYS = [
   'linkHref',
   'mathLatex',
   'mathDisplay',
+  'footnoteText',
+  'footnoteId',
+  'imageSrc',
+  'imageWidthPt',
+  'imageHeightPt',
+  'imageAlt',
+  'imageCropTopPct',
+  'imageCropRightPct',
+  'imageCropBottomPct',
+  'imageCropLeftPct',
+  'imageAnchor',
+  'imageSurround',
+  'imageXPt',
+  'imageYPt',
+  'imageWrapMarginPt',
+  'commentIds',
+  'bookmarkName',
+  'redlineId',
+  'redlineType',
 ] as const satisfies readonly (keyof RunFormatting)[];
 
 export type RunFormatKey = (typeof RUN_FORMAT_KEYS)[number];
@@ -139,8 +273,21 @@ export interface ParagraphNode {
 export interface TableCellNode {
   id: string;
   blocks: ParagraphNode[];
+  /** Nombre de colonnes couvertes (`SwTableBox::getRowSpan` côté horizontal). */
   colSpan?: number;
+  /** Nombre de lignes couvertes vers le bas. */
   rowSpan?: number;
+  /**
+   * Cellule **recouverte** par la fusion d'une voisine.
+   *
+   * Writer ne supprime pas les cellules absorbées par un `SwDoc::MergeTbl` : il
+   * leur donne un `RowSpan` négatif (`swtable.hxx:475`, « covered cell ») et les
+   * garde dans la ligne. La grille reste ainsi rectangulaire, ce dont dépendent
+   * la navigation au curseur, l'insertion de colonne et la scission ultérieure.
+   * On transpose ce choix : une cellule couverte reste présente, mais n'est ni
+   * mesurée ni peinte.
+   */
+  covered?: boolean;
   widthPercent?: number;
   backgroundColor?: string;
   borderColor?: string;
@@ -165,15 +312,43 @@ export interface TableNode {
   borderWidthPt?: number;
 }
 
-export type DocumentBlock = ParagraphNode | TableNode;
+/**
+ * Bloc « table des matières ». Transposition de `SwTOXBase` (`sw/inc/tox.hxx`).
+ *
+ * Writer ne stocke pas les entrées : il conserve la **définition** de la table
+ * (quels niveaux de titre retenir, avec ou sans numéros de page) et régénère
+ * son contenu à la demande (`SwDoc::UpdateTOX`). On transpose ce choix, pour la
+ * même raison : des entrées figées se désynchroniseraient du corps du document
+ * dès la première frappe. Les entrées sont donc dérivées à la pagination, seul
+ * moment où le numéro de page d'un titre est connu.
+ */
+export interface TocNode {
+  id: string;
+  type: 'toc';
+  /** Titre imprimé au-dessus de la table. */
+  title: string;
+  /** Niveaux de titre retenus, de 1 à `maxLevel` (`SwTOXBase::GetLevel`). */
+  maxLevel: HeadingLevel;
+  /** Afficher le numéro de page en fin de ligne (`SwForm` avec `TOKEN_PAGE_NUMS`). */
+  showPageNumbers: boolean;
+  /** Points de suite entre le titre et le numéro (`TOKEN_TAB_STOP` à points). */
+  useDotLeader: boolean;
+  pageBreakBefore?: boolean;
+}
+
+export type DocumentBlock = ParagraphNode | TableNode | TocNode;
 
 /** Discriminant sûr : un bloc est un tableau ou un nœud de texte. */
 export function isTable(block: DocumentBlock): block is TableNode {
   return block.type === 'table';
 }
 
+export function isToc(block: DocumentBlock): block is TocNode {
+  return block.type === 'toc';
+}
+
 export function isParagraph(block: DocumentBlock): block is ParagraphNode {
-  return block.type !== 'table';
+  return block.type !== 'table' && block.type !== 'toc';
 }
 
 /**
@@ -228,6 +403,8 @@ export interface DocumentDefaults {
 }
 
 import type { PageFurniture } from './pageFurniture';
+import type { DocumentComment } from './comments';
+import type { Redline } from './redline';
 
 /** État racine complet. Inspiré de `SwDoc`. */
 export interface WriterDocumentState {
@@ -242,4 +419,21 @@ export interface WriterDocumentState {
   defaults: DocumentDefaults;
   furniture?: PageFurniture;
   blocks: DocumentBlock[];
+
+  /* -- Tables annexes -------------------------------------------------------
+   *
+   * Trois sous-systèmes ancrent leur *repère* dans les runs et rangent leur
+   * *contenu* ici. La règle qui décide de quel côté va quoi est constante :
+   * ce qui doit suivre le texte quand on l'édite est un attribut de run ; ce
+   * qui n'a pas de position — un auteur, une date, un fil de discussion — vit
+   * dans une table indexée par identifiant.
+   *
+   * Les signets font exception et n'ont pas de table : un signet n'est *que*
+   * sa position, il se lit donc entièrement depuis les runs (cf. bookmarks.ts).
+   */
+
+  /** `SwPostItField` : contenu des commentaires, ancrés par `TextRun.commentIds`. */
+  comments?: DocumentComment[];
+  /** `SwRedlineTbl` : métadonnées des révisions, ancrées par `TextRun.redlineId`. */
+  redlines?: Redline[];
 }

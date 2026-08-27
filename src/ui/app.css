@@ -2653,6 +2653,7 @@
   .shell,
   .writer,
   .document-area,
+  .writer-workspace,
   .writer-surface,
   .writer-pages {
     display: block !important;
@@ -2682,15 +2683,18 @@
     border: none !important;
     background: #ffffff !important;
     margin: 0 auto !important;
-    break-after: page !important;
-    page-break-after: always !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
   }
 
-  .writer-page:last-child {
-    break-after: auto !important;
-    page-break-after: auto !important;
+  /* Le saut est posé **avant** chaque page sauf la première, et jamais après
+     la dernière : un `break-after` sur la dernière page fait sortir une
+     feuille blanche de plus. On ne peut pas le rattraper avec `:last-child` —
+     la zone de saisie `.writer-input`, masquée à l'impression mais bien
+     présente dans le DOM, reste le dernier enfant de `.writer-pages`. */
+  .writer-page + .writer-page {
+    break-before: page !important;
+    page-break-before: always !important;
   }
 
   .writer-page__furniture-header,
@@ -2810,3 +2814,449 @@
   border-color: #1e429f;
 }
 
+/* ── Atelier d'image ─────────────────────────────────────────────────────── */
+
+.image-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.image-dialog__sources {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.image-dialog__ou {
+  padding-bottom: 8px;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+.image-dialog__url {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 240px;
+}
+
+.image-dialog__url input {
+  width: 100%;
+}
+
+.image-dialog__erreur {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--danger-subtle, #fef2f2);
+  color: var(--danger, #b91c1c);
+  font-size: var(--text-xs);
+}
+
+.image-dialog__corps {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.image-dialog__apercu {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  max-height: 320px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.image-dialog__apercu--cliquable {
+  cursor: zoom-in;
+}
+
+/* Le cadre porte le masquage : l'image rognée y est agrandie et décalée, et
+   c'est `overflow: hidden` qui coupe — la même mécanique qu'à la page. */
+.image-dialog__cadre {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  max-height: 300px;
+  width: fit-content;
+  margin: 0 auto;
+  line-height: 0;
+}
+
+.image-dialog__apercu img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+}
+
+.image-dialog__colonne-apercu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.image-dialog__rognage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.image-dialog__consigne {
+  flex: 1;
+  min-width: 140px;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+  line-height: 1.35;
+}
+
+/* ── Atelier de rognage ──────────────────────────────────────────────────── */
+
+.cropper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  /* Le conteneur doit épouser **l'image**, pas la colonne qui l'entoure : le
+     cadre de rognage est positionné en pourcentages de ce bloc, et un bloc plus
+     large que l'image décalerait le cadre de la différence — on tracerait à
+     côté de ce qu'on croit désigner. En colonne flexible, un enfant s'étire par
+     défaut sur toute la largeur ; `align-self` l'en empêche. */
+  align-self: flex-start;
+  width: fit-content;
+  line-height: 0;
+  /* Sans ce masquage, l'ombre de très grande étendue de `__ombre` déborderait
+     de l'image et assombrirait tout le dialogue. */
+  overflow: hidden;
+  /* Le geste de rognage ne doit pas faire défiler la page sous le doigt. */
+  touch-action: none;
+  user-select: none;
+}
+
+.cropper__image {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+}
+
+/**
+ * Assombrissement de la partie retranchée.
+ *
+ * L'élément épouse la partie **conservée** et projette une ombre de très grande
+ * étendue : ce qui est dehors se trouve assombri, ce qui est dedans reste net.
+ * Un voile posé par-dessus l'image aurait demandé quatre éléments — un par bord
+ * — et autant de calculs de position à tenir d'accord avec le cadre.
+ *
+ * L'image entière reste visible sous ce voile : on doit pouvoir juger de ce
+ * qu'on coupe, et élargir à nouveau le cadre.
+ */
+.cropper__ombre {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.cropper__cadre {
+  position: absolute;
+  outline: 1px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+/* Grille des tiers : l'aide au cadrage la plus universelle. */
+.cropper__cadre::before,
+.cropper__cadre::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.cropper__cadre::before {
+  background-image:
+    linear-gradient(to right, transparent 33.33%, #fff 33.33%, #fff calc(33.33% + 1px), transparent calc(33.33% + 1px)),
+    linear-gradient(to right, transparent 66.66%, #fff 66.66%, #fff calc(66.66% + 1px), transparent calc(66.66% + 1px));
+}
+
+.cropper__cadre::after {
+  background-image:
+    linear-gradient(to bottom, transparent 33.33%, #fff 33.33%, #fff calc(33.33% + 1px), transparent calc(33.33% + 1px)),
+    linear-gradient(to bottom, transparent 66.66%, #fff 66.66%, #fff calc(66.66% + 1px), transparent calc(66.66% + 1px));
+}
+
+.cropper__interieur {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: move;
+}
+
+.cropper__poignee {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  border-radius: 2px;
+  background: #fff;
+}
+
+.cropper__interieur:focus-visible,
+.cropper__poignee:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cropper__poignee {
+    transition: transform 90ms ease-out;
+  }
+  .cropper__poignee:hover {
+    transform: scale(1.15);
+  }
+}
+
+.image-dialog__vide {
+  margin: 0;
+  padding: 0 12px;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+.image-dialog__reglages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.image-dialog__dimensions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.image-dialog__ratio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+
+.image-dialog__raccourcis {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.image-dialog__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.image-dialog__spacer {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .image-dialog__corps {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Partage ─────────────────────────────────────────────────────────────── */
+
+.share-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.share-dialog__erreur {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--danger-subtle, #fef2f2);
+  color: var(--danger, #b91c1c);
+  font-size: var(--text-xs);
+}
+
+.share-dialog__ajout {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.share-dialog__email {
+  flex: 1;
+  min-width: 220px;
+}
+
+.share-dialog__email input,
+.share-dialog__permission select {
+  width: 100%;
+}
+
+.share-dialog__permission {
+  min-width: 140px;
+}
+
+.share-dialog__aide {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+.share-dialog__liste {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.share-dialog__personne {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.share-dialog__personne:last-child {
+  border-bottom: none;
+}
+
+.share-dialog__adresse {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm, 13px);
+}
+
+.share-dialog__adresse em {
+  color: var(--fg-secondary);
+  font-style: normal;
+}
+
+.share-dialog__role {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+.share-dialog__partage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-sunken);
+}
+
+.share-dialog__note {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+  line-height: 1.45;
+}
+
+.share-dialog__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.share-dialog__spacer {
+  flex: 1;
+}
+
+.field__aide {
+  font-size: var(--text-xs);
+  color: var(--danger, #b91c1c);
+}
+
+/* ── État de connexion en barre d'état ───────────────────────────────────── */
+
+.writer-status__lien {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* La pastille double le libellé, elle ne le remplace pas : l'état ne doit
+   jamais dépendre de la seule couleur. */
+.writer-status__lien::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.writer-status__lien--connected { color: var(--success, #0f6b3f); }
+.writer-status__lien--connecting { color: var(--fg-secondary); }
+.writer-status__lien--offline { color: var(--warning, #b3541e); }
+.writer-status__lien--local { color: var(--fg-secondary); }
+
+.writer-status__lecture {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--fg-secondary);
+  font-size: var(--text-xs);
+}
+
+.writer-refus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--danger-subtle, #fef2f2);
+  color: var(--danger, #b91c1c);
+  font-size: var(--text-xs);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

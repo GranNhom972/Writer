@@ -32,3 +32,17 @@ export function normalizeUrl(input: string): string | null {
 
   return SCHEMAS_ADMIS.includes(url.protocol) ? url.toString() : null;
 }
+
+/**
+ * Adresse sûre à poser dans un `href`, ou `undefined` si elle ne l'est pas.
+ *
+ * `normalizeUrl` garde l'entrée du CLAVIER ; celle-ci garde la SORTIE. Un
+ * `linkHref` peut arriver autrement que par la saisie : import ODF, opération
+ * CRDT reçue d'un autre participant, document rechargé depuis le Drive.
+ * Aucune de ces sources n'est fiable, et React ne bloque pas `javascript:`
+ * dans un `href` — il se contente d'un avertissement en console.
+ */
+export function safeLinkHref(input: string | undefined | null): string | undefined {
+  if (!input) return undefined;
+  return normalizeUrl(input) ?? undefined;
+}

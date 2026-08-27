@@ -182,7 +182,42 @@ describe('import — styles', () => {
     const { document } = importOdfContent(
       content('<text:p><text:a xlink:href="https://exemple.fr">lien</text:a></text:p>'),
     );
-    expect(paragraphs(document)[0]!.runs[0]!.linkHref).toBe('https://exemple.fr');
+    // `normalizeUrl` rend une URL canonique : l'hôte nu reçoit sa barre
+    // finale, exactement comme un lien saisi dans l'éditeur.
+    expect(paragraphs(document)[0]!.runs[0]!.linkHref).toBe('https://exemple.fr/');
+  });
+
+  it('refuse un schéma exécutable dans un lien importé', () => {
+    // Un `.odt` est un fichier fourni par l'usager. Sans normalisation à
+    // l'import, ce `javascript:` ressortait tel quel dans le `<a href>` du
+    // rendu — XSS stocké, rediffusé à tous les collaborateurs par le CRDT.
+    for (const hostile of [
+      'javascript:alert(1)',
+      'JaVaScRiPt:alert(1)',
+      'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+      'vbscript:msgbox(1)',
+      'file:///etc/passwd',
+    ]) {
+      const { document } = importOdfContent(
+        content(`<text:p><text:a xlink:href="${hostile}">clique</text:a></text:p>`),
+      );
+      const run = paragraphs(document)[0]!.runs[0]!;
+      expect(run.linkHref, `schéma accepté à tort : ${hostile}`).toBeUndefined();
+      // Le texte, lui, reste : on retire le lien, pas le contenu.
+      expect(run.text).toBe('clique');
+    }
+  });
+
+  it('conserve les liens mailto et http', () => {
+    for (const [entree, attendu] of [
+      ['mailto:contact@exemple.fr', 'mailto:contact@exemple.fr'],
+      ['http://exemple.fr/page?a=1', 'http://exemple.fr/page?a=1'],
+    ] as const) {
+      const { document } = importOdfContent(
+        content(`<text:p><text:a xlink:href="${entree}">lien</text:a></text:p>`),
+      );
+      expect(paragraphs(document)[0]!.runs[0]!.linkHref).toBe(attendu);
+    }
   });
 
   it('ne boucle pas sur une chaine de styles cyclique', () => {

@@ -307,6 +307,29 @@ export function patchFormatting(
 }
 
 /**
+ * Attributs qu'un objet **ne transmet pas** au texte tapé à côté de lui.
+ *
+ * Une formule et un cadre image sont des objets, pas un style : taper après eux
+ * doit produire du texte, pas un second objet identique. Writer fait le même
+ * tri, `SwTxtNode::GetAttr` ne rendant jamais un `SwTxtAttr` d'objet comme
+ * formatage courant.
+ */
+const OBJECT_KEYS = [
+  'mathLatex',
+  'mathDisplay',
+  'imageSrc',
+  'imageWidthPt',
+  'imageHeightPt',
+  'imageAlt',
+] as const satisfies readonly RunFormatKey[];
+
+function withoutObjectAttributes(formatting: RunFormatting): RunFormatting {
+  const out = { ...formatting };
+  for (const key of OBJECT_KEYS) delete out[key];
+  return out;
+}
+
+/**
  * Formatage qui s'applique à une frappe faite à cet offset.
  *
  * Writer prend celui du caractère de **gauche** (`SwTxtNode::GetAttr` avec
@@ -315,20 +338,12 @@ export function patchFormatting(
 export function formattingAt(runs: readonly TextRun[], offset: number): RunFormatting {
   if (runs.length === 0) return {};
   const clamped = clamp(offset, 0, runsLength(runs));
-  if (clamped === 0) {
-    const fmt = { ...runFormatting(runs[0]!) };
-    delete fmt.mathLatex;
-    delete fmt.mathDisplay;
-    return fmt;
-  }
+  if (clamped === 0) return withoutObjectAttributes(runFormatting(runs[0]!));
 
   const { runIndex, inner } = locateOffset(runs, clamped);
   const run = runs[runIndex]!;
   const base = inner > 0 ? runFormatting(run) : runFormatting(runs[runIndex - 1] ?? run);
-  const fmt = { ...base };
-  delete fmt.mathLatex;
-  delete fmt.mathDisplay;
-  return fmt;
+  return withoutObjectAttributes(base);
 }
 
 /**
@@ -357,4 +372,54 @@ export function commonFormatting(
 
 export function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
+}
+
+/**
+ * Applique une transformation aux seuls runs couvrant `[start, end)`.
+ *
+ * Les runs à cheval sur une borne sont coupés en deux — l'équivalent de
+ * `SwpHints::SplitAttr` (thints.cxx) quand un attribut de caractère est posé au
+ * milieu d'une plage existante. C'est l'opération dont dépendent les trois
+ * sous-systèmes qui ancrent un repère dans le texte : commentaires, signets et
+ * révisions. Elle est ici plutôt que recopiée trois fois, parce que se tromper
+ * d'un caractère sur une borne est une erreur silencieuse.
+ *
+ * Le résultat n'est **pas** normalisé : l'appelant décide, car normaliser
+ * refuserait le run vide que doit conserver un paragraphe vide.
+ */
+export function mapRunsInRange(
+  runs: readonly TextRun[],
+  start: number,
+  end: number,
+  transform: (run: TextRun) => TextRun,
+): TextRun[] {
+  const from = Math.max(0, Math.min(start, end));
+  const to = Math.max(start, end);
+  if (to <= from) return [...runs];
+
+  const out: TextRun[] = [];
+  let offset = 0;
+
+  for (const run of runs) {
+    const runStart = offset;
+    const runEnd = offset + run.text.length;
+    offset = runEnd;
+
+    // Hors plage, ou run vide (porteur de formatage d'un paragraphe vidé) :
+    // le transformer poserait un attribut sur du néant.
+    if (runEnd <= from || runStart >= to || run.text.length === 0) {
+      out.push(run);
+      continue;
+    }
+
+    const format = runFormatting(run);
+    const cutStart = Math.max(from, runStart) - runStart;
+    const cutEnd = Math.min(to, runEnd) - runStart;
+
+    if (cutStart > 0) out.push(makeRun(run.text.slice(0, cutStart), format));
+    out.push(transform(makeRun(run.text.slice(cutStart, cutEnd), format)));
+    if (cutEnd < run.text.length) out.push(makeRun(run.text.slice(cutEnd), format));
+  }
+
+  return out;
 }
