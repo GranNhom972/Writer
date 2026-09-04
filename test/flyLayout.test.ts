@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, createParagraph } from '../src/domain/document/document';
+import { pageGeometry } from '../src/domain/document/pageSetup';
 import { makeRun } from '../src/domain/document/runs';
 import {
   collectFlyFrames,
@@ -17,11 +18,19 @@ import {
   isFloatingFly,
   nextClearY,
   paragraphExclusions,
+  resolveFlyLeft,
+  resolveIdealSurround,
   usableBand,
   DEFAULT_WRAP_MARGIN_PT,
+  IDEAL_TEXT_MIN_PT,
   type FlyExclusion,
   type FlyFrame,
 } from '../src/domain/engine/flyLayout';
+import {
+  imageWrapMode,
+  wrapFormatting,
+  IMAGE_WRAP_MODES,
+} from '../src/domain/document/images';
 import { layoutParagraph } from '../src/domain/engine/lineBreak';
 import { paginateDocument } from '../src/domain/engine/paginate';
 import { MetricTextMeasurer } from '../src/domain/engine/measure';
@@ -34,6 +43,14 @@ const measurer = new MetricTextMeasurer();
 
 function docOf(blocks: DocumentBlock[]) {
   return { ...createEmptyDocument(), blocks };
+}
+
+/** Géométrie d'une A4 à marges par défaut, pour résoudre les alignements. */
+const geometrie = pageGeometry(createEmptyDocument().pageSetup);
+
+/** `collectFlyFrames` sur la géométrie standard — la forme courante des tests. */
+function collecte(blocks: DocumentBlock[]) {
+  return collectFlyFrames(docOf(blocks), geometrie);
 }
 
 function flyRun(surround: FlySurround, extra: Record<string, unknown> = {}) {
@@ -171,7 +188,7 @@ describe('Bande utile (SwTxtFly::GetFrm)', () => {
     const p = createParagraph('', {
       runs: [makeRun('￼', { imageSrc: 'data:,x', imageAnchor: 'to-para', imageWidthPt: 10, imageHeightPt: 0 })],
     });
-    expect(collectFlyFrames(docOf([p]))).toHaveLength(0);
+    expect(collecte([p])).toHaveLength(0);
   });
 });
 
@@ -186,7 +203,7 @@ describe('Collecte des cadres depuis le modèle', () => {
     const p = createParagraph('', {
       runs: [makeRun('avant'), flyRun('right'), makeRun('après')],
     });
-    const flies = collectFlyFrames(docOf([p]));
+    const flies = collecte([p]);
 
     expect(flies).toHaveLength(1);
     expect(flies[0]?.anchorBlockId).toBe(p.id);
@@ -199,13 +216,13 @@ describe('Collecte des cadres depuis le modèle', () => {
     const p = createParagraph('', {
       runs: [makeRun('￼', { imageSrc: 'data:,x', imageAnchor: 'to-para', imageWidthPt: 0, imageHeightPt: 0 })],
     });
-    expect(collectFlyFrames(docOf([p]))).toHaveLength(0);
+    expect(collecte([p])).toHaveLength(0);
   });
 
   it('ne résout que les cadres ancrés au paragraphe demandé', () => {
     const p1 = createParagraph('', { runs: [flyRun('parallel')] });
     const p2 = createParagraph('autre');
-    const flies = collectFlyFrames(docOf([p1, p2]));
+    const flies = collecte([p1, p2]);
 
     expect(paragraphExclusions(flies, p1, 600)).toHaveLength(1);
     expect(paragraphExclusions(flies, p2, 600)).toHaveLength(0);
@@ -369,5 +386,275 @@ describe('Aller-retour ODF de l\'habillage', () => {
     const bloc = relu.blocks[0];
     if (bloc?.type !== 'paragraph') throw new Error('paragraphe attendu');
     expect(bloc.runs.find((r) => r.imageSrc)?.imageSurround).toBe('through');
+  });
+});
+
+/**
+ * `SURROUND_IDEAL` — l'habillage « optimal » de `SwTxtFly::GetSurroundForTextWrap`
+ * (`txtfly.cxx:2372-2402`).
+ *
+ * Il ne décrit pas une géométrie mais un **arbitrage** : la place restant de
+ * chaque côté décide du mode réellement appliqué. Les seuils sont ceux du C++ —
+ * `TEXT_MIN` (2 cm) sous lequel une colonne ne mérite pas d'exister, `FRAME_MAX`
+ * (1,5 cm) au-delà duquel un cadre ne garde que son côté le plus large.
+ */
+describe('Habillage optimal (SURROUND_IDEAL)', () => {
+  const colonne = 600;
+  const minPx = ptToPx(IDEAL_TEXT_MIN_PT);
+
+  it('garde les deux côtés quand chacun dépasse le minimum', () => {
+    const gauche = minPx + 20;
+    // Cadre étroit : la règle `FRAME_MAX` ne s'applique pas, les deux côtés vivent.
+    expect(resolveIdealSurround(gauche, gauche + 10, colonne)).toBe('parallel');
+  });
+
+  it('ne garde que le côté le plus large dès que le cadre est large', () => {
+    // Cadre de 200 px, très au-delà de `FRAME_MAX` : un seul côté survit, et
+    // c'est le plus large — ici la gauche.
+    const droite = colonne - (minPx + 10);
+    expect(resolveIdealSurround(minPx + 60, droite, colonne)).toBe('left');
+  });
+
+  it('bascule à droite quand c\'est de ce côté que la place est', () => {
+    expect(resolveIdealSurround(-20, minPx + 40, colonne)).toBe('right');
+  });
+
+  it('renonce à habiller quand aucun côté n\'atteint le minimum', () => {
+    // Cadre presque aussi large que la colonne : les deux bandes résiduelles
+    // sont sous `TEXT_MIN`, le texte passe donc au-dessus et au-dessous.
+    expect(resolveIdealSurround(10, colonne - 10, colonne)).toBe('none');
+  });
+
+  it('ignore un cadre entièrement hors de la colonne', () => {
+    expect(resolveIdealSurround(-300, -10, colonne)).toBe('parallel');
+    expect(resolveIdealSurround(colonne + 10, colonne + 200, colonne)).toBe('parallel');
+  });
+
+  it('se résout au moment de calculer l\'exclusion, jamais avant', () => {
+    // Cadre collé au bord gauche : `ideal` doit se comporter comme `right`,
+    // c'est-à-dire n'interdire que la partie gauche de la colonne.
+    const cadre = frame({ surround: 'ideal', leftPx: 0, widthPx: 120, marginPx: 0 });
+    const exclusion = exclusionOf(cadre, colonne);
+    expect(exclusion).not.toBeNull();
+    expect(exclusion!.leftPx).toBe(0);
+    expect(exclusion!.rightPx).toBe(120);
+  });
+});
+
+/**
+ * Position d'un cadre — `SwFmtHoriOrient` et `text::RelOrientation`.
+ *
+ * Ce que ces tests vérifient tient en une phrase : un alignement est
+ * **recalculé**, un décalage est **lu**. C'est toute la différence entre une
+ * image qui reste collée à la marge quand celle-ci bouge et une image qui s'en
+ * détache.
+ */
+describe('Alignement horizontal des cadres', () => {
+  const geo = { pageWidthPx: 794, contentLeftPx: 76, contentWidthPx: 642 };
+
+  it('aligne à gauche, au centre et à droite dans la colonne', () => {
+    expect(resolveFlyLeft('left', 'text', 999, 100, geo)).toBe(0);
+    expect(resolveFlyLeft('center', 'text', 999, 100, geo)).toBeCloseTo((642 - 100) / 2, 5);
+    expect(resolveFlyLeft('right', 'text', 999, 100, geo)).toBeCloseTo(642 - 100, 5);
+  });
+
+  it('ne lit le décalage qu\'en position libre', () => {
+    expect(resolveFlyLeft('from-left', 'text', 37, 100, geo)).toBe(37);
+  });
+
+  it('mesure sur la feuille entière, marges comprises, en repère « page »', () => {
+    // Aligné à gauche de la **feuille** : le cadre déborde donc dans la marge,
+    // à une abscisse négative dans le repère de la colonne.
+    expect(resolveFlyLeft('left', 'page', 0, 100, geo)).toBe(-76);
+    expect(resolveFlyLeft('right', 'page', 0, 100, geo)).toBeCloseTo(-76 + 794 - 100, 5);
+  });
+
+  it('résout l\'alignement à la collecte, pas à la peinture', () => {
+    const p = createParagraph('', {
+      runs: [flyRun('parallel', { imageHoriOrient: 'right', imageHoriRelation: 'text', imageXPt: 0 })],
+    });
+    const cadres = collecte([p]);
+    expect(cadres).toHaveLength(1);
+    // 100 pt de large, aligné à droite d'une colonne connue : l'abscisse ne
+    // vaut plus zéro, alors que le modèle porte toujours `imageXPt: 0`.
+    expect(cadres[0]!.leftPx).toBeCloseTo(geometrie.contentWidthPx - ptToPx(100), 5);
+  });
+
+  it('un cadre sans alignement déclaré garde son abscisse — les anciens documents', () => {
+    const p = createParagraph('', { runs: [flyRun('parallel', { imageXPt: 30 })] });
+    expect(collecte([p])[0]!.leftPx).toBeCloseTo(ptToPx(30), 5);
+  });
+});
+
+/**
+ * Les cinq façons de poser une image sur la page.
+ *
+ * `imageWrapMode` et `wrapFormatting` sont réciproques : c'est ce qui garantit
+ * qu'un menu coché sur « Devant le texte » désigne bien l'état qu'on obtient en
+ * cliquant « Devant le texte ».
+ */
+describe('Modes d\'intégration au texte', () => {
+  it('lit le mode des trois attributs d\'OpenOffice', () => {
+    expect(imageWrapMode({})).toBe('inline');
+    expect(imageWrapMode({ imageAnchor: 'as-char' })).toBe('inline');
+    expect(imageWrapMode({ imageAnchor: 'to-para', imageSurround: 'ideal' })).toBe('wrap');
+    expect(imageWrapMode({ imageAnchor: 'to-para', imageSurround: 'parallel' })).toBe('wrap');
+    expect(imageWrapMode({ imageAnchor: 'to-para', imageSurround: 'none' })).toBe('break');
+    expect(imageWrapMode({ imageAnchor: 'to-para', imageSurround: 'through' })).toBe('behind');
+    expect(
+      imageWrapMode({ imageAnchor: 'to-para', imageSurround: 'through', imageInFront: true }),
+    ).toBe('front');
+  });
+
+  it('chaque mode se relit tel qu\'il a été écrit', () => {
+    for (const { mode } of IMAGE_WRAP_MODES) {
+      expect(imageWrapMode(wrapFormatting(mode))).toBe(mode);
+    }
+  });
+
+  it('« derrière » et « devant » ne diffèrent que par le calque', () => {
+    const derriere = wrapFormatting('behind');
+    const devant = wrapFormatting('front');
+    expect(derriere.imageSurround).toBe('through');
+    expect(devant.imageSurround).toBe('through');
+    expect(derriere.imageInFront).toBeUndefined();
+    expect(devant.imageInFront).toBe(true);
+  });
+
+  it('conserve un ancrage à la page en changeant de mode', () => {
+    // Basculer « derrière » → « devant » ne doit pas ramener au paragraphe un
+    // cadre posé sur la feuille.
+    expect(wrapFormatting('front', 'to-page').imageAnchor).toBe('to-page');
+  });
+
+  it('« aligner » n\'écrit aucun attribut de cadre flottant', () => {
+    expect(wrapFormatting('inline')).toEqual({});
+  });
+});
+
+describe('Aller-retour ODF de l\'habillage optimal et du calque', () => {
+  it('écrit `dynamic` pour l\'habillage optimal et le relit', () => {
+    const p = createParagraph('', { runs: [flyRun('ideal')] });
+    const xml = buildContentXml(docOf([p]));
+    expect(xml).toContain('style:wrap="dynamic"');
+
+    const { document: relu } = importOdfContent(xml);
+    const bloc = relu.blocks[0];
+    if (bloc?.type !== 'paragraph') throw new Error('paragraphe attendu');
+    expect(bloc.runs.find((r) => r.imageSrc)?.imageSurround).toBe('ideal');
+  });
+
+  it('écrit le calque en `style:run-through` et le relit', () => {
+    const p = createParagraph('', { runs: [flyRun('through', { imageInFront: true })] });
+    const xml = buildContentXml(docOf([p]));
+    expect(xml).toContain('style:run-through="foreground"');
+
+    const { document: relu } = importOdfContent(xml);
+    const bloc = relu.blocks[0];
+    if (bloc?.type !== 'paragraph') throw new Error('paragraphe attendu');
+    expect(bloc.runs.find((r) => r.imageSrc)?.imageInFront).toBe(true);
+  });
+
+  it('un cadre « derrière le texte » s\'écrit en arrière-plan', () => {
+    const xml = buildContentXml(docOf([createParagraph('', { runs: [flyRun('through')] })]));
+    expect(xml).toContain('style:run-through="background"');
+
+    const { document: relu } = importOdfContent(xml);
+    const bloc = relu.blocks[0];
+    if (bloc?.type !== 'paragraph') throw new Error('paragraphe attendu');
+    expect(bloc.runs.find((r) => r.imageSrc)?.imageInFront).toBeUndefined();
+  });
+
+  it('écrit alignement et repère, puis les relit', () => {
+    const p = createParagraph('', {
+      runs: [flyRun('ideal', { imageHoriOrient: 'right', imageHoriRelation: 'page' })],
+    });
+    const xml = buildContentXml(docOf([p]));
+    expect(xml).toContain('style:horizontal-pos="right"');
+    expect(xml).toContain('style:horizontal-rel="page"');
+
+    const { document: relu } = importOdfContent(xml);
+    const bloc = relu.blocks[0];
+    if (bloc?.type !== 'paragraph') throw new Error('paragraphe attendu');
+    const cadre = bloc.runs.find((r) => r.imageSrc);
+    expect(cadre?.imageHoriOrient).toBe('right');
+    expect(cadre?.imageHoriRelation).toBe('page');
+  });
+
+  it('nomme la colonne de texte comme ODF l\'exige selon l\'ancre', () => {
+    // Sous une ancre de page, ODF n'accepte pas `paragraph` : le repère de la
+    // colonne s'y appelle `page-content`.
+    const surPage = buildContentXml(
+      docOf([
+        createParagraph('', {
+          runs: [flyRun('parallel', { imageAnchor: 'to-page', imageHoriOrient: 'center' })],
+        }),
+      ]),
+    );
+    expect(surPage).toContain('style:horizontal-rel="page-content"');
+  });
+});
+
+/**
+ * Débordement d'un cadre hors de son ancre — `SwTxtFly` interroge la liste des
+ * cadres de la **page**, pas celle du paragraphe.
+ *
+ * C'est le cas courant et non un cas limite : une image de huit centimètres
+ * ancrée à un paragraphe de deux lignes déborde nécessairement sur ce qui suit.
+ */
+describe('Cadres débordant de leur paragraphe d\'ancrage', () => {
+  const suite = 'Un paragraphe suivant, assez long pour occuper plusieurs lignes de la colonne et se faire couper par un cadre voisin.';
+
+  /** Largeur de la plus large ligne d'un paragraphe posé. */
+  function largeurMax(layout: ReturnType<typeof paginateDocument>, blockId: string): number {
+    const lignes = layout.paragraphLayouts.get(blockId)?.lines ?? [];
+    return Math.max(0, ...lignes.map((ligne) => ligne.widthPx));
+  }
+
+  it('écarte le texte des paragraphes suivants', () => {
+    // Un cadre haut de 400 pt ancré à un paragraphe d'une seule ligne : il
+    // recouvre nécessairement les paragraphes du dessous.
+    const porteur = createParagraph('', {
+      runs: [flyRun('parallel', { imageHeightPt: 400, imageWidthPt: 200 })],
+    });
+    const apres = createParagraph(suite);
+
+    const avec = paginateDocument(docOf([porteur, apres]), { measurer });
+    const sans = paginateDocument(docOf([createParagraph(''), apres]), { measurer });
+
+    expect(largeurMax(avec, apres.id)).toBeLessThan(largeurMax(sans, apres.id));
+  });
+
+  it('laisse intact un paragraphe posé sous le bas du cadre', () => {
+    /*
+     * Cadre entièrement contenu dans son ancre : le paragraphe suivant commence
+     * plus bas et n'a rien à contourner.
+     *
+     * Le porteur doit avoir sa propre hauteur pour que le cas existe. Un cadre
+     * ancré à un paragraphe **vide** déborde toujours — le paragraphe ne fait
+     * que quelques pixels de haut, le cadre est nécessairement plus grand, et
+     * c'est bien le paragraphe suivant qu'il recouvre.
+     */
+    const porteur = createParagraph(suite, {
+      runs: [makeRun(suite), flyRun('parallel', { imageHeightPt: 8, imageWidthPt: 40 })],
+    });
+    const apres = createParagraph(suite);
+
+    const avec = paginateDocument(docOf([porteur, apres]), { measurer });
+    const sans = paginateDocument(docOf([createParagraph(suite), apres]), { measurer });
+
+    expect(largeurMax(avec, apres.id)).toBeCloseTo(largeurMax(sans, apres.id), 3);
+  });
+
+  it('un cadre `through` ne creuse rien, même en débordant', () => {
+    const porteur = createParagraph('', {
+      runs: [flyRun('through', { imageHeightPt: 400, imageWidthPt: 200 })],
+    });
+    const apres = createParagraph(suite);
+
+    const avec = paginateDocument(docOf([porteur, apres]), { measurer });
+    const sans = paginateDocument(docOf([createParagraph(''), apres]), { measurer });
+
+    expect(largeurMax(avec, apres.id)).toBeCloseTo(largeurMax(sans, apres.id), 3);
   });
 });

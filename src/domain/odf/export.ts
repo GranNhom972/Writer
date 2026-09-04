@@ -11,7 +11,7 @@
  * `<style:footer>`, `<style:header-left>`, `<style:footer-left>`) et leurs styles.
  */
 
-import { paragraphText } from '../document/document';
+import { figureNumbering, paragraphText } from '../document/document';
 import { runFormatting } from '../document/runs';
 import { sheetSizeMm } from '../document/pageSetup';
 import type { PageFurniture, FurnitureBand } from '../document/pageFurniture';
@@ -32,7 +32,16 @@ import { tocEntries } from '../document/tox';
 import { headingAnchorName } from '../document/bookmarks';
 import { escapeXml, NS_DECLARATIONS } from './namespaces';
 import { collectPictures, type OdfPicture } from './pictures';
-import { hasCrop, imageAttributes, imageCrop, isImageRun, visibleFraction } from '../document/images';
+import {
+  captionText,
+  hasCaption,
+  hasCrop,
+  imageKey,
+  imageAttributes,
+  imageCrop,
+  isImageRun,
+  visibleFraction,
+} from '../document/images';
 import { AutomaticStyles } from './styles';
 import { formatMmAsCm, formatPt } from './units';
 
@@ -169,6 +178,7 @@ function serializeImage(
   run: TextRun,
   hrefBySrc: ReadonlyMap<string, string>,
   styles: AutomaticStyles,
+  figureNumber: number | null = null,
 ): string {
   const attributs = imageAttributes(run);
   if (!attributs) return '';
@@ -192,6 +202,9 @@ function serializeImage(
         anchor: run.imageAnchor === 'to-page' ? 'to-page' : 'to-para',
         surround: run.imageSurround ?? 'parallel',
         ...(run.imageWrapMarginPt !== undefined ? { marginPt: run.imageWrapMarginPt } : {}),
+        ...(run.imageHoriOrient !== undefined ? { horiOrient: run.imageHoriOrient } : {}),
+        ...(run.imageHoriRelation !== undefined ? { horiRelation: run.imageHoriRelation } : {}),
+        ...(run.imageInFront ? { inFront: true } : {}),
       })
     : styles.frame(clip);
 
@@ -203,12 +216,46 @@ function serializeImage(
     ? `<svg:title>${escapeXml(attributs.alt)}</svg:title><svg:desc>${escapeXml(attributs.alt)}</svg:desc>`
     : '';
 
-  return (
+  const cadre =
     `<draw:frame draw:style-name="${frameStyle}" text:anchor-type="${anchorType}"${position} ` +
     `svg:width="${formatPt(attributs.widthPt)}" svg:height="${formatPt(attributs.heightPt)}">` +
     `<draw:image xlink:href="${escapeXml(href)}" xlink:type="simple" ` +
     `xlink:show="embed" xlink:actuate="onLoad"/>` +
     alt +
+    `</draw:frame>`;
+
+  const legende = attributs.caption;
+  if (!legende || !hasCaption(run)) return cadre;
+
+  /*
+   * Image légendée : la structure d'ODF est un cadre **englobant** qui porte un
+   * `draw:text-box`, lequel contient un paragraphe où voisinent l'image et son
+   * texte. C'est ce que produit Writer, et c'est ce que tout lecteur sait
+   * afficher.
+   *
+   * Le numéro y est écrit **en clair**, résolu au moment de l'export : ODF le
+   * porterait par un `text:sequence`, que nous ne savons pas relire. Nos
+   * propres attributs, à côté, gardent le mode et l'alignement pour que la
+   * relecture ici soit sans perte — un lecteur tiers les ignore.
+   */
+  const texte = escapeXml(captionText(legende, figureNumber));
+  const reglages =
+    ` writer:caption="${escapeXml(legende.text)}"` +
+    ` writer:caption-position="${legende.position}"` +
+    ` writer:caption-align="${legende.align}"` +
+    ` writer:caption-manual="${legende.manual ? 'true' : 'false'}"`;
+
+  const paragraphe =
+    legende.position === 'above'
+      ? `<text:p text:style-name="Illustration">${texte}</text:p>` +
+        `<text:p text:style-name="Illustration">${cadre}</text:p>`
+      : `<text:p text:style-name="Illustration">${cadre}</text:p>` +
+        `<text:p text:style-name="Illustration">${texte}</text:p>`;
+
+  return (
+    `<draw:frame draw:style-name="${frameStyle}" text:anchor-type="${anchorType}" ` +
+    `svg:width="${formatPt(attributs.widthPt)}"${reglages}>` +
+    `<draw:text-box fo:min-height="${formatPt(attributs.heightPt)}">${paragraphe}</draw:text-box>` +
     `</draw:frame>`
   );
 }
@@ -257,6 +304,14 @@ interface MarkerContext {
   deletions: ReadonlySet<string>;
   /** Révisions déjà jalonnées, pour n'émettre qu'un `text:change` par coupure. */
   emittedDeletions: Set<string>;
+  /**
+   * Numéros de figure du document, par `blockId:offset`.
+   *
+   * Résolus à l'export : ODF les porterait par un `text:sequence`, mais un
+   * numéro écrit en clair est lisible par tout le monde, y compris par les
+   * lecteurs qui ne recalculent pas les champs.
+   */
+  figureNumbers?: ReadonlyMap<string, number> | undefined;
 }
 
 /** Sérialise l'annotation d'un fil de commentaires et ses réponses. */
@@ -354,8 +409,11 @@ function serializeParagraph(
   let body = headingAnchor;
   let atStart = true;
   let previous: TextRun | null = null;
+  let offset = 0;
 
   for (const run of node.runs) {
+    const runOffset = offset;
+    offset += run.text.length;
     if (run.text.length === 0) continue;
 
     body += serializeMarkers(previous, run, ctx);
@@ -374,7 +432,12 @@ function serializeParagraph(
     }
 
     if (isImageRun(run)) {
-      body += serializeImage(run, hrefBySrc, styles);
+      body += serializeImage(
+        run,
+        hrefBySrc,
+        styles,
+        ctx.figureNumbers?.get(imageKey(node.id, runOffset)) ?? null,
+      );
       atStart = false;
       continue;
     }
@@ -746,6 +809,7 @@ export function buildContentXml(
       (doc.redlines ?? []).filter((r) => r.type === 'delete').map((r) => r.id),
     ),
     emittedDeletions: new Set(),
+    figureNumbers: figureNumbering(doc),
   };
 
   const body =

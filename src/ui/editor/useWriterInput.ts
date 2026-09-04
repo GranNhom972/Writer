@@ -2,7 +2,7 @@
  * Hook central de contrôle. Transposition de `SwEditWin` — la fenêtre qui, dans
  * Writer, traduit les événements de saisie en commandes sur le modèle.
  *
- * Principe, imposé par le cahier des charges : **rien n'est lu depuis le DOM**. Ni le
+ * Principe d'architecture : **rien n'est lu depuis le DOM**. Ni le
  * texte, ni la position du curseur, ni les limites de ligne. Le clavier et la
  * souris produisent des commandes, les commandes transforment l'état, et le
  * moteur recalcule la géométrie. Le DOM n'en est que la projection.
@@ -32,19 +32,26 @@ import {
   replaceParagraph,
 } from '../../domain/document/document';
 import { normalizeUrl } from '../../domain/document/url';
+import { isFloatingFly } from '../../domain/engine/flyLayout';
 import {
+  captionFormatting,
   clampSize,
+  defaultFlyPlacement,
+  spacingFormatting,
   cropFormatting,
   imageAttributes,
+  imageWrapMode,
   isImageRun,
   makeImageRun,
+  placementFormatting,
+  wrapFormatting,
+  WRAP_FORMAT_KEYS,
   type ImageAttributes,
+  type ImageWrapMode,
 } from '../../domain/document/images';
 import type {
   DocumentPosition,
   DocumentSelection,
-  FlyAnchor,
-  FlySurround,
   ListKind,
   ParagraphNode,
   RunFormatting,
@@ -76,6 +83,7 @@ import {
 import {
   caretGeometry,
   collapsedSelection,
+  comparePositions,
   lineBounds,
   makeSelection,
   moveHorizontal,
@@ -95,10 +103,12 @@ import {
   clearRunFormat,
   createEditorState,
   deleteBackward,
+  deleteCurrentTable,
   deleteCurrentTableColumn,
   deleteCurrentTableRow,
   deleteForward,
   deleteSelection,
+  distributeTableColumns,
   extractFragment,
   insertBlockPageBreak,
   insertFootnote,
@@ -111,8 +121,15 @@ import {
   insertTableRowBelow,
   insertText,
   mergeSelectedCells,
+  moveImageRun,
+  moveToAdjacentCell,
+  resizeTableColumnBoundary,
   selectAll,
   selectionText,
+  selectTableColumn,
+  selectTableRow,
+  selectWholeTable,
+  tableContext,
   bookmarkSelection,
   commentSelection,
   setHeading,
@@ -133,6 +150,7 @@ import {
   commit,
   createSession,
   deletionGroup,
+  dragGroup,
   redo,
   typingGroup,
   undo,
@@ -185,6 +203,16 @@ export interface WriterCommands {
   insertTableColumnLeft: () => void;
   insertTableColumnRight: () => void;
   deleteTableColumn: () => void;
+  deleteTable: () => void;
+  /** Répartit également les colonnes du tableau courant. */
+  distributeColumns: () => void;
+  /** Déplace la frontière entre deux colonnes, à la souris. */
+  resizeColumnBoundary: (tableId: string, boundaryIndex: number, deltaPercent: number) => void;
+  selectRow: (tableId: string, rowIndex: number) => void;
+  selectColumn: (tableId: string, columnIndex: number) => void;
+  selectTable: (tableId: string) => void;
+  /** Passe à la cellule suivante ou précédente (`Tab` / `Maj+Tab`). */
+  goToAdjacentCell: (forward: boolean) => void;
   insertFootnote: (text: string) => void;
   /** Fusionne les cellules sélectionnées (`SwDoc::MergeTbl`). */
   mergeCells: () => void;
@@ -214,12 +242,42 @@ export interface WriterCommands {
   acceptAllRedlines: () => void;
   rejectAllRedlines: () => void;
 
-  /** Ancrage et habillage du cadre image situé à cet offset (`SwFmtSurround`). */
-  setImageWrap: (
+  /**
+   * Intégration au texte du cadre image situé à cet offset.
+   *
+   * Un seul point d'entrée pour les trois attributs d'OpenOffice — ancrage,
+   * habillage et calque : les régler séparément laisserait passer des états
+   * que Writer n'a pas, comme un cadre « devant le texte » resté dans le fil.
+   */
+  setImageWrap: (blockId: string, offset: number, mode: ImageWrapMode) => void;
+  /**
+   * Déplace un cadre flottant. Les coordonnées sont en points, dans le repère
+   * de son ancre (`SwFmtHoriOrient` / `SwFmtVertOrient`).
+   *
+   * Bascule l'alignement horizontal en `from-left` : un cadre qu'on déplace à
+   * la main a par définition quitté son alignement, et le laisser aligné
+   * ramènerait l'image à sa place au prochain calcul.
+   */
+  setImagePosition: (blockId: string, offset: number, xPt: number, yPt: number) => void;
+  /**
+   * Ré-ancre une image au paragraphe où on vient de la lâcher.
+   *
+   * C'est ce que fait `SwFEShell::SetAnchor` à la fin d'un glissement : un
+   * cadre reste tributaire de son ancre — c'est elle qui décide de sa page —,
+   * donc le déposer trois pages plus bas doit changer l'ancre, pas seulement
+   * l'ordonnée. Sans cela, une image traînée loin de son paragraphe restait
+   * dessinée sur la page de celui-ci, et sortait de la feuille.
+   *
+   * Une image « comme caractère » n'a pas de coordonnées : pour elle,
+   * `target` est simplement sa nouvelle place dans le texte, et `xPt`/`yPt`
+   * sont ignorés.
+   */
+  moveImageTo: (
     blockId: string,
     offset: number,
-    anchor: FlyAnchor,
-    surround: FlySurround,
+    target: DocumentPosition,
+    xPt: number,
+    yPt: number,
   ) => void;
 
   insertMath: (latex: string, display: boolean) => void;
@@ -229,6 +287,8 @@ export interface WriterCommands {
   insertImage: (attributes: ImageAttributes) => void;
   /** Réécrit source, dimensions et texte alternatif du cadre situé à cet offset. */
   updateImage: (blockId: string, offset: number, attributes: ImageAttributes) => void;
+  /** Retaille une image depuis l'éditeur, sans passer par la fenêtre. */
+  resizeImage: (blockId: string, offset: number, widthPt: number, heightPt: number) => void;
   deleteImage: (blockId: string, offset: number) => void;
   goToBlock: (blockId: string) => void;
   undo: () => void;
@@ -260,8 +320,26 @@ export interface WriterController {
   measurer: TextMeasurer;
   activeFormat: RunFormatting;
   currentParagraph: ParagraphNode | null;
+  /** Tableau sous le curseur, ou `null` — sert à griser les commandes inertes. */
+  table: ReturnType<typeof tableContext>;
   caret: CaretGeometry | null;
   rects: SelectionRect[];
+  /**
+   * Rectangles de sélection **regroupés par page**, et seulement pour les pages
+   * qui en portent.
+   *
+   * Le regroupement est fait ici, une fois, et non par un `filter` dans la
+   * boucle de rendu des feuilles : un filtre y rendrait un tableau neuf à
+   * chaque rendu pour chaque page, ce qui suffit à faire échouer la
+   * comparaison superficielle de `React.memo(A4Page)` — le document entier
+   * serait alors reconcilié à chaque frappe.
+   *
+   * Une table creuse et non un tableau indexé par page : une sélection ne
+   * touche qu'une page ou deux, et un tableau dense recréerait un `[]` neuf
+   * pour toutes les autres à chaque frappe — le même défaut, déplacé. Les
+   * pages absentes retombent sur la constante gelée `AUCUN_RECT`.
+   */
+  rectsByPage: ReadonlyMap<number, readonly SelectionRect[]>;
   /** Paragraphes posés, regroupés par page — ce que chaque feuille doit peindre. */
   placementsByPage: { blockId: string; placed: PlacedParagraph }[][];
   isFocused: boolean;
@@ -285,6 +363,7 @@ export interface WriterController {
     onPointerDown: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
     onPointerMove: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
     onPointerUp: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
+    onContextMenu: (event: React.MouseEvent<HTMLDivElement>, pageIndex: number) => void;
   };
 }
 
@@ -406,6 +485,8 @@ export interface WriterHooks {
   onEditMath?: (blockId: string, latex: string, display: boolean) => void;
   onOpenImage?: () => void;
   onEditImage?: (blockId: string, offset: number) => void;
+  /** Clic droit dans le document, en coordonnées de fenêtre. */
+  onOpenContextMenu?: (x: number, y: number) => void;
 }
 
 export function useWriterInput(
@@ -433,6 +514,19 @@ export function useWriterInput(
   // stable d'un rendu à l'autre.
   const hooksRef = useRef(hooks);
   hooksRef.current = hooks;
+
+  /**
+   * Le tableau où se trouve le curseur, ou `null`.
+   *
+   * Passe par une référence parce que `onKeyDown` ne dépend volontairement pas
+   * de l'état : y ajouter `session` le reconstruirait à chaque frappe. La
+   * référence est réassignée au rendu, donc toujours à jour quand la touche
+   * arrive.
+   */
+  const tableRef = useRef<ReturnType<typeof tableContext>>(null);
+
+  /** Session courante, pour les gestionnaires qui doivent la lire hors réducteur. */
+  const sessionRef = useRef<EditorSession | null>(null);
 
   /**
    * Les métriques d'une fonte changent au moment où elle finit de charger. Un
@@ -502,6 +596,16 @@ export function useWriterInput(
     [session.state.doc, layout, session.state.selection, measurer],
   );
 
+  const rectsByPage = useMemo(() => {
+    const pages = new Map<number, SelectionRect[]>();
+    for (const rect of rects) {
+      const liste = pages.get(rect.pageIndex);
+      if (liste) liste.push(rect);
+      else pages.set(rect.pageIndex, [rect]);
+    }
+    return pages;
+  }, [rects]);
+
   const placementsByPage = useMemo(() => {
     const pages: { blockId: string; placed: PlacedParagraph }[][] = layout.pages.map(() => []);
     for (const [blockId, entries] of layout.placements) {
@@ -519,6 +623,16 @@ export function useWriterInput(
       ?.paragraph ?? null,
     [session.state.doc, session.state.selection.focus.blockId],
   );
+
+  /**
+   * Tableau sous le curseur — `null` en dehors de toute grille.
+   *
+   * Exposé pour que les menus grisent ce qui ne s'applique pas : une commande
+   * de tableau proposée hors tableau est un clic sans effet, donc un bug d'UX.
+   */
+  const table = useMemo(() => tableContext(session.state), [session.state]);
+  tableRef.current = table;
+  sessionRef.current = session;
 
   /* ------------------------------------------------------------- commandes */
 
@@ -741,6 +855,49 @@ export function useWriterInput(
         focus();
       },
 
+      deleteTable: () => {
+        run('Supprimer le tableau', (state) => deleteCurrentTable(state));
+        focus();
+      },
+
+      distributeColumns: () => {
+        run('Répartir les colonnes', (state) => distributeTableColumns(state));
+        focus();
+      },
+
+      resizeColumnBoundary: (tableId, boundaryIndex, deltaPercent) => {
+        // Le glissement d'une poignée produit des dizaines d'événements : ils
+        // se regroupent en **une** entrée d'historique, sinon dix `Ctrl+Z`
+        // seraient nécessaires pour défaire un seul geste.
+        run(
+          'Largeur de colonne',
+          (state) => resizeTableColumnBoundary(state, tableId, boundaryIndex, deltaPercent),
+          () => dragGroup(`${tableId}:${boundaryIndex}`),
+        );
+      },
+
+      selectRow: (tableId, rowIndex) => {
+        move((state) => selectTableRow(state, tableId, rowIndex));
+        focus();
+      },
+
+      selectColumn: (tableId, columnIndex) => {
+        move((state) => selectTableColumn(state, tableId, columnIndex));
+        focus();
+      },
+
+      selectTable: (tableId) => {
+        move((state) => selectWholeTable(state, tableId));
+        focus();
+      },
+
+      goToAdjacentCell: (forward) => {
+        // `Tab` en fin de tableau ajoute une ligne : la transaction doit donc
+        // passer par `run`, pas par `move`, pour être annulable.
+        run('Cellule suivante', (state) => moveToAdjacentCell(state, forward));
+        focus();
+      },
+
       insertFootnote: (text) => {
         run('Insérer une note de bas de page', (state) => insertFootnote(state, text));
         focus();
@@ -850,36 +1007,93 @@ export function useWriterInput(
         }));
       },
 
-      setImageWrap: (blockId, offset, anchor, surround) => {
-        run('Habillage de l\'image', (state) => {
+      setImageWrap: (blockId, offset, mode) => {
+        run("Intégration de l'image", (state) => {
           const node = paragraphIndex(state.doc).byId.get(blockId)?.paragraph;
           if (!node) return state;
+          const cible = imageRunAt(node.runs, offset);
+          if (!cible) return state;
 
-          const runs = node.runs.map((candidate, index) => {
-            const start = node.runs.slice(0, index).reduce((sum, r) => sum + r.text.length, 0);
-            if (!isImageRun(candidate) || start !== offset) return candidate;
+          const precedent = runFormatting(node.runs[cible.index]!);
+          const formatting = { ...precedent };
 
-            const formatting = { ...runFormatting(candidate) };
-            if (anchor === 'as-char') {
-              // Retour dans le flux : la géométrie flottante n'a plus de sens et
-              // la laisser ressortirait au prochain basculement.
-              delete formatting.imageAnchor;
-              delete formatting.imageSurround;
-              delete formatting.imageXPt;
-              delete formatting.imageYPt;
-              delete formatting.imageWrapMarginPt;
-            } else {
-              formatting.imageAnchor = anchor;
-              formatting.imageSurround = surround;
-              formatting.imageXPt = formatting.imageXPt ?? 0;
-              formatting.imageYPt = formatting.imageYPt ?? 0;
-            }
-            return makeRun(candidate.text, formatting);
-          });
+          /*
+           * Les clés d'habillage sont **effacées** avant d'être réécrites.
+           *
+           * `wrapFormatting` ne rend que ce que le nouveau mode demande, jamais
+           * les absences : sans cet effacement, revenir dans le fil laisserait
+           * derrière lui un `imageInFront` ou un décalage, qui ressortirait au
+           * basculement suivant comme si on ne l'avait jamais quitté.
+           */
+          for (const key of WRAP_FORMAT_KEYS) delete formatting[key];
 
+          if (mode !== 'inline') {
+            Object.assign(
+              formatting,
+              wrapFormatting(mode, precedent.imageAnchor ?? 'to-para'),
+              // Un cadre déjà flottant garde sa position ; un cadre qui quitte
+              // le fil du texte s'en voit donner une, faute de quoi il tomberait
+              // au coin haut-gauche du paragraphe, en travers de sa première ligne.
+              imageWrapMode(precedent) === 'inline'
+                ? defaultFlyPlacement(mode)
+                : {
+                    ...(precedent.imageHoriOrient !== undefined
+                      ? { imageHoriOrient: precedent.imageHoriOrient }
+                      : {}),
+                    ...(precedent.imageHoriRelation !== undefined
+                      ? { imageHoriRelation: precedent.imageHoriRelation }
+                      : {}),
+                    imageXPt: precedent.imageXPt ?? 0,
+                    imageYPt: precedent.imageYPt ?? 0,
+                    ...(precedent.imageWrapMarginPt !== undefined
+                      ? { imageWrapMarginPt: precedent.imageWrapMarginPt }
+                      : {}),
+                  },
+            );
+          }
+
+          const runs = [...node.runs];
+          runs[cible.index] = makeRun(node.runs[cible.index]!.text, formatting);
           return { ...state, doc: replaceParagraph(state.doc, blockId, { ...node, runs }) };
         });
         focus();
+      },
+
+      setImagePosition: (blockId, offset, xPt, yPt) => {
+        setSession((current) => {
+          const node = paragraphIndex(current.state.doc).byId.get(blockId)?.paragraph;
+          if (!node) return current;
+          const cible = imageRunAt(node.runs, offset);
+          if (!cible) return current;
+
+          const cadre = node.runs[cible.index]!;
+          if (!isFloatingFly(cadre)) return current;
+          if (cadre.imageXPt === xPt && cadre.imageYPt === yPt) return current;
+
+          const runs = [...node.runs];
+          runs[cible.index] = {
+            ...cadre,
+            // Un cadre qu'on déplace à la main a quitté son alignement : le
+            // laisser aligné le ramènerait à sa place au prochain calcul, et le
+            // geste n'aurait servi à rien.
+            imageHoriOrient: 'from-left',
+            imageXPt: xPt,
+            imageYPt: yPt,
+          };
+
+          const doc = replaceParagraph(current.state.doc, blockId, { ...node, runs });
+          const next = { ...current.state, doc };
+          if (!transactionAutorisee(lectureSeuleRef.current, current.state, next)) return current;
+          // Tout le glissement forme une seule entrée d'historique.
+          return commit(current, 'Déplacer l’image', next, dragGroup(`fly:${blockId}:${offset}`));
+        });
+      },
+
+      moveImageTo: (blockId, offset, target, xPt, yPt) => {
+        run('Déplacer l’image', (state) => ({
+          ...state,
+          doc: moveImageRun(state.doc, blockId, offset, target, { xPt, yPt }),
+        }));
       },
 
       insertMath: (latex, display) => {
@@ -1092,7 +1306,23 @@ export function useWriterInput(
           // fusion de l'ancien formatage les laisserait en place.
           const runs = [...node.paragraph.runs];
           const conserve = runFormatting(runs[cible.index]!);
-          for (const cle of ['imageAlt', 'imageCropTopPct', 'imageCropRightPct', 'imageCropBottomPct', 'imageCropLeftPct'] as const) {
+          for (const cle of [
+            'imageAlt',
+            'imageCropTopPct',
+            'imageCropRightPct',
+            'imageCropBottomPct',
+            'imageCropLeftPct',
+            'imageCaption',
+            'imageCaptionPosition',
+            'imageCaptionAlign',
+            'imageCaptionManual',
+            'imageMarginPt',
+            'imageCaptionGapPt',
+            // L'habillage suit la même règle : revenir dans le fil du texte
+            // doit faire disparaître la géométrie flottante, et une fusion de
+            // l'ancien formatage la laisserait en place.
+            ...WRAP_FORMAT_KEYS,
+          ] as const) {
             delete conserve[cle];
           }
           runs[cible.index] = makeRun(runs[cible.index]!.text, {
@@ -1102,6 +1332,9 @@ export function useWriterInput(
             imageHeightPt: clampSize(attributes.heightPt),
             ...(attributes.alt ? { imageAlt: attributes.alt } : {}),
             ...cropFormatting(attributes.crop),
+            ...captionFormatting(attributes.caption),
+            ...spacingFormatting(attributes.marginPt, attributes.captionGapPt),
+            ...placementFormatting(attributes.wrap),
           });
 
           const doc = replaceParagraph(current.state.doc, blockId, {
@@ -1118,6 +1351,39 @@ export function useWriterInput(
           });
         });
         focus();
+      },
+
+      /**
+       * Retaille une image en place.
+       *
+       * Ne touche **que** les deux dimensions : tout le reste du formatage est
+       * conservé tel quel. Reconstruire le run comme le fait `updateImage`
+       * effacerait la légende et le rognage à chaque mouvement de souris.
+       */
+      resizeImage: (blockId, offset, widthPt, heightPt) => {
+        setSession((current) => {
+          const node = paragraphIndex(current.state.doc).byId.get(blockId);
+          if (!node) return current;
+          const cible = imageRunAt(node.paragraph.runs, offset);
+          if (!cible) return current;
+
+          const run = node.paragraph.runs[cible.index]!;
+          const largeur = clampSize(widthPt);
+          const hauteur = clampSize(heightPt);
+          if (run.imageWidthPt === largeur && run.imageHeightPt === hauteur) return current;
+
+          const runs = [...node.paragraph.runs];
+          runs[cible.index] = { ...run, imageWidthPt: largeur, imageHeightPt: hauteur };
+
+          const doc = replaceParagraph(current.state.doc, blockId, {
+            ...node.paragraph,
+            runs,
+          });
+          const next = { ...current.state, doc };
+          if (!transactionAutorisee(lectureSeuleRef.current, current.state, next)) return current;
+          // Tout le glissement forme une seule entrée d'historique.
+          return commit(current, 'Redimensionner l’image', next, dragGroup(`img:${blockId}:${offset}`));
+        });
       },
 
       deleteImage: (blockId, offset) => {
@@ -1302,7 +1568,6 @@ export function useWriterInput(
           const direction = key === 'ArrowUp' ? -1 : 1;
           goTo((current) =>
             moveVertical(
-              current.doc,
               layout,
               current.selection.focus,
               direction,
@@ -1369,11 +1634,41 @@ export function useWriterInput(
           return;
         }
 
+        // `Maj+F10` et la touche Menu ouvrent le menu contextuel. Sans elles, les
+        // commandes de tableau ne seraient atteignables qu'à la souris. La zone
+        // de saisie invisible suit le curseur : son rectangle **est** la
+        // position du curseur à l'écran.
+        case 'ContextMenu': {
+          event.preventDefault();
+          const box = inputRef.current?.getBoundingClientRect();
+          hooksRef.current.onOpenContextMenu?.(box?.left ?? 0, box?.bottom ?? 0);
+          return;
+        }
+
+        case 'F10': {
+          if (!shiftKey) break;
+          event.preventDefault();
+          const box = inputRef.current?.getBoundingClientRect();
+          hooksRef.current.onOpenContextMenu?.(box?.left ?? 0, box?.bottom ?? 0);
+          return;
+        }
+
         case 'Tab': {
           // La tabulation reste dans le document : sortir de l'éditeur au
           // clavier se fait par `Échap` puis `Tab`, sinon on ne pourrait jamais
           // en insérer une.
           event.preventDefault();
+
+          // Dans un tableau, `Tab` passe de cellule en cellule — convention
+          // partagée par Word, Google Docs et Writer. Elle prime sur les deux
+          // autres usages : c'est le seul moyen de remplir une grille au
+          // clavier, et une tabulation dans une cellule étroite n'a guère de
+          // sens.
+          if (tableRef.current) {
+            commands.goToAdjacentCell(!shiftKey);
+            return;
+          }
+
           if (shiftKey) {
             commands.indent(-1);
             return;
@@ -1571,7 +1866,9 @@ export function useWriterInput(
 
   /** Coordonnées du pointeur dans la zone de contenu d'une page. */
   const pointToContent = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>): { x: number; y: number } => {
+    // Un `MouseEvent` suffit : la fonction ne lit que `currentTarget` et les
+    // coordonnées de fenêtre, communes à tous les événements de pointage.
+    (event: React.MouseEvent<HTMLDivElement>): { x: number; y: number } => {
       const rect = event.currentTarget.getBoundingClientRect();
       // Le rectangle est déjà mis à l'échelle par le zoom : on divise pour
       // revenir aux coordonnées du modèle, qui ignore le zoom.
@@ -1658,6 +1955,39 @@ export function useWriterInput(
     [layout, measurer, pointToContent, move],
   );
 
+  /**
+   * Clic droit : pose le curseur, puis laisse l'appelant ouvrir le menu.
+   *
+   * Le curseur ne bouge **pas** si le clic tombe dans la sélection courante.
+   * C'est la règle de tous les éditeurs, et elle est indispensable ici : sans
+   * elle, un clic droit sur une ligne sélectionnée pour la supprimer replierait
+   * d'abord la sélection, et la commande ne porterait plus sur rien.
+   */
+  const onContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
+      event.preventDefault();
+      focus();
+
+      const { x, y } = pointToContent(event);
+      const position = positionFromPoint(layout, pageIndex, x, y, measurer);
+      // La référence est assignée au rendu : elle est donc déjà posée quand un
+      // événement de pointage peut arriver.
+      const state = sessionRef.current?.state;
+
+      if (position && state) {
+        const { start, end } = normalizeSelection(state.doc, state.selection);
+        const inside =
+          !state.selection.isCollapsed &&
+          comparePositions(state.doc, position, start) >= 0 &&
+          comparePositions(state.doc, position, end) <= 0;
+        if (!inside) move((current) => setSelection(current, collapsedSelection(position)));
+      }
+
+      hooksRef.current.onOpenContextMenu?.(event.clientX, event.clientY);
+    },
+    [layout, measurer, pointToContent, focus, move],
+  );
+
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, _pageIndex: number) => {
       if (!dragging.current) return;
@@ -1673,14 +2003,58 @@ export function useWriterInput(
     setZoomState(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next)));
   }, []);
 
+  const onFocusInput = useCallback(() => setFocused(true), []);
+  const onBlurInput = useCallback(() => setFocused(false), []);
+
+  /**
+   * Faisceau de gestionnaires, d'identité stable.
+   *
+   * Chaque gestionnaire est déjà tenu par un `useCallback` ; ce qui manquait,
+   * c'était l'identité de **l'objet** qui les porte. Reconstruit à chaque
+   * rendu, il propageait son instabilité à tout ce qui en dépend — au premier
+   * rang `onPagePointerDown`, transmis aux feuilles.
+   */
+  const handlers = useMemo(
+    () => ({
+      onKeyDown,
+      onCompositionStart,
+      onCompositionEnd,
+      onFocus: onFocusInput,
+      onBlur: onBlurInput,
+      onCopy,
+      onCut,
+      onPaste,
+      onPointerDown,
+      onPointerMove,
+      onPointerUp,
+      onContextMenu,
+    }),
+    [
+      onKeyDown,
+      onCompositionStart,
+      onCompositionEnd,
+      onFocusInput,
+      onBlurInput,
+      onCopy,
+      onCut,
+      onPaste,
+      onPointerDown,
+      onPointerMove,
+      onPointerUp,
+      onContextMenu,
+    ],
+  );
+
   return {
     session,
     layout,
     measurer,
     activeFormat,
     currentParagraph,
+    table,
     caret,
     rects,
+    rectsByPage,
     placementsByPage,
     isFocused,
     canUndo: canUndo(session),
@@ -1691,19 +2065,7 @@ export function useWriterInput(
     focus,
     run,
     commands,
-    handlers: {
-      onKeyDown,
-      onCompositionStart,
-      onCompositionEnd,
-      onFocus: () => setFocused(true),
-      onBlur: () => setFocused(false),
-      onCopy,
-      onCut,
-      onPaste,
-      onPointerDown,
-      onPointerMove,
-      onPointerUp,
-    },
+    handlers,
   };
 }
 

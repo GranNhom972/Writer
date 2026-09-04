@@ -4,9 +4,8 @@
  * Le composant ne décide de rien : il **peint** ce que le moteur a calculé.
  * Chaque ligne est un élément positionné à l'abscisse et à l'ordonnée que lui
  * a données `layoutParagraph`, et les segments s'y enchaînent dans le flux.
- * Cette séparation est ce que le cahier des charges appelle « le DOM n'est qu'une
- * projection réactive de l'état » : aucune mesure ne remonte du DOM vers le
- * modèle.
+ * Cette séparation garantit que le DOM n'est qu'une projection réactive de l'état :
+ * aucune mesure ne remonte du DOM vers le modèle.
  */
 
 import { memo, type CSSProperties, type JSX } from 'react';
@@ -18,7 +17,14 @@ import type {
 import type { PlacedParagraph } from '../../domain/engine/paginate';
 import { renderMathHtml } from '../../domain/math/render';
 import { ptToPx } from '../../domain/document/units';
-import { cropGeometry, hasCrop, imageCrop } from '../../domain/document/images';
+import type { ImageWrapMode } from '../../domain/document/images';
+import {
+  cropGeometry,
+  hasCrop,
+  imageCrop,
+  imageKey,
+} from '../../domain/document/images';
+import { ImageFrame } from './ImageFrame';
 import { safeLinkHref } from '../../domain/document/url';
 
 /** Style CSS d'un segment, dérivé de la fonte que le moteur a résolue. */
@@ -83,11 +89,13 @@ function SegmentView({
   blockId,
   onEditMath,
   onEditImage,
+  images,
 }: {
   segment: LayoutSegment;
   blockId: string;
   onEditMath?: ((blockId: string, latex: string, display: boolean) => void) | undefined;
   onEditImage?: ((blockId: string, offset: number) => void) | undefined;
+  images?: ImageContext | undefined;
 }): JSX.Element {
   if (segment.isTab) {
     // La largeur d'une tabulation dépend du taquet atteint : elle est donnée en
@@ -102,61 +110,90 @@ function SegmentView({
   }
 
   if (segment.formatting.imageSrc) {
-    const widthPx = ptToPx(segment.formatting.imageWidthPt ?? 0);
-    const heightPx = ptToPx(segment.formatting.imageHeightPt ?? 0);
-    const alt = segment.formatting.imageAlt ?? '';
+    /*
+     * Une image **flottante** n'est pas peinte ici.
+     *
+     * Sa géométrie vient de `flyLayout`, qui la pose à sa position d'ancrage et
+     * creuse le texte autour ; la couche des cadres flottants s'en charge. La
+     * peindre aussi dans la ligne la dessinait **deux fois** — une fois à sa
+     * place, une fois dans le fil, côte à côte. Le run reste dans la ligne,
+     * sans largeur : c'est ce que dit le modèle (`imageAnchor` ≠ `as-char`).
+     */
+    if (segment.formatting.imageAnchor && segment.formatting.imageAnchor !== 'as-char') {
+      return <span aria-hidden="true" />;
+    }
 
-    // Rognage : le cadre garde la taille que le moteur a calculée et **masque**
-    // ce qui déborde. L'image, elle, est agrandie et décalée de sorte que la
-    // part conservée remplisse exactement le cadre. Rien de ceci ne remonte au
-    // moteur : la géométrie de la ligne ne dépend que de la taille du cadre.
-    const crop = imageCrop(segment.formatting);
-    const decoupe = hasCrop(crop) ? cropGeometry(crop, widthPx, heightPx) : null;
+    const widthPx = ptToPx(segment.formatting.imageWidthPt ?? 0);
+    const imageHeightPx = ptToPx(segment.formatting.imageHeightPt ?? 0);
+
+    // Hauteur de la légende telle que le **moteur** l'a réservée dans la ligne.
+    // La recalculer ici ferait dépendre l'affichage d'une seconde dérivation.
+    const captionPx = segment.captionHeightPx ?? 0;
+
+    if (!images) {
+      // Sans contexte d'image — impression, export — le cadre se peint nu.
+      const crop = imageCrop(segment.formatting);
+      const decoupe = hasCrop(crop) ? cropGeometry(crop, widthPx, imageHeightPx) : null;
+      return (
+        <span
+          className="writer-image"
+          style={{
+            display: 'inline-block',
+            width: `${widthPx}px`,
+            height: `${imageHeightPx}px`,
+            overflow: 'hidden',
+            position: 'relative',
+            verticalAlign: 'baseline',
+          }}
+        >
+          <img
+            src={segment.formatting.imageSrc}
+            alt={segment.formatting.imageAlt ?? ''}
+            draggable={false}
+            style={
+              decoupe
+                ? {
+                    position: 'absolute',
+                    left: `${decoupe.offsetXPx}px`,
+                    top: `${decoupe.offsetYPx}px`,
+                    width: `${decoupe.widthPx}px`,
+                    height: `${decoupe.heightPx}px`,
+                    display: 'block',
+                    maxWidth: 'none',
+                  }
+                : { width: '100%', height: '100%', objectFit: 'fill', display: 'block' }
+            }
+          />
+        </span>
+      );
+    }
+
+    const key = imageKey(blockId, segment.startOffset);
 
     return (
-      <span
-        className="writer-image"
-        style={{
-          display: 'inline-block',
-          width: `${widthPx}px`,
-          height: `${heightPx}px`,
-          overflow: 'hidden',
-          position: 'relative',
-          // Le cadre est posé **sur** la ligne de base et monte d'autant : c'est
-          // ce que fait `SwFlyCntFrm`, et c'est la hauteur que le moteur a déjà
-          // comptée comme ascendance. Tout autre alignement ferait diverger le
-          // rendu du calcul, donc dériver le curseur.
-          verticalAlign: 'baseline',
+      <ImageFrame
+        formatting={segment.formatting}
+        blockId={blockId}
+        offset={segment.startOffset}
+        widthPx={widthPx}
+        imageHeightPx={imageHeightPx}
+        captionHeightPx={captionPx}
+        figureNumber={images.figureNumbers.get(key) ?? null}
+        bodyFontSizePt={images.bodyFontSizePt}
+        selected={
+          images.selected?.blockId === blockId && images.selected.offset === segment.startOffset
+        }
+        zoom={images.zoom}
+        readOnly={images.readOnly}
+        onSelect={images.onSelect}
+        onOpenDialog={(b, o) => {
+          images.onOpenDialog(b, o);
+          onEditImage?.(b, o);
         }}
-        title={alt || "Image — cliquer pour modifier"}
-        onPointerDown={(event) => {
-          event.stopPropagation();
-          onEditImage?.(blockId, segment.startOffset);
-        }}
-        onClick={(event) => {
-          event.stopPropagation();
-          onEditImage?.(blockId, segment.startOffset);
-        }}
-      >
-        <img
-          src={segment.formatting.imageSrc}
-          alt={alt}
-          draggable={false}
-          style={
-            decoupe
-              ? {
-                  position: 'absolute',
-                  left: `${decoupe.offsetXPx}px`,
-                  top: `${decoupe.offsetYPx}px`,
-                  width: `${decoupe.widthPx}px`,
-                  height: `${decoupe.heightPx}px`,
-                  display: 'block',
-                  maxWidth: 'none',
-                }
-              : { width: '100%', height: '100%', objectFit: 'fill', display: 'block' }
-          }
-        />
-      </span>
+        onResize={images.onResize}
+        onWrapChange={images.onWrapChange}
+        onDrop={images.onDrop}
+      />
     );
   }
 
@@ -289,6 +326,31 @@ function MarkerView({
   );
 }
 
+/**
+ * Tout ce dont un cadre image a besoin, en un objet.
+ *
+ * Regroupé plutôt qu'éclaté en dix propriétés : la chaîne de transmission
+ * traverse trois composants, et dix arguments à chaque étage rendraient
+ * illisible ce qui n'est qu'un passage de contexte.
+ */
+export interface ImageContext {
+  /** Numéros de figure du document, par `blockId:offset`. */
+  figureNumbers: ReadonlyMap<string, number>;
+  bodyFontSizePt: number;
+  selected: { blockId: string; offset: number } | null;
+  zoom: number;
+  readOnly: boolean;
+  onSelect: (blockId: string, offset: number) => void;
+  onOpenDialog: (blockId: string, offset: number) => void;
+  onResize: (blockId: string, offset: number, widthPt: number, heightPt: number) => void;
+  /** Change l'intégration au texte du cadre (`SwFmtSurround`). */
+  onWrapChange: (blockId: string, offset: number, mode: ImageWrapMode) => void;
+  /** Déplace un cadre flottant, en points, dans le repère de son ancre. */
+  onMove: (blockId: string, offset: number, xPt: number, yPt: number) => void;
+  /** Fin d'un glissement d'image, aux coordonnées de la fenêtre. */
+  onDrop: (blockId: string, offset: number, clientX: number, clientY: number) => void;
+}
+
 export interface ParagraphViewProps {
   placed: PlacedParagraph;
   layout: ParagraphLayout;
@@ -298,6 +360,7 @@ export interface ParagraphViewProps {
   onEditMath?: ((blockId: string, latex: string, display: boolean) => void) | undefined;
   /** Ouvre l'atelier d'image sur le cadre situé à cet offset. */
   onEditImage?: ((blockId: string, offset: number) => void) | undefined;
+  images?: ImageContext | undefined;
 }
 
 /**
@@ -313,6 +376,7 @@ export const ParagraphView = memo(function ParagraphView({
   onToggleTask,
   onEditMath,
   onEditImage,
+  images,
 }: ParagraphViewProps): JSX.Element {
   const top = placed.topPx + (placed.isContinuation ? 0 : layout.marginTopPx);
   const rows: JSX.Element[] = [];
@@ -360,6 +424,7 @@ export const ParagraphView = memo(function ParagraphView({
             blockId={placed.blockId}
             onEditMath={onEditMath}
             onEditImage={onEditImage}
+            images={images}
           />
         ))}
       </div>,

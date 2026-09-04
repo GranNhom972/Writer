@@ -19,7 +19,7 @@ import type {
 } from '../document/types';
 import { graphemeBoundaries, graphemes, type TextMeasurer } from './measure';
 import { isBlank, type LayoutLine, type ParagraphLayout } from './lineBreak';
-import type { DocumentLayout, PlacedParagraph } from './paginate';
+import type { DocumentLayout, PlacedParagraph, PlacedTable } from './paginate';
 
 export function makePosition(blockId: string, offset: number): DocumentPosition {
   return { blockId, offset };
@@ -375,13 +375,20 @@ export function positionFromPoint(
   yPx: number,
   measurer: TextMeasurer,
 ): DocumentPosition | null {
-  // On parcourt les **placements** plutôt que les blocs de la page : un
-  // paragraphe de cellule y figure au même titre qu'un paragraphe du fil, avec
-  // sa position absolue. Le clic dans un tableau ne demande donc aucun cas
-  // particulier.
+  // Une cellule est une **boîte**, pas un voisinage de texte.
+  //
+  // La recherche ci-dessous prend la ligne la plus proche, toutes cellules
+  // confondues. Or le texte d'une cellule est court et cadré à gauche : cliquer
+  // dans la moitié droite d'une cellule large mettait le curseur plus près de la
+  // ligne de la cellule **suivante** que de la sienne, et le curseur sautait
+  // d'une case. Quand le point tombe dans une cellule, on ne considère donc que
+  // les paragraphes de cette cellule — sa boîte fait autorité.
+  const cellIds = paragraphsOfCellAt(layout, pageIndex, xPx, yPx);
+
   let best: { distance: number; position: DocumentPosition } | null = null;
 
-  for (const [, entries] of layout.placements) {
+  for (const [blockId, entries] of layout.placements) {
+    if (cellIds && !cellIds.has(blockId)) continue;
     for (const entry of entries) {
       if (entry.pageIndex !== pageIndex) continue;
       const placed = entry.placed;
@@ -420,6 +427,47 @@ export function positionFromPoint(
   }
 
   return best?.position ?? null;
+}
+
+/**
+ * Identifiants des paragraphes de la cellule qui contient le point, ou `null`.
+ *
+ * `null` — le point n'est dans aucune cellule — laisse la recherche balayer
+ * toute la page, ce qui reste le bon comportement pour le fil du texte et pour
+ * un clic dans la marge.
+ */
+function paragraphsOfCellAt(
+  layout: DocumentLayout,
+  pageIndex: number,
+  xPx: number,
+  yPx: number,
+): Set<string> | null {
+  const page = layout.pages[pageIndex];
+  if (!page) return null;
+
+  for (const block of page.blocks) {
+    if (block.kind !== 'table') continue;
+    const table = block as PlacedTable;
+
+    for (const row of table.rows) {
+      const top = table.topPx + row.topPx;
+      if (yPx < top || yPx > top + row.heightPx) continue;
+
+      for (const cell of row.cells) {
+        // Une cellule recouverte n'a ni surface ni curseur : c'est sa maîtresse
+        // qui couvre le point, et elle est déjà passée dans cette boucle.
+        if (cell.covered || cell.widthPx <= 0) continue;
+        if (xPx < cell.leftPx || xPx > cell.leftPx + cell.widthPx) continue;
+
+        const ids = new Set(cell.paragraphs.map((paragraph) => paragraph.id));
+        // Une cellule sans paragraphe ne peut rien accueillir : mieux vaut
+        // rendre la main à la recherche générale que de bloquer le clic.
+        return ids.size > 0 ? ids : null;
+      }
+    }
+  }
+
+  return null;
 }
 
 /** Offset le plus proche de l'abscisse `xPx` sur une ligne donnée. */
@@ -474,7 +522,6 @@ export function offsetFromX(
  * traversant des lignes courtes (`SwCrsrShell` conserve la même abscisse).
  */
 export function moveVertical(
-  doc: WriterDocumentState,
   layout: DocumentLayout,
   position: DocumentPosition,
   direction: Direction,
@@ -488,35 +535,152 @@ export function moveVertical(
   const currentLine = paragraphLayout.lines[lineIndex];
   if (!currentLine) return null;
 
-  const targetX = desiredX ?? caretXOnLine(currentLine, position.offset, measurer);
+  const here = lineBox(layout, position.blockId, lineIndex);
+  if (!here) return null;
+
+  /*
+   * `targetX` est une abscisse **de page**, pas de paragraphe.
+   *
+   * Le repère du paragraphe suffisait tant que le voisin se déduisait de
+   * l'ordre du document. Il ne suffit plus dès qu'on cherche le voisin par la
+   * géométrie : deux cellules d'une même ligne ont la même abscisse relative et
+   * ne se distinguent que par l'origine de leur boîte. Mesurer en coordonnées
+   * de page corrige du même coup la dérive du curseur entre deux paragraphes de
+   * retraits différents.
+   */
+  const targetX = desiredX ?? here.leftPx + caretXOnLine(currentLine, position.offset, measurer);
   const targetLineIndex = lineIndex + direction;
 
   if (targetLineIndex >= 0 && targetLineIndex < paragraphLayout.lines.length) {
     const line = paragraphLayout.lines[targetLineIndex]!;
     return {
-      position: { blockId: position.blockId, offset: offsetFromX(line, targetX, measurer) },
+      position: {
+        blockId: position.blockId,
+        offset: offsetFromX(line, targetX - here.leftPx, measurer),
+      },
       desiredX: targetX,
     };
   }
 
-  // Sortie du paragraphe : première ou dernière ligne du voisin.
-  const { order } = paragraphIndex(doc);
-  const at = order.indexOf(position.blockId);
-  const neighbourId = at >= 0 ? order[at + direction] : undefined;
-  if (!neighbourId) return null;
-
-  const neighbourLayout = layout.paragraphLayouts.get(neighbourId);
-  if (!neighbourLayout || neighbourLayout.lines.length === 0) return null;
-
-  const line =
-    direction > 0
-      ? neighbourLayout.lines[0]!
-      : neighbourLayout.lines[neighbourLayout.lines.length - 1]!;
+  // Sortie du paragraphe : on cherche la ligne voisine **par la géométrie**.
+  //
+  // L'ordre du document ne convient pas. `paragraphIndex` aplatit les cellules
+  // dans l'ordre de lecture, si bien que le paragraphe « suivant » d'une cellule
+  // est celui de la cellule **à sa droite** : `Bas` déplaçait le curseur
+  // latéralement dans un tableau, et `Haut` le ramenait vers la gauche. C'est
+  // la géométrie, et elle seule, qui dit ce qui se trouve sous le curseur.
+  const found = nearestLineVertically(layout, here, direction, targetX, position.blockId);
+  if (!found) return null;
 
   return {
-    position: { blockId: neighbourId, offset: offsetFromX(line, targetX, measurer) },
+    position: { blockId: found.blockId, offset: offsetFromX(found.line, targetX - found.leftPx, measurer) },
     desiredX: targetX,
   };
+}
+
+/** Où se trouve une ligne sur sa page : bande verticale et origine horizontale. */
+function lineBox(
+  layout: DocumentLayout,
+  blockId: string,
+  lineIndex: number,
+): { pageIndex: number; top: number; bottom: number; leftPx: number } | null {
+  for (const entry of layout.placements.get(blockId) ?? []) {
+    const placed = entry.placed;
+    if (lineIndex < placed.fromLine || lineIndex >= placed.toLine) continue;
+    const top = paragraphTop(placed) + lineTopWithin(placed.layout, placed, lineIndex);
+    return {
+      pageIndex: entry.pageIndex,
+      top,
+      bottom: top + (placed.layout.lines[lineIndex]?.heightPx ?? 0),
+      leftPx: placed.leftPx,
+    };
+  }
+  return null;
+}
+
+/**
+ * Ligne la plus proche verticalement, dans la direction demandée.
+ *
+ * On retient d'abord la **bande** la plus proche — le plus petit `top` situé
+ * sous la ligne courante, ou le plus grand `bottom` situé au-dessus — puis, à
+ * l'intérieur de cette bande, la ligne la plus proche horizontalement. C'est ce
+ * second départage qui fait tomber le curseur dans la bonne colonne d'un
+ * tableau : les cellules d'une même ligne partagent la même bande, et seule
+ * l'abscisse les distingue.
+ *
+ * La recherche déborde sur la page voisine quand la page courante n'offre rien,
+ * pour que `Bas` en fin de page passe à la suivante.
+ */
+function nearestLineVertically(
+  layout: DocumentLayout,
+  from: { pageIndex: number; top: number; bottom: number },
+  direction: Direction,
+  targetX: number,
+  fromBlockId: string,
+): { blockId: string; line: LayoutLine; leftPx: number } | null {
+  // Tolérance d'un demi-pixel : deux cellules voisines calculent leur ordonnée
+  // par des sommes différentes et peuvent différer d'un arrondi.
+  const EPSILON = 0.5;
+
+  const scan = (
+    pageIndex: number,
+    limit: number | null,
+  ): { blockId: string; line: LayoutLine; leftPx: number } | null => {
+    let best: {
+      band: number;
+      distance: number;
+      blockId: string;
+      line: LayoutLine;
+      leftPx: number;
+    } | null = null;
+
+    for (const [blockId, entries] of layout.placements) {
+      for (const entry of entries) {
+        if (entry.pageIndex !== pageIndex) continue;
+        const placed = entry.placed;
+        let top = paragraphTop(placed);
+
+        for (let i = placed.fromLine; i < placed.toLine; i += 1) {
+          const line = placed.layout.lines[i];
+          if (!line) continue;
+          const bottom = top + line.heightPx;
+          const lineTop = top;
+          top = bottom;
+
+          // La ligne d'où l'on part ne peut pas être sa propre voisine.
+          if (blockId === fromBlockId && lineTop >= from.top - EPSILON && bottom <= from.bottom + EPSILON) {
+            continue;
+          }
+
+          if (direction > 0) {
+            if (limit !== null && lineTop < limit - EPSILON) continue;
+          } else if (limit !== null && bottom > limit + EPSILON) {
+            continue;
+          }
+
+          // Bande : on préfère toujours la plus proche, quelle que soit l'abscisse.
+          const band = direction > 0 ? lineTop : -bottom;
+          const left = placed.leftPx + line.leftPx;
+          const right = left + line.widthPx;
+          const distance = targetX < left ? left - targetX : targetX > right ? targetX - right : 0;
+
+          const closerBand = !best || band < best.band - EPSILON;
+          const sameBandCloserX = best !== null && band <= best.band + EPSILON && distance < best.distance;
+          if (closerBand || sameBandCloserX) {
+            best = { band, distance, blockId, line, leftPx: placed.leftPx };
+          }
+        }
+      }
+    }
+
+    return best ? { blockId: best.blockId, line: best.line, leftPx: best.leftPx } : null;
+  };
+
+  const onPage = scan(from.pageIndex, direction > 0 ? from.bottom : from.top);
+  if (onPage) return onPage;
+
+  // Rien sur cette page : on passe à la suivante, sans contrainte de bande.
+  return scan(from.pageIndex + direction, null);
 }
 
 /** Début / fin de la ligne visuelle — les touches `Origine` et `Fin`. */
@@ -548,7 +712,7 @@ export function selectionRects(
 ): SelectionRect[] {
   if (selection.isCollapsed) return [];
   const { start, end } = normalizeSelection(doc, selection);
-  return rangeRects(doc, layout, start, end, measurer);
+  return rangeRects(layout, start, end, measurer);
 }
 
 /**
@@ -557,15 +721,21 @@ export function selectionRects(
  * Sélection et surlignage de recherche partagent cette géométrie : ce sont deux
  * plages à peindre, seule leur couleur diffère. Les calculer deux fois de deux
  * façons finirait par produire deux résultats.
+ *
+ * Le parcours suit l'**ordre de pose** (`layout.readingOrder`) et non l'index
+ * du document. L'index écarte les sommaires — un curseur ne doit pas pouvoir
+ * s'y poser — et s'en servir ici revenait à ne jamais peindre leurs lignes :
+ * `Ctrl+A` laissait le sommaire en blanc au milieu d'un document surligné, et
+ * une page qui n'en portait que des lignes restait entièrement vierge. La
+ * protection d'un `SwTOXBase` porte sur l'écriture, pas sur la sélection.
  */
 export function rangeRects(
-  doc: WriterDocumentState,
   layout: DocumentLayout,
   start: DocumentPosition,
   end: DocumentPosition,
   measurer: TextMeasurer,
 ): SelectionRect[] {
-  const { order } = paragraphIndex(doc);
+  const order = layout.readingOrder;
   const startRank = order.indexOf(start.blockId);
   const endRank = order.indexOf(end.blockId);
   if (startRank === -1 || endRank === -1) return [];

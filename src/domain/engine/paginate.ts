@@ -16,25 +16,43 @@
  */
 
 import { computeListMarkers } from '../document/lists';
-import { paragraphIndex } from '../document/document';
+import {
+  figureNumbering,
+  gridColumnsOf,
+  paragraphIndex,
+  tableColumnWidths,
+} from '../document/document';
 import { pageGeometry, type PageGeometry } from '../document/pageSetup';
 import { ptToPx } from '../document/units';
 import {
   isTable,
   isToc,
+  type DocumentDefaults,
   type ParagraphNode,
-  type TableCellNode,
   type TableNode,
   type WriterDocumentState,
 } from '../document/types';
-import { layoutParagraph, type LayoutContext, type ParagraphLayout } from './lineBreak';
+import {
+  captionHeightPx,
+  CAPTION_FONT_RATIO,
+  layoutParagraph,
+  type LayoutContext,
+  type ParagraphLayout,
+} from './lineBreak';
+import {
+  captionText,
+  hasCaption,
+  imageCaptionOf,
+  imageKey,
+} from '../document/images';
 import type { TextMeasurer } from './measure';
 import { expandToc } from './tox';
 import {
   collectFlyFrames,
-  pageAnchoredExclusions,
+  projectedExclusions,
   paragraphExclusions,
   type FlyFrame,
+  type FlyPlacement,
 } from './flyLayout';
 
 /** Valeurs par défaut du style « Standard » de Writer. */
@@ -119,6 +137,36 @@ export interface PlacedCell {
   covered?: boolean;
 }
 
+/**
+ * Hauteur du cadre d'une cellule, fusion verticale comprise.
+ *
+ * Le pendant vertical de `colSpan` : une maîtresse qui couvre trois lignes
+ * porte le cadre des trois. Peinte à la hauteur de sa seule ligne, elle
+ * laissait les deux suivantes sans bordure — les cellules `covered` ne peignant
+ * rien par ailleurs, la grille s'ouvrait sur toute la zone fusionnée.
+ *
+ * La somme porte sur les lignes **effectivement posées** : un tableau scindé
+ * par la pagination n'a pas ses lignes suivantes sur la page courante, et le
+ * cadre s'arrête alors au bas de la page — le rendu attendu.
+ *
+ * Vit ici, dans le moteur, et non dans la feuille : l'écran et l'export PDF
+ * peignent la même grille et doivent la calculer par la même fonction. Les deux
+ * portaient d'ailleurs le même défaut, chacun de son côté.
+ */
+export function cellFrameHeightPx(
+  rows: readonly PlacedRow[],
+  rowPos: number,
+  cell: PlacedCell,
+): number {
+  const span = cell.rowSpan ?? 1;
+  if (span <= 1) return rows[rowPos]?.heightPx ?? 0;
+  let total = 0;
+  for (let i = rowPos; i < Math.min(rowPos + span, rows.length); i += 1) {
+    total += rows[i]?.heightPx ?? 0;
+  }
+  return total;
+}
+
 export interface PlacedRow {
   rowId: string;
   rowIndex: number;
@@ -152,6 +200,47 @@ export interface LaidOutPage {
   footnoteAreaHeightPx?: number;
   /** Cadres flottants à peindre sur cette page (`SwFlyFreeFrm`). */
   flies?: LaidOutFly[];
+  /**
+   * Les trois partitions que la peinture consomme, posées ici une fois pour
+   * toutes plutôt que refiltrées à chaque rendu.
+   *
+   * `A4Page` en tirait cinq `filter` par feuille et par rendu — deux sur les
+   * cadres pour séparer les calques `hell` et `heaven`, trois sur les blocs
+   * pour retrouver les mêmes tableaux. Autant de tableaux neufs, donc autant
+   * de props d'identité changeante sous un composant mémoïsé, et cinq
+   * parcours par feuille sur le chemin de la frappe.
+   *
+   * Le moteur connaît déjà `imageInFront` et `kind` : la partition lui revient.
+   */
+  fliesHell: readonly LaidOutFly[];
+  fliesHeaven: readonly LaidOutFly[];
+  tables: readonly PlacedTable[];
+}
+
+/** Partitions vides partagées — voir `LaidOutPage`. */
+const AUCUN_FLY: readonly LaidOutFly[] = Object.freeze([]);
+const AUCUN_TABLEAU: readonly PlacedTable[] = Object.freeze([]);
+
+/**
+ * Calcule les partitions de peinture d'une page.
+ *
+ * Appelée une fois les cadres flottants rattachés : `attachFlies` peut encore
+ * ajouter des cadres après la clôture de la page.
+ */
+function partitionnerPage(page: LaidOutPage): void {
+  let hell: LaidOutFly[] | null = null;
+  let heaven: LaidOutFly[] | null = null;
+  for (const laid of page.flies ?? AUCUN_FLY) {
+    if (laid.fly.run.imageInFront) (heaven ??= []).push(laid);
+    else (hell ??= []).push(laid);
+  }
+  let tables: PlacedTable[] | null = null;
+  for (const block of page.blocks) {
+    if (block.kind === 'table') (tables ??= []).push(block);
+  }
+  page.fliesHell = hell ?? AUCUN_FLY;
+  page.fliesHeaven = heaven ?? AUCUN_FLY;
+  page.tables = tables ?? AUCUN_TABLEAU;
 }
 
 export interface DocumentLayout {
@@ -168,8 +257,30 @@ export interface DocumentLayout {
    * paragraphe de texte : c'est elle qui la rend cliquable.
    */
   tocTargets: Map<string, string>;
+  /**
+   * Numéro de figure de chaque image auto-numérotée, par `blockId:offset`.
+   *
+   * Publié par la mise en page plutôt que recalculé au rendu : les deux
+   * partiraient du même document, mais deux dérivations séparées finiraient par
+   * diverger — et c'est la hauteur mesurée ici qui fait autorité.
+   */
+  figureNumbers: Map<string, number>;
   /** Identifiants des paragraphes engendrés par un sommaire, donc non éditables. */
   generatedBlockIds: Set<string>;
+  /**
+   * Ordre de lecture **réellement mis en page**, paragraphes engendrés compris.
+   *
+   * Distinct de `paragraphIndex(doc).order`, et la différence est celle qui
+   * compte : l'index du document écarte les sommaires, parce qu'un curseur ne
+   * doit pas pouvoir s'y poser. C'est juste pour l'édition, et faux pour la
+   * peinture — une sélection qui traverse un sommaire doit le montrer surligné,
+   * comme le fait Writer, où un `SwTOXBase` est protégé en écriture et non en
+   * sélection.
+   *
+   * Publié par la mise en page parce qu'elle seule connaît cet ordre : les
+   * lignes d'un sommaire n'existent qu'ici, développées juste avant la pose.
+   */
+  readingOrder: readonly string[];
 }
 
 export interface PaginateOptions {
@@ -256,6 +367,9 @@ class PageBuilder {
       index: this.pages.length,
       blocks: this.blocks,
       usedHeightPx: this.y,
+      fliesHell: AUCUN_FLY,
+      fliesHeaven: AUCUN_FLY,
+      tables: AUCUN_TABLEAU,
     };
     if (this.footnotes.length > 0) {
       page.footnotes = [...this.footnotes].sort((a, b) => a.index - b.index);
@@ -305,14 +419,40 @@ export function paginateDocument(
   doc: WriterDocumentState,
   options: PaginateOptions,
 ): DocumentLayout {
-  const flies = collectFlyFrames(doc);
-  const hasPageFlies = flies.some((fly) => fly.anchor === 'to-page');
+  // La légende d'un cadre flottant compte dans sa hauteur : le texte la
+  // contourne comme il contourne l'image.
+  const figureNumbersForFlies = figureNumbering(doc);
+  // Les cadres sont posés **avant** la première passe : leur alignement se
+  // résout sur la géométrie de la feuille, qui ne dépend d'aucun placement.
+  const flyGeometry = pageGeometry(doc.pageSetup);
+  const flies = collectFlyFrames(doc, flyGeometry, (run, blockId, offset, widthPx) =>
+    hasCaption(run)
+      ? captionHeightPx(
+          captionText(
+            imageCaptionOf(run),
+            figureNumbersForFlies.get(imageKey(blockId, offset)) ?? null,
+          ),
+          widthPx,
+          ptToPx(doc.defaults.fontSizePt) * CAPTION_FONT_RATIO,
+          options.measurer,
+        )
+      : 0,
+  );
   const hasToc = doc.blocks.some(isToc);
 
   const first = layoutPass(doc, options, flies, new Map(), new Map());
-  if (!hasToc && !hasPageFlies) return first;
+  /*
+   * Une seconde passe dès qu'il y a un cadre, et non plus seulement pour ceux
+   * ancrés à la page.
+   *
+   * Un cadre dépasse presque toujours de son ancre — une image de huit
+   * centimètres dans un paragraphe de deux lignes déborde nécessairement sur ce
+   * qui suit —, et le texte suivant ne peut le contourner que si l'on sait où
+   * le cadre est **tombé**. C'est ce que la première passe apprend.
+   */
+  if (!hasToc && flies.length === 0) return first;
 
-  return layoutPass(doc, options, flies, headingPages(doc, first), anchorPages(first));
+  return layoutPass(doc, options, flies, headingPages(doc, first), flyPlacements(first));
 }
 
 /** Page 1-indexée de chaque titre du flux principal, d'après une passe faite. */
@@ -329,14 +469,142 @@ function headingPages(
   return out;
 }
 
-/** Page **0-indexée** portant l'ancre de chaque paragraphe. */
-function anchorPages(layout: DocumentLayout): Map<string, number> {
-  const out = new Map<string, number>();
+/**
+ * Page et ordonnée de l'ancre de chaque paragraphe, d'après une passe faite.
+ *
+ * La **première** occurrence seule : un paragraphe coupé entre deux pages
+ * ancre ses cadres là où il commence, comme `SwFlyFrm::AnchorFrm` les ancre au
+ * `SwTxtFrm` maître et non à sa suite.
+ */
+function flyPlacements(layout: DocumentLayout): Map<string, FlyPlacement> {
+  const out = new Map<string, FlyPlacement>();
   for (const [blockId, entries] of layout.placements) {
     const first = entries[0];
-    if (first) out.set(blockId, first.pageIndex);
+    if (first) out.set(blockId, { pageIndex: first.pageIndex, topPx: first.placed.topPx });
   }
   return out;
+}
+
+/* ------------------------------------------- partage des mises en page */
+
+/**
+ * Une mise en page de paragraphe déjà calculée, et le contexte qui l'a produite.
+ */
+interface VarianteLayout {
+  /** Comparés par identité : ce sont des objets immuables du document. */
+  defaults: DocumentDefaults;
+  signature: string;
+  layout: ParagraphLayout;
+}
+
+/**
+ * Mises en page conservées d'une pagination à l'autre.
+ *
+ * Le premier niveau est le **mesureur**, qui vit aussi longtemps que la session
+ * d'édition : changer de mesureur — donc de métriques — doit repartir de zéro.
+ * Le second est le **nœud de paragraphe**, immuable : une frappe remplace le
+ * nœud modifié et laisse tous les autres intacts, si bien que l'appartenance au
+ * cache dit exactement « ce paragraphe n'a pas changé ».
+ *
+ * Deux `WeakMap` imbriquées : rien ici ne retient un document ni un paragraphe
+ * en vie, et la pile d'annulation garde naturellement chaudes les versions
+ * qu'elle référence encore.
+ */
+const layoutsMemoises = new WeakMap<TextMeasurer, WeakMap<ParagraphNode, VarianteLayout[]>>();
+
+/**
+ * Nombre de contextes distincts conservés pour un même paragraphe.
+ *
+ * Un paragraphe est mis en page une fois par passe, et `paginateDocument` en
+ * fait au plus deux (sommaire et cadres flottants) ; en cellule de tableau la
+ * largeur diffère encore. Quatre couvre ces cas avec de la marge, et borne le
+ * cache à une taille constante par paragraphe.
+ */
+const MAX_VARIANTES = 4;
+
+/**
+ * Empreinte des entrées de contexte qui ne sont pas des identités stables.
+ *
+ * `marker`, `exclusions` et `figureNumbers` sont reconstruits à chaque passe :
+ * les comparer par identité rejetterait toujours le cache. Ce sont en revanche
+ * des valeurs plates et courtes, qu'une chaîne décrit intégralement.
+ */
+function signatureContexte(ctx: LayoutContext, figures: string): string {
+  const m = ctx.marker;
+  const marqueur = m ? `${m.kind}/${m.level}/${m.text}/${m.checked ? 1 : 0}/${m.value}` : '';
+  let exclusions = '';
+  for (const e of ctx.exclusions ?? []) {
+    exclusions += `${e.topPx},${e.bottomPx},${e.leftPx},${e.rightPx};`;
+  }
+  return `${ctx.contentWidthPx}|${ctx.tabStopPx ?? ''}|${marqueur}|${exclusions}|${figures}`;
+}
+
+/**
+ * Numéros de figure qui concernent ce paragraphe, et eux seuls.
+ *
+ * `layoutParagraph` ne consulte la table que par `imageKey(blockId, offset)` :
+ * les numéros des autres paragraphes n'entrent donc pas dans le résultat, et
+ * les faire entrer dans l'empreinte invaliderait tout le document dès qu'une
+ * image est insérée n'importe où.
+ */
+function figuresDuParagraphe(ctx: LayoutContext): string {
+  if (!ctx.figureNumbers || !ctx.blockId) return '';
+  const prefixe = `${ctx.blockId}:`;
+  let out = '';
+  for (const [cle, valeur] of ctx.figureNumbers) {
+    if (cle.startsWith(prefixe)) out += `${cle}=${valeur};`;
+  }
+  return out;
+}
+
+/**
+ * Met en page un paragraphe, en réutilisant le résultat s'il est déjà connu.
+ *
+ * Deux gains, de natures différentes :
+ *
+ *  - **le calcul** : le découpage en lignes et la mesure des grappes sont le
+ *    poste dominant d'une pagination. Une frappe ne modifie qu'un paragraphe ;
+ *    recomposer les autres à l'identique était du travail pur perdu, payé à
+ *    chaque caractère et proportionnel à la longueur du document.
+ *  - **l'identité** : le résultat rendu est l'objet **précédent**, et non un
+ *    équivalent. C'est ce qui rend `React.memo(ParagraphView)` opérant — un
+ *    objet neuf à chaque passe, même de contenu identique, échoue à la
+ *    comparaison superficielle et force le rendu de tout le document.
+ *
+ * La justesse tient à l'immuabilité : le nœud de paragraphe n'est jamais
+ * modifié en place, et l'empreinte couvre tout ce dont dépend le résultat.
+ */
+function layoutParagraphMemoise(
+  paragraph: ParagraphNode,
+  ctx: LayoutContext,
+): ParagraphLayout {
+  let parParagraphe = layoutsMemoises.get(ctx.measurer);
+  if (!parParagraphe) {
+    parParagraphe = new WeakMap<ParagraphNode, VarianteLayout[]>();
+    layoutsMemoises.set(ctx.measurer, parParagraphe);
+  }
+
+  const signature = signatureContexte(ctx, figuresDuParagraphe(ctx));
+  const variantes = parParagraphe.get(paragraph);
+  if (variantes) {
+    for (const variante of variantes) {
+      if (variante.defaults === ctx.defaults && variante.signature === signature) {
+        return variante.layout;
+      }
+    }
+  }
+
+  const layout = layoutParagraph(paragraph, ctx);
+  const entree: VarianteLayout = { defaults: ctx.defaults, signature, layout };
+  if (!variantes) {
+    parParagraphe.set(paragraph, [entree]);
+  } else {
+    // Les variantes les plus récentes en tête : la plus utile est la dernière
+    // posée, et la plus ancienne sort quand le plafond est atteint.
+    variantes.unshift(entree);
+    if (variantes.length > MAX_VARIANTES) variantes.length = MAX_VARIANTES;
+  }
+  return layout;
 }
 
 /** Une passe complète de mise en page. */
@@ -345,7 +613,7 @@ function layoutPass(
   options: PaginateOptions,
   flies: readonly FlyFrame[],
   headingPageNumbers: ReadonlyMap<string, number>,
-  flyAnchorPages: ReadonlyMap<string, number>,
+  flyAnchorPlacements: ReadonlyMap<string, FlyPlacement>,
 ): DocumentLayout {
   const geometry = pageGeometry(doc.pageSetup);
   const baseCtx: LayoutContext = {
@@ -359,6 +627,9 @@ function layoutPass(
   // le numéro d'un élément dépend de ce qui le précède, il ne peut donc pas se
   // déduire d'un paragraphe pris isolément.
   const markers = computeListMarkers(doc);
+  // Numéros de figure : dérivés une fois par passe de mise en page, jamais
+  // conservés dans le document (cf. `figureNumbering`).
+  const figureNumbers = figureNumbering(doc);
 
   const paragraphLayouts = new Map<string, ParagraphLayout>();
   const placements = new Map<string, { pageIndex: number; placed: PlacedParagraph }[]>();
@@ -375,21 +646,27 @@ function layoutPass(
   const layoutOf = (paragraph: ParagraphNode, ctx: LayoutContext): ParagraphLayout => {
     const marker = markers.get(paragraph.id);
     const own = paragraphExclusions(flies, paragraph, ctx.contentWidthPx);
-    const fromPage = flyAnchorPages.size
-      ? pageAnchoredExclusions(
+    // Les cadres venus d'ailleurs — ancrés à la page, ou à un paragraphe voisin
+    // dont ils débordent — n'ont de position connue qu'après une première passe.
+    const ailleurs = flyAnchorPlacements.size
+      ? projectedExclusions(
           flies,
           builder.pages.length,
-          flyAnchorPages,
+          flyAnchorPlacements,
           builder.top,
           ctx.contentWidthPx,
+          paragraph.id,
         )
       : [];
-    const exclusions = own.length + fromPage.length > 0 ? [...own, ...fromPage] : undefined;
+    const exclusions = own.length + ailleurs.length > 0 ? [...own, ...ailleurs] : undefined;
 
     let effective = ctx;
     if (marker) effective = { ...effective, marker };
     if (exclusions) effective = { ...effective, exclusions };
-    return layoutParagraph(paragraph, effective);
+    // Le paragraphe et la table des numéros : la mesure d'une légende a besoin
+    // des deux pour connaître le texte qu'elle doit replier.
+    effective = { ...effective, blockId: paragraph.id, figureNumbers };
+    return layoutParagraphMemoise(paragraph, effective);
   };
 
   const record = (placed: PlacedParagraph): void => {
@@ -422,7 +699,26 @@ function layoutPass(
   // celle de leur ancre, information qui n'existe qu'après placement.
   attachFlies(pages, flies, placements, geometry);
 
-  return { pages, geometry, paragraphLayouts, placements, tocTargets, generatedBlockIds };
+  for (const page of pages) partitionnerPage(page);
+
+  return {
+    pages,
+    geometry,
+    paragraphLayouts,
+    placements,
+    tocTargets,
+    generatedBlockIds,
+    figureNumbers,
+    /*
+     * L'ordre de pose, lu dans la table des mises en page.
+     *
+     * `paragraphLayouts` est alimentée au fil du parcours du flux développé —
+     * un paragraphe quand on l'atteint, les paragraphes d'un tableau quand on
+     * mesure ses lignes — et une `Map` conserve l'ordre d'insertion. Ses clés
+     * sont donc déjà l'ordre de lecture, sommaire développé compris.
+     */
+    readingOrder: [...paragraphLayouts.keys()],
+  };
 }
 
 /**
@@ -484,14 +780,28 @@ function attachFlies(
     const topPx =
       fly.anchor === 'to-para' ? placement.placed.topPx + fly.topPx : fly.topPx;
 
+    /*
+     * Le cadre est retenu sur la **feuille**, non dans la colonne de texte.
+     *
+     * `SwFlyFreeFrm::CheckClip` borne de même : il empêche un cadre de sortir
+     * de la page, et le laisse déborder dans la marge. Serrer ici à la colonne
+     * rendrait `imageHoriRelation: 'page'` inopérant — un cadre aligné sur le
+     * bord de la feuille reviendrait aussitôt contre le texte.
+     */
+    const minLeftPx = -geometry.contentLeftPx;
+    const maxLeftPx = minLeftPx + geometry.pageWidthPx - fly.widthPx;
+
     const laid: LaidOutFly = {
       fly,
-      leftPx: Math.max(0, Math.min(fly.leftPx, geometry.contentWidthPx - fly.widthPx)),
+      leftPx: Math.max(minLeftPx, Math.min(fly.leftPx, Math.max(minLeftPx, maxLeftPx))),
       topPx,
       widthPx: fly.widthPx,
       heightPx: fly.heightPx,
     };
-    page.flies = page.flies ? [...page.flies, laid] : [laid];
+    // `push` et non une recopie : recréer le tableau à chaque cadre rendait le
+    // rattachement quadratique en nombre de cadres sur une même page.
+    if (page.flies) page.flies.push(laid);
+    else page.flies = [laid];
   }
 }
 
@@ -795,6 +1105,37 @@ function makePlaced(
 /* ------------------------------------------------------------------ tableaux */
 
 /**
+ * Frontières des colonnes, en pixels, cumulées **puis** arrondies.
+ *
+ * Le tableau rendu compte `n + 1` bornes pour `n` colonnes : `bornes[i]` est le
+ * bord gauche de la colonne `i`, `bornes[i + 1]` son bord droit.
+ *
+ * L'ordre des deux opérations est tout l'objet de la fonction. Arrondir chaque
+ * largeur puis les additionner fait dériver l'erreur d'une colonne à l'autre —
+ * jusqu'à un pixel entier d'écart sur la dernière, qui ne tombe alors plus sur
+ * le bord de la zone de texte. Cumuler d'abord puis arrondir le cumul borne
+ * l'erreur à un demi-pixel **sur chaque borne prise isolément**, sans jamais
+ * l'accumuler : `X_n = round(somme des W_i)`.
+ *
+ * Les largeurs se lisent ensuite par **différence de deux bornes**, jamais par
+ * une somme indépendante. C'est ce qui garantit `gauche_i + largeur_i` égal à
+ * `gauche_{i+1}` au pixel près : les cellules sont peintes en `border-box` avec
+ * une bordure d'un pixel, et le moindre écart sous-pixel entre le bord droit
+ * d'une cellule et le bord gauche de sa voisine ouvre une couture claire ou
+ * double le trait selon le niveau de zoom.
+ */
+function columnBoundariesPx(table: TableNode, contentWidthPx: number): number[] {
+  const pourcentages = tableColumnWidths(table);
+  const bornes: number[] = [0];
+  let cumul = 0;
+  for (const pct of pourcentages) {
+    cumul += pct;
+    bornes.push(Math.round((contentWidthPx * cumul) / 100));
+  }
+  return bornes;
+}
+
+/**
  * Pose un tableau, en le coupant au besoin **entre deux lignes**.
  *
  * `SwTabFrm::Split` procède ainsi, et répète les lignes d'en-tête en haut de
@@ -811,8 +1152,12 @@ function placeTable(
   layoutOf: (paragraph: ParagraphNode, ctx: LayoutContext) => ParagraphLayout,
   footnotes: FootnoteContext,
 ): void {
+  // La grille est une propriété du tableau, pas de la ligne : la calculer dans
+  // `measureRow` la reconstruisait — deux tableaux de nombres compris — à
+  // chaque ligne, donc à chaque pagination, donc à chaque frappe.
+  const bornesPx = columnBoundariesPx(table, geometry.contentWidthPx);
   const measured = table.rows.map((row, rowIndex) =>
-    measureRow(table, row.id, rowIndex, ctx, geometry, paragraphLayouts, layoutOf),
+    measureRow(table, row.id, rowIndex, bornesPx, ctx, geometry, paragraphLayouts, layoutOf),
   );
   const headerRows = measured.filter((row) => row.isHeader);
   const headerHeight = headerRows.reduce((sum, row) => sum + row.heightPx, 0);
@@ -919,6 +1264,8 @@ function measureRow(
   table: TableNode,
   rowId: string,
   rowIndex: number,
+  /** Bornes de colonnes du tableau — cf. `columnBoundariesPx`. */
+  bornesPx: readonly number[],
   ctx: LayoutContext,
   geometry: PageGeometry,
   paragraphLayouts: Map<string, ParagraphLayout>,
@@ -926,17 +1273,15 @@ function measureRow(
 ): PlacedRow {
   const row = table.rows[rowIndex]!;
   const cells: PlacedCell[] = [];
-  let left = 0;
   let height = 0;
 
-  // La largeur par défaut se compte en **colonnes de grille** et non en nombre
-  // de cellules : après une fusion, une ligne peut n'avoir plus que deux
-  // cellules pour quatre colonnes, et diviser par deux les élargirait à tort.
-  const gridColumns = Math.max(1, gridWidthOf(row));
-  const defaultPercent = 100 / gridColumns;
+  const derniereBorne = bornesPx[bornesPx.length - 1] ?? 0;
+  const gridCols = gridColumnsOf(row);
 
   row.cells.forEach((cell, cellIndex) => {
+    const gridCol = gridCols[cellIndex] ?? cellIndex;
     const span = Math.max(1, cell.colSpan ?? 1);
+    const leftPx = bornesPx[gridCol] ?? 0;
 
     // Cellule recouverte par une fusion (`SwTableBox` de RowSpan négatif) :
     // elle garde sa place dans la grille mais n'est ni mesurée ni peinte.
@@ -945,24 +1290,24 @@ function measureRow(
         cellId: cell.id,
         rowIndex,
         cellIndex,
-        leftPx: left,
+        leftPx,
         widthPx: 0,
         layouts: [],
         paragraphs: [],
         paddingPx: 0,
         covered: true,
       });
-      left += (geometry.contentWidthPx * defaultPercent * span) / 100;
       return;
     }
 
-    const paddingPx = ptToPx(cell.paddingPt ?? DEFAULT_CELL_PADDING_PT);
-    // Une cellule fusionnée occupe la largeur de toutes les colonnes qu'elle
-    // couvre : c'est ce que rend `SwTableBox::GetFrmFmt()->GetFrmSize()` après
-    // un `MergeTbl`.
-    const percent = cell.widthPercent ?? defaultPercent * span;
-    const widthPx = (geometry.contentWidthPx * percent) / 100;
+    // Différence de deux bornes, et non somme des largeurs traversées : c'est
+    // la seule forme qui referme exactement la grille sur la borne suivante.
+    let widthPx = (bornesPx[Math.min(gridCol + span, bornesPx.length - 1)] ?? derniereBorne) - leftPx;
+    if (widthPx <= 0) {
+      widthPx = Math.round((geometry.contentWidthPx * (cell.widthPercent ?? 100)) / 100);
+    }
 
+    const paddingPx = ptToPx(cell.paddingPt ?? DEFAULT_CELL_PADDING_PT);
     const innerCtx: LayoutContext = {
       ...ctx,
       contentWidthPx: Math.max(1, widthPx - paddingPx * 2),
@@ -986,7 +1331,7 @@ function measureRow(
       cellId: cell.id,
       rowIndex,
       cellIndex,
-      leftPx: left,
+      leftPx,
       widthPx,
       layouts,
       paragraphs: cell.blocks,
@@ -994,7 +1339,6 @@ function measureRow(
       ...(span > 1 ? { colSpan: span } : {}),
       ...(rowSpan > 1 ? { rowSpan } : {}),
     });
-    left += widthPx;
   });
 
   return {
@@ -1005,15 +1349,4 @@ function measureRow(
     cells,
     isHeader: row.isHeader === true,
   };
-}
-
-/**
- * Nombre de colonnes de grille d'une ligne.
- *
- * Chaque cellule en occupe exactement une, recouvertes comprises : c'est
- * l'invariant posé par `gridColumnsOf` (document.ts). Sommer les `colSpan`
- * compterait deux fois chaque colonne fusionnée.
- */
-function gridWidthOf(row: { cells: readonly TableCellNode[] }): number {
-  return row.cells.length;
 }

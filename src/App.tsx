@@ -118,7 +118,41 @@ function messageErreur(error: unknown): string {
 }
 
 export function App(): JSX.Element {
-  const [doc, setDoc] = useState<WriterDocumentState>(demoDocument);
+  /**
+   * L'adresse d'ouverture, lue **une seule fois** au premier rendu.
+   *
+   * L'effet d'ouverture CloudServ efface le fragment aussitôt qu'il l'a lu —
+   * un billet n'a rien à faire dans la barre d'adresse ni dans l'historique.
+   * Les effets suivants ne peuvent donc plus interroger `window.location` :
+   * ils y trouveraient une adresse nue et concluraient à tort au mode
+   * autonome, ce qui chargeait le document d'exemple **par-dessus** le
+   * document CloudServ tout juste ouvert.
+   *
+   * Le calcul se fait pendant le rendu, avant tout effet, ce qui garantit de
+   * voir l'adresse d'origine quel que soit l'ordre d'exécution.
+   */
+  const [lienInitial] = useState(() => ({
+    cloudServ: readCloudServLink(window.location.hash, window.location.pathname, window.location.search),
+    partage: readShareLink(window.location.search),
+  }));
+
+  /**
+   * Document affiché. Le choix de l'état initial n'est pas cosmétique.
+   *
+   * Ouvert depuis CloudServ ou depuis un partage, l'éditeur part d'un document
+   * **vide** : le contenu réel arrive par la synchronisation collaborative.
+   * Y placer le document de démonstration le ferait apparaître le temps que la
+   * synchronisation s'établisse — et, en écriture, ce contenu local pouvait
+   * être fusionné dans le document partagé, écrasant celui de l'utilisateur.
+   *
+   * Le document de démonstration reste l'accueil du mode autonome, quand
+   * l'éditeur est ouvert directement et n'a rien d'autre à montrer.
+   */
+  const [doc, setDoc] = useState<WriterDocumentState>(() =>
+    lienInitial.cloudServ || lienInitial.partage
+      ? createEmptyDocument('')
+      : demoDocument(),
+  );
   const [generation, setGeneration] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -130,6 +164,7 @@ export function App(): JSX.Element {
   const [shareOpen, setShareOpen] = useState(false);
   /** Adresse locale : celle du lien de partage, ou une valeur de travail. */
   const [ownerEmail, setOwnerEmail] = useState('moi@exemple.fr');
+
 
   // La commande d'application distante vient de l'éditeur, qui possède l'état.
   const applyRemoteRef = useRef<
@@ -172,20 +207,23 @@ export function App(): JSX.Element {
    * clignoter un contenu qui n'est pas le bon.
    */
   /**
-   * Ouverture depuis CloudServ : `#doc=<uuid>&token=<billet>`.
+   * Ouverture depuis CloudServ : `/doc/<uuid>#token=<billet>` ou `#doc=<uuid>&token=<billet>`.
    *
    * Aucun appel réseau préalable — contrairement au partage géré par Writer, où
    * il faut d'abord rejoindre pour connaître sa permission. Ici c'est CloudServ
    * qui a tranché : le billet **est** la réponse, signé et lié à ce document.
    *
-   * Le fragment est effacé aussitôt lu. Il resterait sinon dans la barre
-   * d'adresse et dans l'historique du navigateur, où un billet n'a rien à faire.
+   * Le fragment / paramètre portant le jeton est effacé de la barre d'adresse
+   * tout en conservant la route isolée `/doc/<docId>`.
    */
   useEffect(() => {
-    const lien = readCloudServLink(window.location.hash);
+    const lien = lienInitial.cloudServ;
     if (!lien) return;
 
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    const targetUrl = `/doc/${lien.docId}`;
+    if (window.location.pathname !== targetUrl || window.location.hash || window.location.search) {
+      window.history.replaceState(null, '', targetUrl);
+    }
 
     const claims = readTicketClaims(lien.token);
     if (!claims) {
@@ -211,10 +249,10 @@ export function App(): JSX.Element {
         ? 'Document CloudServ ouvert. Vos modifications sont enregistrées régulièrement dans votre Drive.'
         : 'Document CloudServ ouvert en lecture seule.',
     );
-  }, []);
+  }, [lienInitial]);
 
   useEffect(() => {
-    const lien = readShareLink(window.location.search);
+    const lien = lienInitial.partage;
     if (!lien) return;
 
     let annule = false;
@@ -243,6 +281,56 @@ export function App(): JSX.Element {
     return () => {
       annule = true;
     };
+  }, [lienInitial]);
+
+  /**
+   * Chargement par défaut du document d'exemple ODT (`doc_test.odt`).
+   *
+   * En mode autonome (sans fragment `#doc=` CloudServ ni paramètre `?session=`),
+   * l'application charge le document d'exemple OpenOffice de 25 pages pour
+   * offrir d'emblée un banc d'essai complet de tous les sous-systèmes.
+   */
+  useEffect(() => {
+    // On interroge la capture, pas `window.location` : le fragment a déjà été
+    // effacé par l'effet d'ouverture, et le relire ferait charger l'exemple
+    // par-dessus le document de l'utilisateur.
+    if (lienInitial.cloudServ || lienInitial.partage) return;
+
+    let annule = false;
+    void (async () => {
+      try {
+        const response = await fetch('/doc_test.odt');
+        if (!response.ok || annule) return;
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const result = await openOdt(bytes, { title: "Banc d'essai OpenOffice Writer" });
+        if (annule) return;
+        setDoc(result.document);
+        liveDocRef.current = result.document;
+        setGeneration((v) => v + 1);
+        setMessage("Document d'exemple OpenOffice « doc_test.odt » chargé.");
+      } catch (e) {
+        console.warn("Impossible de charger doc_test.odt, conservation de l'exemple de repli :", e);
+      }
+    })();
+
+    return () => {
+      annule = true;
+    };
+  }, [lienInitial]);
+
+  const onLoadSample = useCallback(async () => {
+    try {
+      const response = await fetch('/doc_test.odt');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const result = await openOdt(bytes, { title: "Banc d'essai OpenOffice Writer" });
+      setDoc(result.document);
+      liveDocRef.current = result.document;
+      setGeneration((v) => v + 1);
+      setMessage("Document d'exemple OpenOffice « doc_test.odt » chargé.");
+    } catch (error) {
+      setMessage(`Impossible de charger le document d’exemple : ${(error as Error).message}`);
+    }
   }, []);
 
   const onOpen = useCallback(async (file: File) => {
@@ -514,6 +602,7 @@ export function App(): JSX.Element {
         collab={collab}
         onTitleChange={handleTitleCommit}
         onOpen={() => fileRef.current?.click()}
+        onLoadSample={onLoadSample}
         onSave={onSave}
         onPrint={onPrint}
         onExportPdf={onExportPdf}

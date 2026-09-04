@@ -53,12 +53,11 @@ export interface PageGeometry {
 
 /**
  * Zone imprimable :
- * `hauteur - marge haute - marge basse - en-tête - pied`, conformément au §4.1
- * du cahier des charges.
+ * `hauteur - marge haute - marge basse - en-tête - pied`, conformément aux règles de mise en page A4.
  *
  * Les valeurs sont bornées à un minimum strictement positif : des marges plus
  * grandes que la feuille donneraient une hauteur nulle ou négative, et la
- * pagination boucle­rait sans jamais poser une seule ligne.
+ * pagination bouclerait sans jamais poser une seule ligne.
  */
 export function pageGeometry(setup: PageSetup): PageGeometry {
   const { widthMm, heightMm } = sheetSizeMm(setup);

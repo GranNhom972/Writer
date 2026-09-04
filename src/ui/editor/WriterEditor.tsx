@@ -10,6 +10,7 @@
 
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -24,15 +25,18 @@ import type {
   WriterDocumentState,
 } from '../../domain/document/types';
 import { paragraphIndex, paragraphText } from '../../domain/document/document';
+import { imageKey } from '../../domain/document/images';
 import { locateOffset } from '../../domain/document/runs';
-import { pxToPt } from '../../domain/document/units';
-import { fitToContentWidth } from '../../domain/document/images';
+import { mmToPt, ptToMm, ptToPx, pxToPt } from '../../domain/document/units';
+import { fitToContentWidth, type ImageWrapPlacement } from '../../domain/document/images';
 import { probeImageSize, readFileAsDataUrl } from '../../domain/image/raster';
 import { DEFAULT_FURNITURE, type FurnitureBand } from '../../domain/document/pageFurniture';
-import { A4Page } from './A4Page';
+import { A4Page, AUCUN_RECT, AUCUNE_OCCURRENCE, AUCUN_PLACEMENT, type SearchRect } from './A4Page';
+import type { ImageContext } from './ParagraphView';
 import { useWriterInput, imageDraftAt } from './useWriterInput';
 import { Ribbon } from '../components/Ribbon';
 import { MenuBar, type MenuDefinition } from '../components/MenuBar';
+import { ContextMenu } from '../components/ContextMenu';
 import { DocumentTitle } from '../components/DocumentTitle';
 import { Ruler } from '../components/Ruler';
 import { DocumentOutline } from '../components/DocumentOutline';
@@ -41,7 +45,7 @@ import { CommandPalette, type PaletteCommand } from '../dialogs/CommandPalette';
 import { StylesAndMarginsDialog } from '../dialogs/StylesAndMarginsDialog';
 import { FootnoteDialog } from '../dialogs/FootnoteDialog';
 import { BookmarkDialog, CommentDialog } from '../dialogs/AnnotationDialog';
-import { CommentBand } from './CommentBand';
+import { CommentBand, COMMENT_BAND_WIDTH_PX } from './CommentBand';
 import { commentAnchors, commentThreads } from '../../domain/document/comments';
 import { listBookmarks } from '../../domain/document/bookmarks';
 import { listRedlineRanges } from '../../domain/document/redline';
@@ -59,7 +63,7 @@ import {
   replaceMatch,
   selectMatch,
 } from '../../domain/engine/search';
-import { normalizeSelection, rangeRects } from '../../domain/engine/cursor';
+import { normalizeSelection, positionFromPoint, rangeRects } from '../../domain/engine/cursor';
 import { downloadPdfWithImages, printDocument } from '../../domain/pdf';
 import { shortcutLabel } from '../shortcuts';
 import { PresenceAvatars } from '../../design/components/PresenceAvatars';
@@ -68,6 +72,9 @@ import type { ConnectionStatus, PeerPresence } from '../../domain/collab/session
 import './editor.css';
 
 const PAGE_GAP_PX = 16;
+
+/** Écart entre le bord droit de la feuille et la bande de commentaires. */
+const COMMENT_GUTTER_GAP_PX = 16;
 
 /**
  * Trois états de connexion, pas plus.
@@ -95,6 +102,7 @@ export interface WriterEditorProps {
   showMargins?: boolean;
   onSave?: (doc?: WriterDocumentState) => void;
   onOpen?: () => void;
+  onLoadSample?: () => void;
   onPrint?: () => void;
   onExportPdf?: () => void;
   onTitleChange?: (title: string) => void;
@@ -146,6 +154,7 @@ export function WriterEditor({
   showMargins = true,
   onSave,
   onOpen,
+  onLoadSample,
   onPrint,
   onExportPdf,
   onTitleChange,
@@ -171,14 +180,16 @@ export function WriterEditor({
     onEditMath: (blockId, latex, display) => editMathRef.current(blockId, latex, display),
     onOpenImage: () => openImageDialogRef.current(),
     onEditImage: (blockId, offset) => editImageRef.current(blockId, offset),
+    onOpenContextMenu: (x, y) => setContextMenuAt({ x, y }),
   });
   const {
     layout,
     caret,
-    rects,
+    rectsByPage,
     placementsByPage,
     session,
     currentParagraph,
+    table,
     zoom,
     setZoom,
     inputRef,
@@ -193,6 +204,38 @@ export function WriterEditor({
 
   const doc = session.state.doc;
   const geometry = layout.geometry;
+
+  /**
+   * Le document courant, accessible sans en dépendre.
+   *
+   * Certains rappels ont besoin de le lire au moment où l'utilisateur agit,
+   * mais descendent jusqu'à des composants mémoïsés. En faire une dépendance
+   * de `useCallback` les recréerait à chaque frappe et propagerait le rendu à
+   * tout le document ; une réf donne la même lecture sans l'instabilité.
+   */
+  const docRef = useRef(doc);
+  docRef.current = doc;
+
+  /**
+   * Ce que les poignées de tableau doivent peindre.
+   *
+   * Reprend le contexte calculé par le contrôleur en n'en gardant que la
+   * géométrie : les feuilles n'ont pas à connaître le nombre de lignes, et un
+   * objet réduit leur évite un rendu à chaque déplacement du curseur dans une
+   * même cellule.
+   */
+  const activeTable = useMemo(
+    () =>
+      table
+        ? {
+            tableId: table.tableId,
+            rowIndex: table.rowIndex,
+            cellIndex: table.cellIndex,
+            rect: table.rect,
+          }
+        : null,
+    [table],
+  );
 
   /**
    * Auteur des commentaires et des révisions.
@@ -227,6 +270,24 @@ export function WriterEditor({
   const hasComments = useMemo(() => commentThreads(doc).length > 0, [doc]);
 
   /**
+   * Taille de la pile de pages **avant** zoom, gouttière comprise.
+   *
+   * `transform: scale()` ne redimensionne pas la boîte de mise en page : un
+   * élément mis à l'échelle occupe toujours sa taille d'origine dans le flux.
+   * La surface calculait donc ses barres de défilement sur la pile à 100 % quel
+   * que soit le zoom — du vide sous la dernière page en dessous de 100 %, des
+   * pages rognées et inatteignables au-dessus. Ces deux mesures servent à donner
+   * au cadre de zoom une hauteur et une largeur réelles, égales à ce que l'œil
+   * voit.
+   */
+  const pileHeightPx =
+    layout.pages.length * geometry.pageHeightPx +
+    Math.max(0, layout.pages.length - 1) * PAGE_GAP_PX;
+  const pileWidthPx =
+    geometry.pageWidthPx +
+    (hasComments ? COMMENT_GUTTER_GAP_PX + COMMENT_BAND_WIDTH_PX : 0);
+
+  /**
    * Message annoncé aux lecteurs d'écran.
    *
    * Les changements **structurels** — pagination, mode révision, nombre de fils
@@ -244,6 +305,8 @@ export function WriterEditor({
   }, [layout.pages.length, reviewing, redlineRanges.length, lectureSeule]);
 
   // États des panneaux et dialogues UI
+  /** Point d'ouverture du menu contextuel, ou `null` s'il est fermé. */
+  const [contextMenuAt, setContextMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [showRuler, setShowRuler] = useState(true);
@@ -263,6 +326,10 @@ export function WriterEditor({
   const linkButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mathDraft, setMathDraft] = useState<MathDraft | null>(null);
   const [imageDraft, setImageDraft] = useState<ImageDraft | null>(null);
+  /** Image saisie dans l'éditeur : poignées et barre d'actions. */
+  const [imageSelection, setImageSelection] = useState<{ blockId: string; offset: number } | null>(
+    null,
+  );
   const [furnitureBandToEdit, setFurnitureBandToEdit] = useState<FurnitureBand | null>(null);
 
   const [findReplaceState, setFindReplaceState] = useState<FindReplaceState>({
@@ -321,6 +388,27 @@ export function WriterEditor({
   /** Largeur de la zone imprimable — plafond d'insertion d'une image. */
   const contentWidthPt = useMemo(() => pxToPt(geometry.contentWidthPx), [geometry.contentWidthPx]);
 
+/**
+ * Placement d'un cadre, mis à plat pour le brouillon de la fenêtre.
+ *
+ * `ImageDraft` est plat parce qu'un formulaire l'est : chaque champ y a son
+ * état. Le modèle, lui, réunit le placement en un objet, seul niveau où
+ * « inline » peut rendre les cinq autres valeurs sans objet d'un seul coup.
+ * Cette fonction est la charnière entre les deux formes.
+ */
+function placementDraft(placement: ImageWrapPlacement | undefined): Partial<ImageDraft> {
+  if (!placement) return {};
+  if (placement.mode === 'inline') return { wrap: 'inline' };
+  return {
+    wrap: placement.mode,
+    ...(placement.horiOrient !== undefined ? { horiOrient: placement.horiOrient } : {}),
+    ...(placement.horiRelation !== undefined ? { horiRelation: placement.horiRelation } : {}),
+    ...(placement.xPt !== undefined ? { xPt: placement.xPt } : {}),
+    ...(placement.yPt !== undefined ? { yPt: placement.yPt } : {}),
+    ...(placement.wrapMarginPt !== undefined ? { wrapMarginPt: placement.wrapMarginPt } : {}),
+  };
+}
+
   /**
    * Ouvre l'atelier d'image.
    *
@@ -342,12 +430,27 @@ export function WriterEditor({
         heightPt: existante.heightPt,
         alt: existante.alt ?? '',
         ...(existante.crop ? { crop: existante.crop } : {}),
+        ...(existante.caption ? { caption: existante.caption } : {}),
+        ...(existante.marginPt !== undefined ? { marginPt: existante.marginPt } : {}),
+        ...(existante.captionGapPt !== undefined
+          ? { captionGapPt: existante.captionGapPt }
+          : {}),
+        ...placementDraft(existante.wrap),
+        figureNumber:
+          layout.figureNumbers.get(imageKey(position.blockId, existante.offset)) ??
+          layout.figureNumbers.size + 1,
       });
       return;
     }
 
-    setImageDraft({ src: '', widthPt: contentWidthPt / 2, heightPt: contentWidthPt / 3, alt: '' });
-  }, [session.state, contentWidthPt]);
+    setImageDraft({
+      src: '',
+      widthPt: contentWidthPt / 2,
+      heightPt: contentWidthPt / 3,
+      alt: '',
+      figureNumber: layout.figureNumbers.size + 1,
+    });
+  }, [session.state, contentWidthPt, layout.figureNumbers]);
 
   /**
    * Adresse définitive d'une image, une fois déposée s'il y a lieu.
@@ -370,7 +473,7 @@ export function WriterEditor({
 
   const handleEditImage = useCallback(
     (blockId: string, offset: number) => {
-      const node = paragraphIndex(session.state.doc).byId.get(blockId);
+      const node = paragraphIndex(docRef.current).byId.get(blockId);
       const cadre = node ? imageDraftAt(node.paragraph.runs, offset) : null;
       if (!cadre) return;
       setImageDraft({
@@ -381,9 +484,29 @@ export function WriterEditor({
         heightPt: cadre.heightPt,
         alt: cadre.alt ?? '',
         ...(cadre.crop ? { crop: cadre.crop } : {}),
+        ...(cadre.caption ? { caption: cadre.caption } : {}),
+        // Sans ces deux-là, rouvrir la fenêtre pour changer autre chose
+        // remettait les espacements à leur valeur par défaut : une marge réglée
+        // à zéro y reprenait 4 px sans que rien ne l'ait demandé.
+        ...(cadre.marginPt !== undefined ? { marginPt: cadre.marginPt } : {}),
+        ...(cadre.captionGapPt !== undefined ? { captionGapPt: cadre.captionGapPt } : {}),
+        // Intégration au texte : la fenêtre doit rouvrir sur le mode courant,
+        // faute de quoi valider un simple changement de légende ramènerait
+        // l'image dans le fil du texte.
+        ...placementDraft(cadre.wrap),
+        figureNumber:
+          layout.figureNumbers.get(imageKey(blockId, cadre.offset)) ??
+          layout.figureNumbers.size + 1,
       });
     },
-    [session.state.doc],
+    /*
+     * `layout.figureNumbers` est désormais canonisé et ne change qu'avec les
+     * numéros eux-mêmes ; le document, lui, change à chaque frappe. Il est donc
+     * lu par référence : ce rappel descend jusqu'aux paragraphes mémoïsés, et
+     * en dépendre les aurait tous fait rendre à chaque caractère saisi.
+     */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [docRef, layout.figureNumbers],
   );
 
   /**
@@ -520,8 +643,22 @@ export function WriterEditor({
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handlePrint, openMathDialog, openImageDialog]);
 
-  // Statistiques en temps réel
-  const statistics = useMemo(() => computeStatistics(doc), [doc]);
+  /**
+   * Statistiques de la barre d'état.
+   *
+   * Différées, et non calculées en temps réel : le comptage traverse tout le
+   * document, et il était refait à chaque caractère saisi — sur le chemin
+   * critique de la frappe, pour un affichage dont personne n'attend qu'il soit
+   * synchrone. `useDeferredValue` laisse React reposer la mise en page et le
+   * curseur d'abord, puis rattraper le comptage quand la frappe marque une
+   * pause. Le chiffre affiché peut retarder d'une frappe ou deux ; la latence
+   * de saisie, elle, ne dépend plus de la taille du document.
+   */
+  const docPourStatistiques = useDeferredValue(doc);
+  const statistics = useMemo(
+    () => computeStatistics(docPourStatistiques),
+    [docPourStatistiques],
+  );
 
   // Recherche & Remplacement
   const matches = useMemo(
@@ -557,12 +694,29 @@ export function WriterEditor({
     if (matches.length === 0) return [];
     return matches.flatMap((match, index) => {
       const { start, end } = matchRange(match);
-      return rangeRects(doc, layout, start, end, measurer).map((rect) => ({
+      return rangeRects(layout, start, end, measurer).map((rect) => ({
         rect,
         current: index === currentMatchIndex,
       }));
     });
   }, [matches, currentMatchIndex, doc, layout, measurer]);
+
+  /**
+   * Occurrences regroupées par page.
+   *
+   * Creux comme `rectsByPage`, et pour la même raison : recherche fermée, la
+   * table est vide et **toutes** les feuilles reçoivent la même constante
+   * gelée — aucune ne voit sa prop changer d'identité.
+   */
+  const searchRectsByPage = useMemo(() => {
+    const pages = new Map<number, SearchRect[]>();
+    for (const entree of searchRects) {
+      const liste = pages.get(entree.rect.pageIndex);
+      if (liste) liste.push(entree);
+      else pages.set(entree.rect.pageIndex, [entree]);
+    }
+    return pages;
+  }, [searchRects]);
 
   const handleSearchNavigate = useCallback(
     (direction: 1 | -1) => {
@@ -643,6 +797,131 @@ export function WriterEditor({
       }
     : { left: '-9999px', top: '0px' };
 
+  /**
+   * Ce que l'éditeur sait faire d'une image sans rouvrir la fenêtre.
+   *
+   * Tous ces gestes passent par l'historique : retaille, déplacement et
+   * changement d'habillage s'annulent comme le reste. Les glissements — poignée
+   * de taille comme cadre déplacé — se regroupent en une seule entrée
+   * (`dragGroup` côté commande), faute de quoi défaire une image retaillée
+   * demanderait trente `Ctrl+Z`.
+   */
+  /**
+   * Fin d'un glissement d'image : ré-ancrage au point de dépôt.
+   *
+   * Le glissement écoute la **fenêtre** — il faut bien suivre un pointeur qui
+   * sort du cadre —, et n'a donc que des coordonnées d'écran. On retrouve ici
+   * la feuille visée par son `data-page-index`, puis le paragraphe par la même
+   * recherche que le clic ordinaire (`positionFromPoint`).
+   *
+   * Sans ce ré-ancrage, une image traînée loin de son paragraphe restait
+   * dessinée sur la page de celui-ci : le cadre suivait bien le pointeur, mais
+   * lâché deux pages plus bas il ressortait hors de la feuille d'origine.
+   */
+  const handleImageRelocated = useCallback(
+    (blockId: string, offset: number, clientX: number, clientY: number) => {
+      const feuille = document
+        .elementsFromPoint(clientX, clientY)
+        .find((element): element is HTMLElement =>
+          element instanceof HTMLElement && element.dataset.pageIndex !== undefined,
+        );
+      if (!feuille) return;
+
+      const pageIndex = Number(feuille.dataset.pageIndex);
+      if (!Number.isInteger(pageIndex)) return;
+
+      // Coordonnées dans la zone de contenu, zoom défait — le modèle l'ignore.
+      const rect = feuille.getBoundingClientRect();
+      const xPx = (clientX - rect.left) / zoom - layout.geometry.contentLeftPx;
+      const yPx = (clientY - rect.top) / zoom - layout.geometry.contentTopPx;
+
+      const cible = positionFromPoint(layout, pageIndex, xPx, yPx, measurer);
+      if (!cible) return;
+
+      /*
+       * Position du cadre relative à sa **nouvelle** ancre.
+       *
+       * Le paragraphe d'accueil n'a pas bougé de la passe précédente : on lit
+       * donc son ordonnée telle quelle. Les quelques pixels d'écart que la
+       * reprise de mise en page introduira ensuite sont invisibles, là où
+       * conserver l'ancienne origine ferait sauter l'image d'un paragraphe.
+       */
+      const accueil = layout.placements.get(cible.blockId)?.[0]?.placed.topPx ?? 0;
+      const cadre = paragraphIndex(session.state.doc).byId.get(blockId)?.paragraph;
+      const largeurPx = cadre
+        ? ptToPx(imageDraftAt(cadre.runs, offset)?.widthPt ?? 0)
+        : 0;
+
+      commands.moveImageTo(
+        blockId,
+        offset,
+        cible,
+        // Le point saisi devient le **centre** du cadre : c'est là que l'œil
+        // croit tenir l'image, et poser son coin sous le pointeur la décalerait
+        // d'une demi-largeur à chaque dépôt.
+        pxToPt(xPx - largeurPx / 2),
+        pxToPt(yPx - accueil),
+      );
+    },
+    [layout, measurer, zoom, session.state.doc, commands],
+  );
+
+  const imageContext = useMemo<ImageContext>(
+    () => ({
+      figureNumbers: layout.figureNumbers,
+      bodyFontSizePt: doc.defaults.fontSizePt,
+      selected: imageSelection,
+      zoom,
+      readOnly: lectureSeule,
+      onSelect: (blockId, offset) => setImageSelection({ blockId, offset }),
+      onOpenDialog: () => {
+        /* l'ouverture passe par `onEditImage`, déjà branché sur la page */
+      },
+      onResize: (blockId, offset, widthPt, heightPt) =>
+        commands.resizeImage(blockId, offset, widthPt, heightPt),
+      onWrapChange: (blockId, offset, mode) => commands.setImageWrap(blockId, offset, mode),
+      onMove: (blockId, offset, xPt, yPt) => commands.setImagePosition(blockId, offset, xPt, yPt),
+      onDrop: handleImageRelocated,
+    }),
+    [
+      layout.figureNumbers,
+      doc.defaults.fontSizePt,
+      imageSelection,
+      zoom,
+      lectureSeule,
+      commands,
+      handleImageRelocated,
+    ],
+  );
+
+  /**
+   * Désélectionne l'image dès qu'on clique ailleurs.
+   *
+   * `ImageFrame` arrête la propagation de son propre `pointerdown` : seuls les
+   * clics qui atteignent la feuille passent ici, et ce sont exactement ceux qui
+   * doivent lever la sélection. Sans cela la barre d'actions restait affichée
+   * indéfiniment, y compris après avoir cliqué dans le texte — elle semblait
+   * figée à l'écran.
+   */
+  const onPagePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => {
+      setImageSelection(null);
+      handlers.onPointerDown(event, pageIndex);
+    },
+    [handlers],
+  );
+
+  // `Échap` lève aussi la sélection : c'est le geste attendu, et il évite d'avoir
+  // à viser le texte pour se débarrasser des poignées.
+  useEffect(() => {
+    if (!imageSelection) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setImageSelection(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [imageSelection]);
+
   // Définition des menus de la MenuBar
   const menus = useMemo<MenuDefinition[]>(
     () => [
@@ -650,6 +929,7 @@ export function WriterEditor({
         label: 'Fichier',
         entries: [
           ...(onOpen ? [{ label: 'Ouvrir un document (.odt)…', shortcut: shortcutLabel('Mod-o'), run: onOpen }] : []),
+          ...(onLoadSample ? [{ label: 'Charger le document d’exemple OpenOffice (.odt)', run: onLoadSample }] : []),
           ...(onSave ? [{ label: 'Enregistrer (.odt)', shortcut: shortcutLabel('Mod-s'), run: () => onSave(doc) }] : []),
           {
             label: 'Exporter au format PDF…',
@@ -751,17 +1031,75 @@ export function WriterEditor({
       },
       {
         label: 'Tableau',
+        /*
+         * Toute entrée qui agit sur une grille est grisée hors d'une grille.
+         * Les commandes sous-jacentes sont inertes dans ce cas — elles renvoient
+         * l'état inchangé — et une entrée active sans effet est le pire des
+         * retours : l'utilisateur croit avoir raté son clic.
+         */
         entries: [
           { label: 'Insérer un tableau (3×3)', run: () => commands.insertTable(3, 3) },
-          { label: 'Insérer une ligne au-dessus', run: commands.insertTableRowAbove, separatorBefore: true },
-          { label: 'Insérer une ligne au-dessous', run: commands.insertTableRowBelow },
-          { label: 'Supprimer la ligne', run: commands.deleteTableRow },
-          { label: 'Insérer une colonne à gauche', run: commands.insertTableColumnLeft, separatorBefore: true },
-          { label: 'Insérer une colonne à droite', run: commands.insertTableColumnRight },
-          { label: 'Supprimer la colonne', run: commands.deleteTableColumn },
-          { label: 'Fusionner les cellules', run: commands.mergeCells, separatorBefore: true },
-          { label: 'Scinder en colonnes', run: () => commands.splitCell('horizontal', 2) },
-          { label: 'Scinder en lignes', run: () => commands.splitCell('vertical', 2) },
+          { label: 'Insérer une ligne au-dessus', run: commands.insertTableRowAbove, separatorBefore: true, disabled: !table },
+          { label: 'Insérer une ligne au-dessous', run: commands.insertTableRowBelow, disabled: !table },
+          {
+            label: 'Supprimer la ligne',
+            run: commands.deleteTableRow,
+            // Supprimer la dernière ligne emporte le tableau : l'entrée dédiée
+            // le dit, celle-ci ne doit pas le faire par surprise.
+            disabled: !table || table.rowCount <= 1,
+          },
+          { label: 'Insérer une colonne à gauche', run: commands.insertTableColumnLeft, separatorBefore: true, disabled: !table },
+          { label: 'Insérer une colonne à droite', run: commands.insertTableColumnRight, disabled: !table },
+          {
+            label: 'Supprimer la colonne',
+            run: commands.deleteTableColumn,
+            disabled: !table || table.columnCount <= 1,
+          },
+          {
+            label: 'Répartir les colonnes également',
+            run: commands.distributeColumns,
+            separatorBefore: true,
+            disabled: !table || table.columnCount <= 1,
+          },
+          {
+            label: 'Fusionner les cellules',
+            run: commands.mergeCells,
+            separatorBefore: true,
+            // Fusionner demande au moins deux cellules : sans rectangle, la
+            // commande n'a pas d'objet.
+            disabled: !table?.rect,
+          },
+          /*
+           * Sur une cellule fusionnée, `splitTableCell` ne découpe pas : il
+           * rend la grille en libérant les cellules absorbées. Proposer alors
+           * « scinder en 2 colonnes » promettrait un découpage qui n'aura pas
+           * lieu — d'où une entrée unique, et son vrai nom.
+           */
+          ...(table?.merged
+            ? [
+                {
+                  label: 'Séparer les cellules fusionnées',
+                  run: () => commands.splitCell('horizontal', 2),
+                },
+              ]
+            : [
+                {
+                  label: 'Scinder en 2 colonnes',
+                  run: () => commands.splitCell('horizontal', 2),
+                  disabled: !table,
+                },
+                {
+                  label: 'Scinder en 2 lignes',
+                  run: () => commands.splitCell('vertical', 2),
+                  disabled: !table,
+                },
+              ]),
+          {
+            label: 'Supprimer le tableau',
+            run: commands.deleteTable,
+            separatorBefore: true,
+            disabled: !table,
+          },
         ],
       },
       {
@@ -834,8 +1172,73 @@ export function WriterEditor({
       statistics,
       openMathDialog,
       openImageDialog,
+      // Le menu Tableau grise ses entrées d'après le contexte du curseur, et le
+      // menu Révision affiche l'état du suivi : sans ces dépendances, les deux
+      // restent figés sur ce qu'ils valaient au dernier changement de document.
+      table,
+      reviewing,
+      authorName,
+      redlineRanges.length,
     ],
   );
+
+  /**
+   * Contenu du menu contextuel.
+   *
+   * Il se compose au lieu de se dupliquer : les entrées de tableau ne
+   * paraissent que dans une grille, et elles sont exactement celles du menu
+   * « Tableau », séparateurs compris. Un même intitulé y désigne toujours la
+   * même commande — c'est ce qui permet d'apprendre l'un en se servant de
+   * l'autre.
+   */
+  const contextMenu = useMemo<MenuDefinition>(() => {
+    const tableEntries = menus.find((menu) => menu.label === 'Tableau')?.entries ?? [];
+
+    return {
+      label: 'Actions',
+      entries: [
+        {
+          label: 'Couper',
+          shortcut: shortcutLabel('Mod-x'),
+          run: () => document.execCommand('cut'),
+          disabled: !selectedText || lectureSeule,
+        },
+        {
+          label: 'Copier',
+          shortcut: shortcutLabel('Mod-c'),
+          run: () => document.execCommand('copy'),
+          disabled: !selectedText,
+        },
+        {
+          label: 'Coller',
+          shortcut: shortcutLabel('Mod-v'),
+          // Le presse-papiers système ne se lit pas sans geste de l'utilisateur
+          // dans le document : on redonne le focus, et `Ctrl+V` fait le reste.
+          run: () => controller.focus(),
+          disabled: lectureSeule,
+        },
+        {
+          label: 'Ajouter un commentaire…',
+          run: () => setCommentDialogOpen(true),
+          separatorBefore: true,
+          disabled: lectureSeule,
+        },
+        {
+          label: 'Lien hypertexte…',
+          shortcut: shortcutLabel('Mod-k'),
+          run: () => linkButtonRef.current?.click(),
+          disabled: lectureSeule,
+        },
+        // Hors tableau, rien n'est ajouté : un bloc entier d'entrées grisées
+        // n'apprend rien et allonge le menu pour tout le monde.
+        ...(table
+          ? tableEntries
+              .filter((entry) => entry.label !== 'Insérer un tableau (3×3)')
+              .map((entry, index) => (index === 0 ? { ...entry, separatorBefore: true } : entry))
+          : []),
+      ],
+    };
+  }, [menus, selectedText, lectureSeule, table, controller]);
 
   // Commandes pour la palette Ctrl+K
   const paletteCommands = useMemo<PaletteCommand[]>(
@@ -946,10 +1349,10 @@ export function WriterEditor({
           pageWidthCm={doc.pageSetup.widthMm / 10}
           leftMarginCm={doc.pageSetup.marginLeftMm / 10}
           rightMarginCm={doc.pageSetup.marginRightMm / 10}
-          firstLineIndentCm={((currentParagraph?.firstLineIndentPt ?? 0) * 2.54) / 72}
+          firstLineIndentCm={ptToMm(currentParagraph?.firstLineIndentPt ?? 0) / 10}
           onMarginChange={handleRulerMarginChange}
           onFirstLineIndentChange={(indentCm) => {
-            const pt = (indentCm * 72) / 2.54;
+            const pt = mmToPt(indentCm * 10);
             commands.setFirstLineIndentPt(Math.abs(pt) > 0.5 ? Math.round(pt * 10) / 10 : null);
           }}
           onOpenMarginsDialog={() => setStylesMarginsOpen(true)}
@@ -974,110 +1377,149 @@ export function WriterEditor({
 
         {/* Surface des pages physiques */}
         <div className="writer-surface" style={{ flex: 1 }}>
-          <div
-            className="writer-pages"
-            style={{
-              transform: `scale(${zoom})`,
-              width: `${geometry.pageWidthPx}px`,
-              gap: `${PAGE_GAP_PX}px`,
-            }}
-            // Déposer une image sur la page l'insère au curseur. `preventDefault`
-            // sur le survol est obligatoire : sans lui le navigateur refuse le
-            // dépôt et ouvre le fichier à la place, en quittant le document.
-            onDragOver={(event) => {
-              if (event.dataTransfer.types.includes('Files')) event.preventDefault();
-            }}
-            onDrop={(event) => {
-              const fichier = Array.from(event.dataTransfer.files).find((f) =>
-                f.type.startsWith('image/'),
-              );
-              if (!fichier) return;
-              event.preventDefault();
-              void readFileAsDataUrl(fichier)
-                .then(handleDropImage)
-                .catch(() => {
-                  /* fichier illisible : rien de déposé, rien de cassé */
-                });
-            }}
-          >
-            {layout.pages.map((page) => (
-              <A4Page
-                key={page.index}
-                page={page}
-                totalPages={layout.pages.length}
-                documentTitle={doc.meta.title || 'Sans titre'}
-                furniture={doc.furniture ?? DEFAULT_FURNITURE}
-                geometry={geometry}
-                paragraphLayouts={layout.paragraphLayouts}
-                placements={placementsByPage[page.index] ?? []}
-                selectionRects={rects.filter((rect) => rect.pageIndex === page.index)}
-                searchRects={searchRects.filter((entry) => entry.rect.pageIndex === page.index)}
-                caret={caret?.pageIndex === page.index ? caret : null}
-                caretIdle={!controller.isFocused}
-                showMargins={showMargins}
-                onToggleTask={controller.commands.toggleTask}
-                onOpenFurniture={(band) => setFurnitureBandToEdit(band)}
-                onEditMath={handleEditMath}
-                onEditImage={handleEditImage}
-                onPointerDown={handlers.onPointerDown}
-                onPointerMove={handlers.onPointerMove}
-                onPointerUp={handlers.onPointerUp}
-              />
-            ))}
-
-            {/* Zone de frappe invisible mais contrôlée */}
-            <textarea
-              ref={inputRef}
-              className="writer-input"
-              style={inputStyle}
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              aria-label="Document Writer"
-              aria-multiline="true"
-              role="textbox"
-              onKeyDown={handlers.onKeyDown}
-              onCompositionStart={handlers.onCompositionStart}
-              onCompositionEnd={handlers.onCompositionEnd}
-              onFocus={handlers.onFocus}
-              onBlur={handlers.onBlur}
-              onCopy={handlers.onCopy}
-              onCut={handlers.onCut}
-              onPaste={handlers.onPaste}
-            />
-          </div>
-
           {/*
-            Gouttière de commentaires (`SwPostItMgr`). Hors de la feuille, et
-            non dans sa marge : un commentaire est un objet de relecture, il ne
-            doit pas s'imprimer. Elle se met à l'échelle avec les pages pour que
-            chaque bulle reste en face de son ancre à tous les niveaux de zoom.
+            Cadre du zoom. Il ne contient rien lui-même : sa seule raison d'être
+            est de porter, en pixels, la taille **mise à l'échelle** du contenu.
+            La mise à l'échelle se fait sur son enfant, qui garde sa taille
+            d'origine dans le flux — et c'est ce cadre, dimensionné à ce que
+            l'œil voit, qui décide des barres de défilement de la surface.
           */}
-          {hasComments && (
+          <div
+            className="writer-zoom"
+            style={{ width: `${pileWidthPx * zoom}px`, height: `${pileHeightPx * zoom}px` }}
+          >
+            {/*
+              L'enfant garde la taille **d'origine** : sans largeur explicite il
+              s'étirait sur celle du cadre, déjà multipliée par le zoom, et se
+              faisait mettre à l'échelle une seconde fois — 2 408 px de large à
+              150 % au lieu de 1 605.
+            */}
             <div
-              className="writer-comment-gutter"
+              className="writer-zoom__contenu"
               style={{
+                width: `${pileWidthPx}px`,
+                height: `${pileHeightPx}px`,
                 transform: `scale(${zoom})`,
-                transformOrigin: 'top left',
-                marginLeft: '16px',
               }}
             >
-              <CommentBand
-                doc={doc}
-                layout={layout}
-                pageStridePx={geometry.pageHeightPx + PAGE_GAP_PX}
-                contentTopPx={geometry.contentTopPx}
-                author={authorName}
-                activeThreadId={activeThreadId}
-                readOnly={lectureSeule}
-                onReply={(threadId, text) => commands.replyToComment(threadId, authorName, text)}
-                onResolve={commands.resolveComment}
-                onDelete={commands.deleteComment}
-                onEdit={commands.editComment}
-                onGoToAnchor={handleSelectHeading}
-              />
+              <div
+                className="writer-pages"
+                style={{
+                  width: `${geometry.pageWidthPx}px`,
+                  gap: `${PAGE_GAP_PX}px`,
+                }}
+                // Déposer une image sur la page l'insère au curseur. `preventDefault`
+                // sur le survol est obligatoire : sans lui le navigateur refuse le
+                // dépôt et ouvre le fichier à la place, en quittant le document.
+                onDragOver={(event) => {
+                  if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  const fichier = Array.from(event.dataTransfer.files).find((f) =>
+                    f.type.startsWith('image/'),
+                  );
+                  if (!fichier) return;
+                  event.preventDefault();
+                  void readFileAsDataUrl(fichier)
+                    .then(handleDropImage)
+                    .catch(() => {
+                      /* fichier illisible : rien de déposé, rien de cassé */
+                    });
+                }}
+              >
+                {layout.pages.map((page) => (
+                  <A4Page
+                    key={page.index}
+                    page={page}
+                    totalPages={layout.pages.length}
+                    documentTitle={doc.meta.title || 'Sans titre'}
+                    furniture={doc.furniture ?? DEFAULT_FURNITURE}
+                    geometry={geometry}
+                    paragraphLayouts={layout.paragraphLayouts}
+                    placements={placementsByPage[page.index] ?? AUCUN_PLACEMENT}
+                    selectionRects={rectsByPage.get(page.index) ?? AUCUN_RECT}
+                    searchRects={searchRectsByPage.get(page.index) ?? AUCUNE_OCCURRENCE}
+                    caret={caret?.pageIndex === page.index ? caret : null}
+                    caretIdle={!controller.isFocused}
+                    showMargins={showMargins}
+                    zoom={zoom}
+                    activeTable={activeTable}
+                    onResizeColumn={commands.resizeColumnBoundary}
+                    onSelectRow={commands.selectRow}
+                    onSelectColumn={commands.selectColumn}
+                    onSelectTable={commands.selectTable}
+                    readOnly={lectureSeule}
+                    images={imageContext}
+                    onToggleTask={controller.commands.toggleTask}
+                    onOpenFurniture={setFurnitureBandToEdit}
+                    onEditMath={handleEditMath}
+                    onEditImage={handleEditImage}
+                    onPointerDown={onPagePointerDown}
+                    onPointerMove={handlers.onPointerMove}
+                    onPointerUp={handlers.onPointerUp}
+                    onContextMenu={handlers.onContextMenu}
+                  />
+                ))}
+
+                {/* Zone de frappe invisible mais contrôlée */}
+                <textarea
+                  ref={inputRef}
+                  className="writer-input"
+                  style={inputStyle}
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  aria-label="Document Writer"
+                  aria-multiline="true"
+                  role="textbox"
+                  onKeyDown={handlers.onKeyDown}
+                  onCompositionStart={handlers.onCompositionStart}
+                  onCompositionEnd={handlers.onCompositionEnd}
+                  onFocus={handlers.onFocus}
+                  onBlur={handlers.onBlur}
+                  onCopy={handlers.onCopy}
+                  onCut={handlers.onCut}
+                  onPaste={handlers.onPaste}
+                />
+              </div>
+
+              {/*
+                Gouttière de commentaires (`SwPostItMgr`). Hors de la feuille, et
+                non dans sa marge : un commentaire est un objet de relecture, il ne
+                doit pas s'imprimer.
+
+                Elle est **dans** le cadre mis à l'échelle, et non à côté : c'est la
+                même transformation que les pages, donc chaque bulle reste en face
+                de son ancre à tous les niveaux de zoom sans porter son propre
+                `scale`. Sa hauteur est celle de la pile — les bulles y sont posées
+                en absolu, et sans hauteur explicite la bande était plate.
+              */}
+              {hasComments && (
+                <div
+                  className="writer-comment-gutter"
+                  style={{
+                    height: `${pileHeightPx}px`,
+                    marginLeft: `${COMMENT_GUTTER_GAP_PX}px`,
+                  }}
+                >
+                  <CommentBand
+                    doc={doc}
+                    layout={layout}
+                    pageStridePx={geometry.pageHeightPx + PAGE_GAP_PX}
+                    contentTopPx={geometry.contentTopPx}
+                    author={authorName}
+                    activeThreadId={activeThreadId}
+                    readOnly={lectureSeule}
+                    onReply={(threadId, text) => commands.replyToComment(threadId, authorName, text)}
+                    onResolve={commands.resolveComment}
+                    onDelete={commands.deleteComment}
+                    onEdit={commands.editComment}
+                    onGoToAnchor={handleSelectHeading}
+                  />
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -1194,6 +1636,31 @@ export function WriterEditor({
                 heightPt: resultat.heightPt,
                 alt: resultat.alt,
                 ...(resultat.crop ? { crop: resultat.crop } : {}),
+                ...(resultat.caption ? { caption: resultat.caption } : {}),
+                // `0` est une valeur : on teste la présence, jamais la vérité,
+                // sinon une marge remise à zéro n'atteindrait jamais le run.
+                ...(resultat.marginPt !== undefined ? { marginPt: resultat.marginPt } : {}),
+                ...(resultat.captionGapPt !== undefined
+                  ? { captionGapPt: resultat.captionGapPt }
+                  : {}),
+                ...(resultat.wrap
+                  ? {
+                      wrap: {
+                        mode: resultat.wrap,
+                        ...(resultat.horiOrient !== undefined
+                          ? { horiOrient: resultat.horiOrient }
+                          : {}),
+                        ...(resultat.horiRelation !== undefined
+                          ? { horiRelation: resultat.horiRelation }
+                          : {}),
+                        ...(resultat.xPt !== undefined ? { xPt: resultat.xPt } : {}),
+                        ...(resultat.yPt !== undefined ? { yPt: resultat.yPt } : {}),
+                        ...(resultat.wrapMarginPt !== undefined
+                          ? { wrapMarginPt: resultat.wrapMarginPt }
+                          : {}),
+                      },
+                    }
+                  : {}),
               };
               if (resultat.blockId !== undefined && resultat.offset !== undefined) {
                 commands.updateImage(resultat.blockId, resultat.offset, attributs);
@@ -1229,6 +1696,15 @@ export function WriterEditor({
         />
       )}
 
+      {contextMenuAt && (
+        <ContextMenu
+          x={contextMenuAt.x}
+          y={contextMenuAt.y}
+          menu={contextMenu}
+          onClose={() => setContextMenuAt(null)}
+        />
+      )}
+
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
 
     </div>
@@ -1236,6 +1712,35 @@ export function WriterEditor({
 }
 
 /** Statistiques du document */
+/** Un caractère d'espacement au sens d'`Intl` — le séparateur de mots. */
+function estEspace(code: number): boolean {
+  return (
+    code === 0x20 || // espace
+    code === 0x09 || // tabulation
+    code === 0x0a || // saut de ligne
+    code === 0x0d || // retour chariot
+    code === 0x0c || // saut de page
+    code === 0x0b || // tabulation verticale
+    code === 0xa0 || // espace insécable
+    code === 0x1680 ||
+    code === 0xfeff ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000
+  );
+}
+
+/**
+ * Mots et caractères du document.
+ *
+ * Le comptage se fait caractère par caractère plutôt que par `text.match(/\S+/g)` :
+ * l'expression régulière alloue le tableau de **tous** les mots du paragraphe
+ * pour n'en lire que la longueur, et le jette aussitôt. Sur un document long,
+ * c'est une pression de ramasse-miettes gratuite, répétée à chaque comptage.
+ */
 function computeStatistics(doc: WriterDocumentState): { words: number; characters: number } {
   let words = 0;
   let characters = 0;
@@ -1246,8 +1751,13 @@ function computeStatistics(doc: WriterDocumentState): { words: number; character
     if (!paragraph) continue;
     const text = paragraphText(paragraph);
     characters += text.length;
-    const matches = text.match(/\S+/g);
-    if (matches) words += matches.length;
+
+    let dansUnMot = false;
+    for (let i = 0; i < text.length; i += 1) {
+      const espace = estEspace(text.charCodeAt(i));
+      if (!espace && !dansUnMot) words += 1;
+      dansUnMot = !espace;
+    }
   }
 
   return { words, characters };

@@ -4,8 +4,7 @@
  * Un document OpenDocument est un ZIP contenant `mimetype`, `content.xml`,
  * `styles.xml`, `meta.xml` et `META-INF/manifest.xml`. La compression passe par
  * `CompressionStream('deflate-raw')`, présent dans les navigateurs modernes
- * comme dans Node : aucune bibliothèque tierce, conformément à la règle d'or du
- * cahier des charges.
+ * comme dans Node : zéro dépendance binaire externe.
  *
  * Deux contraintes du format, qui ne sont pas des détails :
  *   – `mimetype` doit être la **première** entrée et être stockée **sans

@@ -28,7 +28,7 @@ interface Snapshot {
 
 /** Signature de regroupement d'une frappe. */
 export interface GroupingKey {
-  kind: 'insert' | 'delete';
+  kind: 'insert' | 'delete' | 'resize';
   blockId: string;
   /** Position du curseur **avant** l'opération. */
   offsetBefore: number;
@@ -198,6 +198,24 @@ export function typingGroup(
     offsetBefore,
     offsetAfter,
     isWordDelimiter: isWordDelimiter(text),
+  };
+}
+
+/**
+ * Clé de regroupement d'un geste continu — tirer une poignée de colonne.
+ *
+ * Un glissement émet une transaction par mouvement de souris. Sans
+ * regroupement, défaire un seul geste demanderait autant de `Ctrl+Z` qu'il a
+ * produit d'événements. Les offsets sont constants : c'est l'identité de la
+ * poignée, portée par `blockId`, qui décide de la continuité.
+ */
+export function dragGroup(handleId: string): GroupingKey {
+  return {
+    kind: 'resize',
+    blockId: handleId,
+    offsetBefore: 0,
+    offsetAfter: 0,
+    isWordDelimiter: false,
   };
 }
 

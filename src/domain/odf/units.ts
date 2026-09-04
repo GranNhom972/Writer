@@ -7,17 +7,19 @@
  * laquelle le modèle exprime déjà corps de police, marges et retraits.
  */
 
+import { MM_PER_INCH, PT_PER_INCH, PX_PER_INCH, ptToMm } from '../document/units';
+
 const LENGTH = /^\s*(-?\d+(?:\.\d+)?)\s*(cm|mm|in|pt|pc|px|twip)?\s*$/i;
 
 /** Facteurs vers le point typographique (1 pt = 1/72 pouce). */
 const TO_POINTS: Readonly<Record<string, number>> = {
   pt: 1,
   pc: 12,
-  in: 72,
-  cm: 72 / 2.54,
-  mm: 72 / 25.4,
+  in: PT_PER_INCH,
+  cm: (PT_PER_INCH * 10) / MM_PER_INCH,
+  mm: PT_PER_INCH / MM_PER_INCH,
   // Le pixel d'ODF est celui de CSS : 96 par pouce.
-  px: 72 / 96,
+  px: PT_PER_INCH / PX_PER_INCH,
   twip: 1 / 20,
 };
 
@@ -34,12 +36,12 @@ export function parseLengthPt(value: string | null | undefined): number | null {
 
 export function parseLengthMm(value: string | null | undefined): number | null {
   const pt = parseLengthPt(value);
-  return pt === null ? null : (pt * 25.4) / 72;
+  return pt === null ? null : ptToMm(pt);
 }
 
 /** Sérialise en centimètres — l'unité qu'écrit Writer dans ses fichiers. */
 export function formatCm(pt: number): string {
-  return `${round((pt * 2.54) / 72)}cm`;
+  return `${round(ptToMm(pt) / 10)}cm`;
 }
 
 export function formatPt(pt: number): string {

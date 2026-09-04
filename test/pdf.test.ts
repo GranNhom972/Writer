@@ -4,6 +4,7 @@ import { paginateDocument } from '../src/domain/engine/paginate';
 import { MetricTextMeasurer } from '../src/domain/engine/measure';
 import { exportToPdfBytes, exportToPdfBlob } from '../src/domain/pdf/export';
 import { DEFAULT_FURNITURE } from '../src/domain/document/pageFurniture';
+import { makeRun } from '../src/domain/document/runs';
 
 describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
   const measurer = new MetricTextMeasurer();
@@ -153,6 +154,57 @@ describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
     expect(text).toContain('(Pied D) Tj');
     // Vérification du filet séparateur dashed '[4 2] 0 d'
     expect(text).toContain('[4 2] 0 d');
+  });
+
+  /**
+   * Cadres flottants au PDF.
+   *
+   * Le PDF les ignorait : une image habillée y disparaissait, et il ne restait
+   * que le trou qu'elle avait creusé dans le texte. Faute d'un rastériseur dans
+   * les tests, on vérifie le **cadre de remplacement** que trace `paintImage`
+   * quand les octets manquent — sa présence prouve que le cadre a été visité.
+   */
+  function cadreFlottant(surround: 'parallel' | 'through', extra: Record<string, unknown> = {}) {
+    return makeRun('￼', {
+      imageSrc: 'data:image/png;base64,iVBORw0KGgo=',
+      imageWidthPt: 120,
+      imageHeightPt: 90,
+      imageAnchor: 'to-para',
+      imageSurround: surround,
+      imageXPt: 0,
+      imageYPt: 0,
+      ...extra,
+    });
+  }
+
+  it('peint les cadres flottants, que le fil du texte ne porte pas', () => {
+    const doc = createEmptyDocument('Cadre flottant');
+    doc.blocks = [createParagraph('', { runs: [makeRun('Du texte '), cadreFlottant('parallel')] })];
+
+    const layout = paginateDocument(doc, { measurer });
+    expect(layout.pages[0]?.flies).toHaveLength(1);
+
+    const text = new TextDecoder('latin1').decode(exportToPdfBytes(doc, layout));
+    // `120 × 90 pt`, la taille du cadre, tracée en rectangle de remplacement.
+    expect(text).toContain('120.00 90.00 re S');
+  });
+
+  it('peint le calque « devant le texte » après le corps de la page', () => {
+    const doc = createEmptyDocument('Devant le texte');
+    doc.blocks = [
+      createParagraph('', {
+        runs: [makeRun('Du texte '), cadreFlottant('through', { imageInFront: true })],
+      }),
+    ];
+
+    const layout = paginateDocument(doc, { measurer });
+    const text = new TextDecoder('latin1').decode(exportToPdfBytes(doc, layout));
+
+    const cadre = text.indexOf('120.00 90.00 re S');
+    const dernierTexte = text.lastIndexOf('ET');
+    expect(cadre).toBeGreaterThan(-1);
+    // L'ordre de `SwRootFrm::Paint` : le calque `heaven` passe après le texte.
+    expect(cadre).toBeGreaterThan(dernierTexte);
   });
 
   it('exportToPdfBlob produit un objet Blob de type application/pdf', () => {

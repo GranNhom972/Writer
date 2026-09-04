@@ -1,5 +1,5 @@
 /**
- * Édition atomique. §4.2 du cahier des charges, transposé de `SwTxtNode` (`ndtxt.cxx`)
+ * Édition atomique, transposée de `SwTxtNode` (`ndtxt.cxx`)
  * et `SwEditShell` (`sw/source/core/edit/`).
  *
  * Chaque opération suit la même séquence que Writer :
@@ -16,6 +16,7 @@
 import {
   containerKeyOf,
   createParagraph,
+  deleteTable,
   deleteTableColumn,
   deleteTableRow,
   gridColumnsOf,
@@ -30,7 +31,10 @@ import {
   removeBlocks,
   ROOT_CONTAINER,
   replaceParagraph,
+  setTableColumnWidths,
   splitTableCell,
+  tableColumnCount,
+  tableColumnWidths,
   touch,
   type CellRect,
 } from '../document/document';
@@ -43,12 +47,15 @@ import {
   makeRun,
   normalizeRuns,
   patchFormatting,
+  runFormatting,
   runsLength,
   sliceRuns,
   splitRunsAt,
   type RunFormatPatch,
 } from '../document/runs';
+import { isImageRun } from '../document/images';
 import {
+  isParagraph,
   isTable,
   MAX_LIST_LEVEL,
   type DocumentBlock,
@@ -960,6 +967,118 @@ export function currentTableLocation(state: EditorState): {
   };
 }
 
+/**
+ * Tout ce que l'interface a besoin de savoir du tableau courant, en un appel.
+ *
+ * Les commandes de tableau sont **inertes** hors d'un tableau : `insertTableRow`
+ * et consorts renvoient l'état inchangé. Sans ce sélecteur, un menu ne peut pas
+ * distinguer « rien à faire » de « rien ne s'est passé », et l'utilisateur clique
+ * sur un élément actif qui ne produit aucun effet — le pire des retours. C'est
+ * lui qui permet de griser ce qui n'est pas applicable.
+ */
+export function tableContext(state: EditorState): {
+  tableId: string;
+  rowIndex: number;
+  cellIndex: number;
+  rowCount: number;
+  columnCount: number;
+  /** Rectangle de cellules quand la sélection en couvre plusieurs. */
+  rect: CellRect | null;
+  /**
+   * La cellule courante est-elle issue d'une fusion ?
+   *
+   * Sur une cellule fusionnée, « scinder » ne découpe pas : il **rend la
+   * grille**, en libérant les cellules absorbées. Les deux gestes portent des
+   * noms différents dans l'interface, et c'est ce drapeau qui permet de les
+   * distinguer plutôt que de promettre une découpe qui n'aura pas lieu.
+   */
+  merged: boolean;
+} | null {
+  const loc = currentTableLocation(state);
+  if (!loc) return null;
+  const block = state.doc.blocks.find((candidate) => candidate.id === loc.tableId);
+  if (!block || !isTable(block)) return null;
+  const selected = selectedCellRect(state);
+  const rect = selected && selected.tableId === loc.tableId ? selected.rect : null;
+  const multiple = rect ? rect.fromRow !== rect.toRow || rect.fromCol !== rect.toCol : false;
+  const cell = block.rows[loc.rowIndex]?.cells[loc.cellIndex];
+
+  return {
+    tableId: loc.tableId,
+    rowIndex: loc.rowIndex,
+    cellIndex: loc.cellIndex,
+    rowCount: block.rows.length,
+    columnCount: tableColumnCount(block),
+    rect: multiple ? rect : null,
+    merged: (cell?.colSpan ?? 1) > 1 || (cell?.rowSpan ?? 1) > 1,
+  };
+}
+
+/**
+ * Premier paragraphe d'une cellule, en repartant vers l'arrière si la cellule
+ * visée a disparu ou est recouverte. Sert à replacer le curseur après une
+ * opération structurelle.
+ */
+function cellAnchorId(
+  doc: WriterDocumentState,
+  tableId: string,
+  rowIndex: number,
+  cellIndex: number,
+): string | null {
+  const block = doc.blocks.find((candidate) => candidate.id === tableId);
+  if (!block || !isTable(block)) return null;
+  const row = block.rows[Math.min(rowIndex, block.rows.length - 1)] ?? block.rows[0];
+  if (!row) return null;
+
+  // Une cellule recouverte n'accueille pas de curseur : on remonte vers sa
+  // maîtresse, à gauche, exactement comme le fait `SwCrsrShell` en sortant
+  // d'un `SwTableBox` de RowSpan négatif.
+  for (let i = Math.min(cellIndex, row.cells.length - 1); i >= 0; i -= 1) {
+    const cell = row.cells[i];
+    if (cell && !cell.covered && cell.blocks[0]) return cell.blocks[0].id;
+  }
+  for (const cell of row.cells) {
+    if (!cell.covered && cell.blocks[0]) return cell.blocks[0].id;
+  }
+  return null;
+}
+
+/**
+ * Replace le curseur après une suppression de ligne ou de colonne.
+ *
+ * Le faire retomber sur `order[0]` — le tout premier paragraphe du document —
+ * était le comportement précédent : supprimer une ligne d'un tableau en page 12
+ * renvoyait l'utilisateur en page 1, sans que rien ne l'explique. On reste dans
+ * le tableau tant qu'il existe, et à défaut sur le paragraphe qui le suivait.
+ */
+function selectionAfterStructuralEdit(
+  doc: WriterDocumentState,
+  tableId: string,
+  rowIndex: number,
+  cellIndex: number,
+  fallbackBlockIndex: number,
+): DocumentSelection {
+  const inCell = cellAnchorId(doc, tableId, rowIndex, cellIndex);
+  if (inCell) return collapsedSelection({ blockId: inCell, offset: 0 });
+
+  // Le tableau a disparu avec sa dernière ligne : on se pose sur le paragraphe
+  // qui occupe désormais sa place, ou sur le précédent s'il était en fin.
+  const index = paragraphIndex(doc);
+  for (let i = fallbackBlockIndex; i < doc.blocks.length; i += 1) {
+    const block = doc.blocks[i];
+    if (block && isParagraph(block) && index.byId.has(block.id)) {
+      return collapsedSelection({ blockId: block.id, offset: 0 });
+    }
+  }
+  for (let i = Math.min(fallbackBlockIndex, doc.blocks.length) - 1; i >= 0; i -= 1) {
+    const block = doc.blocks[i];
+    if (block && isParagraph(block) && index.byId.has(block.id)) {
+      return collapsedSelection({ blockId: block.id, offset: paragraphText(block).length });
+    }
+  }
+  return collapsedSelection({ blockId: index.order[0] ?? '', offset: 0 });
+}
+
 export function insertTableRowAbove(state: EditorState): EditorState {
   const loc = currentTableLocation(state);
   if (!loc) return state;
@@ -977,9 +1096,19 @@ export function insertTableRowBelow(state: EditorState): EditorState {
 export function deleteCurrentTableRow(state: EditorState): EditorState {
   const loc = currentTableLocation(state);
   if (!loc) return state;
+  const blockIndex = state.doc.blocks.findIndex((block) => block.id === loc.tableId);
   const doc = deleteTableRow(state.doc, loc.tableId, loc.rowIndex);
-  const nextFirst = paragraphIndex(doc).order[0] ?? '';
-  return { ...state, doc, selection: collapsedSelection({ blockId: nextFirst, offset: 0 }) };
+  if (doc === state.doc) return state;
+  // On vise la ligne qui a pris la place de celle supprimée, donc le même
+  // index ; `cellAnchorId` la ramène dans les bornes si c'était la dernière.
+  const selection = selectionAfterStructuralEdit(
+    doc,
+    loc.tableId,
+    loc.rowIndex,
+    loc.cellIndex,
+    blockIndex,
+  );
+  return { ...state, doc, selection };
 }
 
 export function insertTableColumnLeft(state: EditorState): EditorState {
@@ -999,9 +1128,191 @@ export function insertTableColumnRight(state: EditorState): EditorState {
 export function deleteCurrentTableColumn(state: EditorState): EditorState {
   const loc = currentTableLocation(state);
   if (!loc) return state;
+  const blockIndex = state.doc.blocks.findIndex((block) => block.id === loc.tableId);
   const doc = deleteTableColumn(state.doc, loc.tableId, loc.cellIndex);
-  const nextFirst = paragraphIndex(doc).order[0] ?? '';
-  return { ...state, doc, selection: collapsedSelection({ blockId: nextFirst, offset: 0 }) };
+  if (doc === state.doc) return state;
+  const selection = selectionAfterStructuralEdit(
+    doc,
+    loc.tableId,
+    loc.rowIndex,
+    loc.cellIndex,
+    blockIndex,
+  );
+  return { ...state, doc, selection };
+}
+
+/** Supprime le tableau courant en entier, curseur reposé là où il était. */
+export function deleteCurrentTable(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const blockIndex = state.doc.blocks.findIndex((block) => block.id === loc.tableId);
+  const doc = deleteTable(state.doc, loc.tableId);
+  if (doc === state.doc) return state;
+  return {
+    ...state,
+    doc,
+    selection: selectionAfterStructuralEdit(doc, loc.tableId, 0, 0, blockIndex),
+  };
+}
+
+/* ------------------------------------------------- largeur des colonnes */
+
+/** Largeurs de colonne du tableau courant, en pourcentage — pour l'interface. */
+export function currentTableColumnWidths(state: EditorState): number[] | null {
+  const loc = currentTableLocation(state);
+  if (!loc) return null;
+  const block = state.doc.blocks.find((candidate) => candidate.id === loc.tableId);
+  return block && isTable(block) ? tableColumnWidths(block) : null;
+}
+
+/**
+ * Déplace la **frontière** entre deux colonnes voisines, à la souris.
+ *
+ * Seules les deux colonnes adjacentes bougent, et leur somme est conservée :
+ * c'est le comportement de `SwTable::SetTabCols` en mode « déplacement de
+ * bord », et celui qu'attend l'utilisateur — tirer un trait ne doit pas faire
+ * frémir toute la grille. Une largeur plancher empêche de rendre une colonne
+ * inatteignable à la souris.
+ */
+export function resizeTableColumnBoundary(
+  state: EditorState,
+  tableId: string,
+  boundaryIndex: number,
+  deltaPercent: number,
+): EditorState {
+  const block = state.doc.blocks.find((candidate) => candidate.id === tableId);
+  if (!block || !isTable(block)) return state;
+
+  const widths = tableColumnWidths(block);
+  const left = widths[boundaryIndex];
+  const right = widths[boundaryIndex + 1];
+  if (left === undefined || right === undefined) return state;
+
+  const MIN = 3;
+  const pair = left + right;
+  const nextLeft = Math.min(pair - MIN, Math.max(MIN, left + deltaPercent));
+  if (Math.abs(nextLeft - left) < 0.001) return state;
+
+  const next = [...widths];
+  next[boundaryIndex] = nextLeft;
+  next[boundaryIndex + 1] = pair - nextLeft;
+
+  return { ...state, doc: setTableColumnWidths(state.doc, tableId, next) };
+}
+
+/** Rend aux colonnes du tableau courant des largeurs égales. */
+export function distributeTableColumns(state: EditorState): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const block = state.doc.blocks.find((candidate) => candidate.id === loc.tableId);
+  if (!block || !isTable(block)) return state;
+  const count = Math.max(1, tableColumnCount(block));
+  const even = new Array<number>(count).fill(100 / count);
+  return { ...state, doc: setTableColumnWidths(state.doc, loc.tableId, even) };
+}
+
+/* ------------------------------------------------- navigation et sélection */
+
+/**
+ * Déplace le curseur d'une cellule, dans l'ordre de lecture (`Tab`).
+ *
+ * En fin de tableau, `Tab` **ajoute une ligne** plutôt que d'en sortir : c'est
+ * la convention de Word, de Google Docs et de Writer, et c'est la façon dont on
+ * remplit une grille au clavier sans jamais toucher la souris.
+ */
+export function moveToAdjacentCell(state: EditorState, forward: boolean): EditorState {
+  const loc = currentTableLocation(state);
+  if (!loc) return state;
+  const block = state.doc.blocks.find((candidate) => candidate.id === loc.tableId);
+  if (!block || !isTable(block)) return state;
+
+  const flat: { rowIndex: number; cellIndex: number }[] = [];
+  block.rows.forEach((row, rowIndex) =>
+    row.cells.forEach((cell, cellIndex) => {
+      if (!cell.covered) flat.push({ rowIndex, cellIndex });
+    }),
+  );
+
+  const here = flat.findIndex((c) => c.rowIndex === loc.rowIndex && c.cellIndex === loc.cellIndex);
+  if (here === -1) return state;
+  const target = flat[here + (forward ? 1 : -1)];
+
+  if (!target) {
+    if (!forward) return state;
+    const doc = insertTableRow(state.doc, loc.tableId, block.rows.length - 1, 'below');
+    const anchor = cellAnchorId(doc, loc.tableId, block.rows.length, 0);
+    return anchor ? { ...state, doc, selection: collapsedSelection({ blockId: anchor, offset: 0 }) } : state;
+  }
+
+  const cell = block.rows[target.rowIndex]?.cells[target.cellIndex];
+  const paragraph = cell?.blocks[0];
+  if (!paragraph) return state;
+
+  // Le contenu de la cellule atteinte est sélectionné en entier : c'est ce qui
+  // permet de la remplir en frappant, sans avoir à effacer d'abord.
+  const length = paragraphText(cell.blocks[cell.blocks.length - 1]!).length;
+  return {
+    ...state,
+    selection: makeSelection(
+      { blockId: paragraph.id, offset: 0 },
+      { blockId: cell.blocks[cell.blocks.length - 1]!.id, offset: length },
+    ),
+  };
+}
+
+/** Sélectionne une ligne entière du tableau (clic sur sa poignée). */
+export function selectTableRow(state: EditorState, tableId: string, rowIndex: number): EditorState {
+  const block = state.doc.blocks.find((candidate) => candidate.id === tableId);
+  if (!block || !isTable(block)) return state;
+  const row = block.rows[rowIndex];
+  if (!row) return state;
+
+  const first = row.cells.find((cell) => !cell.covered)?.blocks[0];
+  const lastCell = [...row.cells].reverse().find((cell) => !cell.covered);
+  const last = lastCell?.blocks[lastCell.blocks.length - 1];
+  if (!first || !last) return state;
+
+  return {
+    ...state,
+    selection: makeSelection(
+      { blockId: first.id, offset: 0 },
+      { blockId: last.id, offset: paragraphText(last).length },
+    ),
+  };
+}
+
+/** Sélectionne une colonne entière du tableau (clic sur sa poignée). */
+export function selectTableColumn(
+  state: EditorState,
+  tableId: string,
+  columnIndex: number,
+): EditorState {
+  const block = state.doc.blocks.find((candidate) => candidate.id === tableId);
+  if (!block || !isTable(block)) return state;
+
+  const firstCell = block.rows[0]?.cells[columnIndex];
+  const lastRow = block.rows[block.rows.length - 1];
+  const lastCell = lastRow?.cells[columnIndex];
+  const first = firstCell?.blocks[0];
+  const last = lastCell?.blocks[lastCell.blocks.length - 1];
+  if (!first || !last) return state;
+
+  return {
+    ...state,
+    selection: makeSelection(
+      { blockId: first.id, offset: 0 },
+      { blockId: last.id, offset: paragraphText(last).length },
+    ),
+  };
+}
+
+/** Sélectionne toutes les cellules du tableau courant. */
+export function selectWholeTable(state: EditorState, tableId: string): EditorState {
+  const block = state.doc.blocks.find((candidate) => candidate.id === tableId);
+  if (!block || !isTable(block) || block.rows.length === 0) return state;
+  const withFirst = selectTableRow(state, tableId, 0);
+  const withLast = selectTableRow(state, tableId, block.rows.length - 1);
+  return { ...state, selection: makeSelection(withFirst.selection.anchor, withLast.selection.focus) };
 }
 
 /* --------------------------------------- fusion et scission de cellules */
@@ -1146,4 +1457,121 @@ export function setReviewMode(state: EditorState, who: RedlineAuthor | null): Ed
 /** Le suivi des modifications est-il actif ? */
 export function isReviewing(state: EditorState): boolean {
   return state.review != null;
+}
+
+/* ------------------------------------------- déplacement d'un cadre image */
+
+/** Où poser un cadre flottant après l'avoir déplacé, en points. */
+export interface FlyDropPlacement {
+  xPt: number;
+  yPt: number;
+}
+
+/**
+ * Déplace le cadre image situé à `offset` vers `target`.
+ *
+ * Transposition de `SwFEShell::SetAnchor` / `SwFEShell::EndDrag`
+ * (`sw/source/core/frmedt/fefly1.cxx`) : à la fin d'un glissement, Writer ne
+ * se contente pas de corriger les coordonnées du cadre, il **change son ancre**
+ * pour le paragraphe où on l'a lâché.
+ *
+ * La raison est structurelle : c'est l'ancre qui décide de la page d'un cadre
+ * (`SwFlyFrm::AnchorFrm`). Un cadre traîné trois pages plus bas mais resté
+ * ancré à son paragraphe d'origine continue d'être dessiné sur la page de
+ * celui-ci, et sort de la feuille — il suit le pointeur pendant le geste puis
+ * disparaît au relâchement.
+ *
+ * `placement` n'est lu que pour un cadre flottant. Une image « comme
+ * caractère » n'a pas de coordonnées propres : la déplacer, c'est uniquement
+ * la changer de place dans le texte, et le formateur de lignes fait le reste.
+ */
+export function moveImageRun(
+  doc: WriterDocumentState,
+  blockId: string,
+  offset: number,
+  target: DocumentPosition,
+  placement: FlyDropPlacement,
+): WriterDocumentState {
+  const index = paragraphIndex(doc);
+  const source = index.byId.get(blockId)?.paragraph;
+  const destination = index.byId.get(target.blockId)?.paragraph;
+  if (!source || !destination) return doc;
+
+  const cible = imageRunIndexAt(source.runs, offset);
+  if (!cible) return doc;
+
+  const cadre = source.runs[cible.index]!;
+  const formatage = runFormatting(cadre);
+  const flottant = Boolean(cadre.imageAnchor && cadre.imageAnchor !== 'as-char');
+
+  // Un cadre déplacé à la main a quitté son alignement : le laisser aligné le
+  // ramènerait à sa place au prochain calcul, et le geste n'aurait rien fait.
+  const place = flottant
+    ? {
+        imageHoriOrient: 'from-left' as const,
+        imageXPt: placement.xPt,
+        imageYPt: placement.yPt,
+      }
+    : {};
+
+  const restantes = source.runs.filter((_, i) => i !== cible.index);
+  const heritage = formattingAt(source.runs, cible.offset);
+
+  if (target.blockId === blockId) {
+    /*
+     * Le retrait décale ce qui le suit.
+     *
+     * Un offset visé **après** le cadre désigne, une fois celui-ci retiré, un
+     * caractère plus à gauche : sans cette correction, l'image reculait d'un
+     * cran chaque fois qu'on la déplaçait vers la droite dans son paragraphe.
+     */
+    const vise =
+      target.offset > cible.offset ? target.offset - cadre.text.length : target.offset;
+    const runs = insertTextInRuns(
+      normalizeRuns(restantes, heritage),
+      Math.max(0, vise),
+      cadre.text,
+      { ...formatage, ...place },
+    );
+    return replaceParagraph(doc, blockId, { ...source, runs });
+  }
+
+  // Deux paragraphes : on retire d'abord, on insère ensuite. Le paragraphe
+  // d'accueil est **relu** après le retrait — celui qu'on tenait date d'avant.
+  const sansCadre = replaceParagraph(doc, blockId, {
+    ...source,
+    runs: normalizeRuns(restantes, heritage),
+  });
+  const arrivee = paragraphIndex(sansCadre).byId.get(target.blockId)?.paragraph;
+  if (!arrivee) return doc;
+
+  const longueur = paragraphText(arrivee).length;
+  const runs = insertTextInRuns(
+    arrivee.runs,
+    Math.min(Math.max(0, target.offset), longueur),
+    cadre.text,
+    { ...formatage, ...place },
+  );
+  return replaceParagraph(sansCadre, target.blockId, { ...arrivee, runs });
+}
+
+/**
+ * Index et offset de début du cadre image couvrant cet offset.
+ *
+ * On accepte l'offset du **début** du cadre comme celui de sa fin : le rendu
+ * annonce le premier, un curseur posé juste après l'image donne le second.
+ */
+function imageRunIndexAt(
+  runs: readonly TextRun[],
+  offset: number,
+): { index: number; offset: number } | null {
+  let consomme = 0;
+  for (let index = 0; index < runs.length; index += 1) {
+    const run = runs[index]!;
+    const debut = consomme;
+    const fin = consomme + run.text.length;
+    if (isImageRun(run) && offset >= debut && offset <= fin) return { index, offset: debut };
+    consomme = fin;
+  }
+  return null;
 }

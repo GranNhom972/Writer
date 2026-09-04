@@ -22,6 +22,7 @@ import { commentThreads } from '../src/domain/document/comments';
 import { listBookmarks, resolveInternalLink } from '../src/domain/document/bookmarks';
 import { listRedlineRanges } from '../src/domain/document/redline';
 import { tocNodes } from '../src/domain/document/tox';
+import { pageGeometry } from '../src/domain/document/pageSetup';
 import { collectFlyFrames } from '../src/domain/engine/flyLayout';
 import { paginateDocument } from '../src/domain/engine/paginate';
 import { MetricTextMeasurer } from '../src/domain/engine/measure';
@@ -169,7 +170,7 @@ describe('Sous-systèmes présents dans l\'exemple relu', () => {
   });
 
   it('porte des cadres flottants avec leur habillage', () => {
-    const cadres = collectFlyFrames(doc);
+    const cadres = collectFlyFrames(doc, pageGeometry(doc.pageSetup));
     expect(cadres.length).toBeGreaterThanOrEqual(2);
 
     const habillages = new Set(cadres.map((c) => c.surround));

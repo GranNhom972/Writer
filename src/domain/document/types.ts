@@ -111,6 +111,40 @@ export interface TextRun {
    */
 
   /** `RndStdIds` : `as-char` coule dans la ligne, les autres flottent. */
+  /* -- Légende de figure --------------------------------------------------
+   *
+   * Le **numéro n'est pas stocké**, seulement le texte et le mode.
+   *
+   * C'est le choix qu'a fait Writer pour ses champs de séquence
+   * (`SwSetExpField` de type `SwGetSetExpType::Sequence`) : la valeur est
+   * recalculée à l'affichage, jamais conservée. Un numéro écrit dans le
+   * document serait faux dès la première insertion au-dessus, et il faudrait
+   * renuméroter tout le reste à chaque édition — c'est précisément par là que
+   * les doublons arrivent. Ici, `figureNumbering` le dérive de l'ordre du
+   * document, et la question ne se pose plus.
+   */
+  /** Texte saisi par l'utilisateur, sans le préfixe « Figure n°X : ». */
+  imageCaption?: string;
+  /** Au-dessus ou au-dessous de l'image. Par défaut au-dessous. */
+  imageCaptionPosition?: 'above' | 'below';
+  imageCaptionAlign?: 'left' | 'center' | 'right';
+  /**
+   * Numérotation automatique. `undefined` vaut **activée** : c'est le mode par
+   * défaut demandé, et il s'applique donc aussi aux images déjà présentes.
+   */
+  imageCaptionManual?: boolean;
+
+  /**
+   * Marge autour du cadre — image et légende comprises —, en points.
+   *
+   * Le moteur l'ajoute aux quatre côtés de la boîte mesurée : elle repousse
+   * donc réellement le texte, au lieu d'être un simple retrait décoratif que
+   * les lignes viendraient recouvrir.
+   */
+  imageMarginPt?: number;
+  /** Blanc entre l'image et sa légende, en points. */
+  imageCaptionGapPt?: number;
+
   imageAnchor?: FlyAnchor;
   /** `SwFmtSurround` : mode d'habillage du texte autour du cadre flottant. */
   imageSurround?: FlySurround;
@@ -120,6 +154,34 @@ export interface TextRun {
   imageYPt?: number;
   /** Marge d'habillage autour du cadre (`SvxLRSpaceItem` du cadre), en points. */
   imageWrapMarginPt?: number;
+
+  /* -- Position du cadre (`SwFmtHoriOrient`, sw/inc/fmtornt.hxx) ------------
+   *
+   * `imageXPt` seul ne suffit pas à poser un cadre : une abscisse figée en
+   * points cesse d'être juste dès que la marge de page change, et « collé au
+   * bord droit » redevient alors « à 12,3 cm du bord gauche ».
+   *
+   * Writer sépare donc l'**orientation** de son **repère** — `SwFmtHoriOrient`
+   * porte `text::HoriOrientation` (LEFT, CENTER, RIGHT, NONE) et
+   * `text::RelOrientation` (PRINT_AREA, PAGE_FRAME, PAGE_PRINT_AREA). Seule
+   * `NONE`, ici `from-left`, consulte l'abscisse ; les trois autres la
+   * recalculent à chaque mise en page.
+   */
+
+  /** `text::HoriOrientation` : alignement horizontal, ou `from-left` pour un décalage libre. */
+  imageHoriOrient?: FlyHoriOrient;
+  /** `text::RelOrientation` : ce par rapport à quoi cet alignement se mesure. */
+  imageHoriRelation?: FlyHoriRelation;
+
+  /**
+   * `RES_OPAQUE` (`SvxOpaqueItem`) : le cadre passe **devant** le texte.
+   *
+   * Dans Writer, c'est le calque qui décide — `hell` sous le texte, `heaven`
+   * au-dessus (`SwDrawView`, `SdrLayerID`) —, et c'est ce que le format ODF
+   * écrit en `style:run-through="foreground"`. La distinction n'a de sens
+   * qu'avec l'habillage `through`, seul cas où cadre et texte se superposent.
+   */
+  imageInFront?: boolean;
 
   /* -- Ancres de commentaire, de signet et de révision ----------------------
    *
@@ -149,8 +211,40 @@ export interface TextRun {
  */
 export type FlyAnchor = 'as-char' | 'to-para' | 'to-page';
 
-/** Mode d'habillage. Transposition de `SwSurround` (`sw/inc/fmtsrndenum.hxx:27`). */
-export type FlySurround = 'none' | 'through' | 'parallel' | 'left' | 'right';
+/**
+ * Mode d'habillage. Transposition de `SwSurround` (`sw/inc/fmtsrndenum.hxx:27`).
+ *
+ * `ideal` est `SURROUND_IDEAL`, l'habillage « optimal » : il ne décrit pas une
+ * géométrie mais une **règle de choix**, résolue ligne à ligne par
+ * `SwTxtFly::GetSurroundForTextWrap` d'après la place restant de chaque côté du
+ * cadre (cf. `resolveIdealSurround`). Les cinq autres se lisent tels quels.
+ */
+export type FlySurround = 'none' | 'through' | 'parallel' | 'ideal' | 'left' | 'right';
+
+/**
+ * Alignement horizontal d'un cadre. Transposition de `text::HoriOrientation`
+ * (`offapi/com/sun/star/text/HoriOrientation.idl`).
+ *
+ * `from-left` est `HoriOrientation::NONE` : pas d'alignement, la position vient
+ * du décalage `imageXPt`. C'est le mode dans lequel tombe un cadre qu'on
+ * déplace à la souris.
+ */
+export type FlyHoriOrient = 'left' | 'center' | 'right' | 'from-left';
+
+/**
+ * Repère d'un alignement horizontal. Transposition de `text::RelOrientation`
+ * (`offapi/com/sun/star/text/RelOrientation.idl`).
+ *
+ * OpenOffice en distingue dix ; deux suffisent à une mise en page à colonne
+ * unique, et les nommer d'après ce qu'elles mesurent vaut mieux que d'en
+ * recopier dix dont huit coïncideraient :
+ *
+ *  - `text` recouvre `PRINT_AREA` et `PAGE_PRINT_AREA` — la colonne de texte,
+ *    marges de page déduites. Les deux donnent ici la même bande ;
+ *  - `page` est `PAGE_FRAME` : la feuille entière, marges comprises. C'est le
+ *    seul repère qui permette à un cadre de déborder dans la marge.
+ */
+export type FlyHoriRelation = 'text' | 'page';
 
 /** Nature d'une modification suivie (`IDocumentRedlineAccess.hxx:73-75`). */
 export type RedlineType = 'insert' | 'delete' | 'format';
@@ -186,11 +280,20 @@ export const RUN_FORMAT_KEYS = [
   'imageCropRightPct',
   'imageCropBottomPct',
   'imageCropLeftPct',
+  'imageMarginPt',
+  'imageCaptionGapPt',
+  'imageCaption',
+  'imageCaptionPosition',
+  'imageCaptionAlign',
+  'imageCaptionManual',
   'imageAnchor',
   'imageSurround',
   'imageXPt',
   'imageYPt',
   'imageWrapMarginPt',
+  'imageHoriOrient',
+  'imageHoriRelation',
+  'imageInFront',
   'commentIds',
   'bookmarkName',
   'redlineId',

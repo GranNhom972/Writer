@@ -113,7 +113,15 @@ export function MenuBar({ menus }: MenuBarProps) {
   );
 }
 
-function MenuPanel({ menu, onClose }: { menu: MenuDefinition; onClose: () => void }) {
+/**
+ * Panneau d'un menu — la liste d'entrées elle-même.
+ *
+ * Exporté pour que le menu contextuel le réutilise tel quel : deux
+ * implémentations séparées finiraient par diverger sur un détail de focus, de
+ * séparateur ou de coche, et l'utilisateur verrait deux menus différents pour
+ * les mêmes commandes.
+ */
+export function MenuPanel({ menu, onClose }: { menu: MenuDefinition; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

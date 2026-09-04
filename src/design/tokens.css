@@ -64,7 +64,32 @@
   --space-7: 32px;
   --space-8: 48px;
 
+  /* --- Le papier ---------------------------------------------------------
+   *
+   * La feuille n'est pas une surface d'interface : c'est la **représentation
+   * d'une page imprimée**. Elle ne suit donc pas le thème du système, et ces
+   * jetons gardent la même valeur en clair comme en sombre.
+   *
+   * Les faire basculer avec le thème avait une conséquence qu'on ne voit
+   * qu'une fois le thème sombre actif : le fond de page passait au gris
+   * anthracite, mais le texte gardait la couleur inscrite dans le document —
+   * un noir à 1,16 de contraste sur ce fond, c'est-à-dire illisible. Il aurait
+   * fallu retranscrire toutes les couleurs du document, y compris celles que
+   * l'auteur a choisies, ce qui n'est plus afficher un document mais le
+   * réécrire. Le papier reste donc blanc, et l'interface autour s'assombrit.
+   */
+  --paper-bg: #ffffff;
+  --paper-fg: #16191d;
+  --paper-secondary: #545b64;
+  --paper-border: #c4c8ce;
+  --paper-sunken: #f2f4f6;
+
+  /* Teinte de sélection de texte. Alpha, et non couleur pleine : elle se pose
+     sous les glyphes, qui doivent rester lisibles au travers. */
+  --selection: rgba(26, 86, 219, 0.22);
+
   /* --- Rayon --- */
+  --radius: 6px;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 8px;
@@ -75,6 +100,8 @@
   --elevation-hover: 0 1px 2px rgba(16, 24, 40, 0.08);
   --elevation-popover: 0 4px 12px rgba(16, 24, 40, 0.12);
   --elevation-modal: 0 16px 40px rgba(16, 24, 40, 0.2);
+  /* Ombre portée d'une feuille sur le plan de travail. */
+  --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.08);
 
   /* --- Mouvement --- */
   --motion-fast: 120ms;
@@ -124,6 +151,9 @@
     --success-subtle: #14301f;
 
     --focus-ring: #9cc2ff;
+
+    --selection: rgba(138, 180, 255, 0.28);
+    --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
 
     --presence-1: #ff8fa0;
     --presence-2: #6fd2e3;

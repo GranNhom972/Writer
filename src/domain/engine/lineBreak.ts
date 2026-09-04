@@ -30,7 +30,15 @@ import type {
 import { resolveBlockSpacing, resolveColor, resolveFont, resolveLineSpacing } from './style';
 import type { FontMetrics, FontSpec, TextMeasurer } from './measure';
 import { measureMathExact } from '../math/render';
-import { isImageFormatting } from '../document/images';
+import {
+  captionText,
+  hasCaption,
+  imageCaptionGapPt,
+  imageCaptionOf,
+  imageKey,
+  imageMarginPt,
+  isImageFormatting,
+} from '../document/images';
 import { nextClearY, usableBand, type FlyExclusion } from './flyLayout';
 
 /** Taquet de tabulation par défaut de Writer : 1,25 cm. */
@@ -66,6 +74,15 @@ export interface LayoutSegment {
   widthPx: number;
   /** Vrai pour le segment engendré par une tabulation (largeur calculée). */
   isTab: boolean;
+  /**
+   * Hauteur réservée à la légende d'une image, blanc compris.
+   *
+   * Portée par le segment parce que c'est le moteur qui l'a mesurée et qui l'a
+   * déjà comptée dans la hauteur de la ligne. La recalculer au rendu ferait
+   * dépendre l'affichage d'une seconde dérivation, qui finirait par diverger de
+   * celle qui fait autorité.
+   */
+  captionHeightPx?: number;
 }
 
 export interface LayoutLine {
@@ -131,6 +148,71 @@ export interface LayoutContext {
    * largeur pleine sans un test de plus par caractère.
    */
   exclusions?: readonly FlyExclusion[] | undefined;
+  /**
+   * Numéros de figure du document, et paragraphe en cours de mise en page.
+   *
+   * La légende d'une image occupe de la hauteur : elle doit donc être mesurée
+   * ici, avec son numéro, sinon le texte qui suit passerait dessus. Le numéro
+   * n'est pas dans le run — il est dérivé de l'ordre du document (cf.
+   * `figureNumbering`) — d'où ces deux champs, qui n'existent que pour le lui
+   * rapporter.
+   */
+  figureNumbers?: ReadonlyMap<string, number> | undefined;
+  blockId?: string | undefined;
+}
+
+/** Taille de police d'une légende, relativement au corps du document. */
+export const CAPTION_FONT_RATIO = 0.85;
+/** Interligne d'une légende. */
+export const CAPTION_LINE_RATIO = 1.3;
+/**
+ * Blanc entre l'image et sa légende.
+ *
+ * Il ne fait **plus** partie de la hauteur mesurée de la légende : il était
+ * compté dedans, puis retranché à l'affichage, si bien qu'il finissait en bas du
+ * cadre au lieu de séparer l'image de son texte. Il est maintenant posé où il
+ * doit l'être, et réglable (`imageCaptionGapPt`).
+ */
+
+/**
+ * Hauteur qu'occupe la légende d'une image, blanc compris.
+ *
+ * La légende est cadrée sur la **largeur de l'image** et se replie autant de
+ * fois qu'il le faut : c'est ce que fait Writer, dont la légende vit dans un
+ * cadre de la largeur du sien. Mesurer ici, et non au rendu, est ce qui garantit
+ * que la ligne suivante du texte soit posée sous la légende et non dessus.
+ */
+export function captionHeightPx(
+  text: string,
+  imageWidthPx: number,
+  fontSizePx: number,
+  measurer: TextMeasurer,
+): number {
+  if (text.trim().length === 0) return 0;
+  const font: FontSpec = {
+    fontFamily: 'Liberation Sans, Arimo, Arial, sans-serif',
+    fontSizePx,
+    bold: false,
+    italic: false,
+  };
+  const lineHeight = fontSizePx * CAPTION_LINE_RATIO;
+  const usable = Math.max(1, imageWidthPx);
+
+  // Repli au mot, comme le remplisseur de ligne : compter les caractères
+  // donnerait un nombre de lignes faux dès le premier mot long.
+  let lines = 1;
+  let current = '';
+  for (const word of text.split(/\s+/)) {
+    const candidate = current.length === 0 ? word : `${current} ${word}`;
+    if (measurer.measure(candidate, font) <= usable || current.length === 0) {
+      current = candidate;
+    } else {
+      lines += 1;
+      current = word;
+    }
+  }
+
+  return lines * lineHeight;
 }
 
 /** Mesures pré-calculées d'un paragraphe : avances par offset et fontes par run. */
@@ -148,6 +230,8 @@ interface ParagraphMetrics {
   colors: string[];
   formats: RunFormatting[];
   metrics: FontMetrics[];
+  /** Hauteur de légende par run — nulle hors image légendée. */
+  captionHeights: number[];
 }
 
 /**
@@ -313,6 +397,7 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
   const colors: string[] = [];
   const formats: RunFormatting[] = [];
   const metrics: FontMetrics[] = [];
+  const captionHeights: number[] = [];
 
   let offset = 0;
   paragraph.runs.forEach((run, runIndex) => {
@@ -326,8 +411,36 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
       // Un cadre image n'a pas de ligne de base propre : `SwFlyCntFrm` est posé
       // sur celle du texte et monte d'autant (`SwTxtFrm::CalcBaseOfstForFly`).
       // Toute sa hauteur est donc de l'ascendance, la descente est nulle.
-      const widthPx = ptToPx(formatting.imageWidthPt ?? 0);
-      const heightPx = ptToPx(formatting.imageHeightPt ?? 0);
+      // Un cadre flottant ne compte ni en largeur ni en hauteur dans la ligne :
+      // il est posé hors du fil, et le texte est creusé autour de lui par les
+      // exclusions de `flyLayout`. Lui donner sa taille ici réservait en plus
+      // une place vide au milieu du texte.
+      const flottant = Boolean(formatting.imageAnchor && formatting.imageAnchor !== 'as-char');
+      // La marge fait partie de la boîte : elle repousse le texte pour de bon.
+      const margePx = flottant ? 0 : ptToPx(imageMarginPt(formatting));
+      const widthPx = flottant ? 0 : ptToPx(formatting.imageWidthPt ?? 0);
+      const imageHeightPx = flottant ? 0 : ptToPx(formatting.imageHeightPt ?? 0);
+
+      // La légende fait partie du cadre : sa hauteur s'ajoute à celle de
+      // l'image, sinon la ligne suivante viendrait se poser dessus.
+      const legende = hasCaption(formatting)
+        ? captionText(
+            imageCaptionOf(formatting),
+            ctx.figureNumbers?.get(imageKey(ctx.blockId ?? '', offset)) ?? null,
+          )
+        : '';
+      const texteLegende = captionHeightPx(
+        legende,
+        widthPx,
+        ptToPx(ctx.defaults.fontSizePt) * CAPTION_FONT_RATIO,
+        ctx.measurer,
+      );
+      // Le blanc n'existe que s'il y a une légende à séparer de l'image.
+      const captionPx =
+        texteLegende > 0 ? texteLegende + ptToPx(imageCaptionGapPt(formatting)) : 0;
+      const heightPx = imageHeightPx + captionPx + margePx * 2;
+      captionHeights[runIndex] = captionPx;
+
       metrics.push({
         ascentPx: heightPx,
         descentPx: 0,
@@ -337,7 +450,7 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
       // Le run vaut un seul caractère de substitution : toute sa largeur tombe
       // sur cette unique avance, ce qui interdit au curseur de s'y insérer.
       const charCount = Math.max(1, run.text.length);
-      const step = widthPx / charCount;
+      const step = (widthPx + margePx * 2) / charCount;
       for (let i = 0; i < run.text.length; i += 1) {
         runAt[offset + i] = runIndex;
         cum[offset + i + 1] = cum[offset + i]! + step;
@@ -371,7 +484,7 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
     offset += run.text.length;
   });
 
-  return { text, runAt, cum, fonts, colors, formats, metrics };
+  return { text, runAt, cum, fonts, colors, formats, metrics, captionHeights };
 }
 
 /** Largeur de `[from, to)`, valide tant que l'intervalle ne franchit pas de tabulation. */
@@ -632,6 +745,7 @@ function buildSegments(
       leftPx: originX + x,
       widthPx: segmentWidth,
       isTab: false,
+      ...(m.captionHeights[runIndex] ? { captionHeightPx: m.captionHeights[runIndex] } : {}),
     });
     x += segmentWidth;
     pos = stop;
@@ -731,8 +845,8 @@ function alignLine(
 /**
  * Met en page un paragraphe : découpage en lignes, hauteurs, alignement.
  *
- * Fonction pure — c'est elle qui rend le moteur exécutable dans un Web Worker,
- * comme l'exige la couche 2 du cahier des charges.
+ * Fonction pure — c'est elle qui rend le moteur exécutable dans un Web Worker
+ * ou en environnement serveur sans accès direct au DOM.
  */
 export function layoutParagraph(
   paragraph: ParagraphNode,

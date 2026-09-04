@@ -27,6 +27,7 @@
  *   left     → du bord gauche du cadre jusqu'au bout de la colonne
  *   right    → du début de la colonne jusqu'au bord droit du cadre
  *   none     → toute la colonne
+ *   ideal    → l'un des quatre précédents, choisi d'après la place restante
  *
  * La bande utile est alors le plus large intervalle survivant à toutes les
  * soustractions. Cette formulation a un avantage concret sur une analyse au cas
@@ -38,15 +39,20 @@
 
 import { ptToPx } from '../document/units';
 import { paragraphIndex } from '../document/document';
+import { DEFAULT_WRAP_MARGIN_PT } from '../document/images';
+import type { PageGeometry } from '../document/pageSetup';
 import type {
+  FlyHoriOrient,
+  FlyHoriRelation,
   FlySurround,
   ParagraphNode,
   TextRun,
   WriterDocumentState,
 } from '../document/types';
 
-/** Marge d'habillage par défaut autour d'un cadre, en points (`SvxLRSpaceItem`). */
-export const DEFAULT_WRAP_MARGIN_PT = 4;
+// Réexport de commodité : la marge d'habillage est un défaut du modèle, mais
+// c'est ici qu'on la lit, et c'est ici que les appelants la cherchent.
+export { DEFAULT_WRAP_MARGIN_PT };
 
 /**
  * Largeur minimale d'une bande pour qu'on daigne y écrire.
@@ -59,6 +65,8 @@ export const MIN_BAND_WIDTH_PX = 24;
 
 /** Un cadre flottant résolu à sa géométrie en pixels. */
 export interface FlyFrame {
+  /** Part de la hauteur revenant à la légende. Zéro s'il n'y en a pas. */
+  captionHeightPx?: number;
   /** Paragraphe portant le caractère d'ancrage. */
   anchorBlockId: string;
   /** Offset du caractère d'ancrage dans ce paragraphe. */
@@ -84,6 +92,106 @@ export interface FlyExclusion {
   rightPx: number;
 }
 
+/* ------------------------------------------------- habillage « optimal » */
+
+/**
+ * Largeur minimale d'une colonne de texte pour qu'elle mérite d'exister, en
+ * points. `TEXT_MIN` de `txtfly.cxx:2337` — 1134 twips, soit 2 cm.
+ */
+export const IDEAL_TEXT_MIN_PT = 1134 / 20;
+
+/**
+ * Largeur au-delà de laquelle un cadre ne se laisse plus habiller des deux
+ * côtés. `FRAME_MAX` de `txtfly.cxx:2339` — 850 twips, soit 1,5 cm.
+ */
+export const IDEAL_FRAME_MAX_PT = 850 / 20;
+
+/**
+ * Résout `SURROUND_IDEAL` en un mode concret.
+ *
+ * Port direct de `SwTxtFly::GetSurroundForTextWrap` (`txtfly.cxx:2372-2402`).
+ * L'habillage « optimal » n'est pas une géométrie mais un **arbitrage** : on
+ * mesure ce qui reste de colonne de chaque côté du cadre, on écarte les bandes
+ * trop étroites pour qu'on y écrive (`TEXT_MIN`), et le mode se déduit de ce
+ * qui survit — les deux côtés donnent `parallel`, un seul donne `left` ou
+ * `right`, aucun donne `none`.
+ *
+ * La règle de `FRAME_MAX` mérite un mot : passé 1,5 cm de large, un cadre ne
+ * garde **que son côté le plus large**, même si l'autre dépasse le minimum.
+ * Deux colonnes étroites de part et d'autre d'une image sont lisibles en
+ * théorie et illisibles en pratique ; Writer tranche pour une seule.
+ */
+export function resolveIdealSurround(
+  /** Bord gauche du cadre, marges comprises, dans le repère de la colonne. */
+  leftPx: number,
+  /** Bord droit du cadre, marges comprises. */
+  rightPx: number,
+  contentWidthPx: number,
+): 'none' | 'parallel' | 'left' | 'right' {
+  // Cadre entièrement hors de la colonne : il ne la coupe pas, le texte
+  // l'ignore de part et d'autre.
+  if (rightPx < 0 || leftPx > contentWidthPx) return 'parallel';
+
+  let left = leftPx;
+  let right = contentWidthPx - rightPx;
+
+  if (rightPx - leftPx > ptToPx(IDEAL_FRAME_MAX_PT)) {
+    if (left < right) left = 0;
+    else right = 0;
+  }
+
+  const minPx = ptToPx(IDEAL_TEXT_MIN_PT);
+  if (left < minPx) left = 0;
+  if (right < minPx) right = 0;
+
+  if (left > 0) return right > 0 ? 'parallel' : 'left';
+  return right > 0 ? 'right' : 'none';
+}
+
+/* --------------------------------------------------- position horizontale */
+
+/**
+ * Abscisse d'un cadre, dans le repère de la colonne de texte.
+ *
+ * Transposition de `SwAnchoredObjectPosition::CalcRelPosX`
+ * (`sw/source/core/layout/anchoreddrawobject.cxx`, `objectpositioning/`) :
+ * l'alignement et son repère se combinent en une abscisse, une fois la page
+ * connue. `from-left` — `HoriOrientation::NONE` — est le seul mode qui lise le
+ * décalage tel quel ; les autres le recalculent, et c'est précisément ce qu'on
+ * attend d'eux quand la marge de page change.
+ *
+ * Le résultat est toujours ramené au repère de la **colonne** : c'est celui où
+ * `lineBreak` retranche les bandes, et mélanger deux origines déplacerait le
+ * texte sans déplacer l'image.
+ */
+export function resolveFlyLeft(
+  orient: FlyHoriOrient,
+  relation: FlyHoriRelation,
+  offsetPx: number,
+  widthPx: number,
+  geometry: Pick<PageGeometry, 'pageWidthPx' | 'contentLeftPx' | 'contentWidthPx'>,
+): number {
+  // Bornes du repère demandé, exprimées dans celui de la colonne. La feuille
+  // commence donc à une abscisse **négative** : c'est la marge de gauche, que
+  // la colonne ne couvre pas et où un cadre a le droit de déborder.
+  const { leftPx, widthPx: frameWidthPx } =
+    relation === 'page'
+      ? { leftPx: -geometry.contentLeftPx, widthPx: geometry.pageWidthPx }
+      : { leftPx: 0, widthPx: geometry.contentWidthPx };
+
+  switch (orient) {
+    case 'center':
+      return leftPx + (frameWidthPx - widthPx) / 2;
+    case 'right':
+      return leftPx + frameWidthPx - widthPx;
+    case 'left':
+      return leftPx;
+    case 'from-left':
+    default:
+      return leftPx + offsetPx;
+  }
+}
+
 /** Un cadre est-il flottant, par opposition à « comme caractère » ? */
 export function isFloatingFly(run: TextRun): boolean {
   return (
@@ -99,7 +207,31 @@ export function isFloatingFly(run: TextRun): boolean {
  * Un cadre sans dimensions n'est pas retenu : sans largeur ni hauteur, il
  * n'exclut rien, et le laisser passer obligerait chaque appelant à revérifier.
  */
-export function collectFlyFrames(doc: WriterDocumentState): FlyFrame[] {
+export function collectFlyFrames(
+  doc: WriterDocumentState,
+  /**
+   * Géométrie de la page, nécessaire à la résolution des alignements.
+   *
+   * `SwFlyFrm::MakeAll` fait de même : l'orientation devient une coordonnée
+   * **une fois**, avant que `SwTxtFly` n'en retranche quoi que ce soit. Résoudre
+   * plus tard obligerait chaque ligne à refaire le calcul, et les deux repères
+   * — celui du cadre et celui du texte — finiraient par diverger.
+   */
+  geometry: Pick<PageGeometry, 'pageWidthPx' | 'contentLeftPx' | 'contentWidthPx'>,
+  /**
+   * Hauteur de la légende d'un cadre, fournie par l'appelant.
+   *
+   * Elle entre dans la hauteur du cadre, donc dans la bande que le texte doit
+   * contourner : sans elle, les lignes se refermaient sur la légende et
+   * passaient par-dessus.
+   *
+   * C'est un **rappel** et non un calcul direct : mesurer une légende demande
+   * `lineBreak`, qui dépend déjà de ce module. Le paramètre renverse la
+   * dépendance au lieu de la boucler, et les appelants qui ne peignent pas —
+   * géométrie pure — n'ont rien à fournir.
+   */
+  captionHeightOf?: (run: TextRun, blockId: string, offset: number, widthPx: number) => number,
+): FlyFrame[] {
   const out: FlyFrame[] = [];
   const { order, byId } = paragraphIndex(doc);
 
@@ -115,14 +247,29 @@ export function collectFlyFrames(doc: WriterDocumentState): FlyFrame[] {
       }
 
       const widthPx = ptToPx(run.imageWidthPt ?? 0);
-      const heightPx = ptToPx(run.imageHeightPt ?? 0);
+      const imageHeightPx = ptToPx(run.imageHeightPt ?? 0);
+
+      // La légende s'ajoute au cadre, et le texte la contourne comme l'image.
+      const captionPx = captionHeightOf ? captionHeightOf(run, blockId, offset, widthPx) : 0;
+      const heightPx = imageHeightPx + captionPx;
+
       if (widthPx > 0 && heightPx > 0) {
         out.push({
           anchorBlockId: blockId,
           anchorOffset: offset,
+          captionHeightPx: captionPx,
           surround: run.imageSurround ?? 'parallel',
           anchor: run.imageAnchor === 'to-page' ? 'to-page' : 'to-para',
-          leftPx: ptToPx(run.imageXPt ?? 0),
+          leftPx: resolveFlyLeft(
+            // Sans alignement déclaré, l'abscisse est celle du modèle : c'est
+            // `HoriOrientation::NONE`, et c'est aussi ce que valaient les cadres
+            // écrits avant que l'alignement n'existe.
+            run.imageHoriOrient ?? 'from-left',
+            run.imageHoriRelation ?? 'text',
+            ptToPx(run.imageXPt ?? 0),
+            widthPx,
+            geometry,
+          ),
           topPx: ptToPx(run.imageYPt ?? 0),
           widthPx,
           heightPx,
@@ -151,7 +298,15 @@ export function exclusionOf(fly: FlyFrame, contentWidthPx: number): FlyExclusion
   const left = fly.leftPx - fly.marginPx;
   const right = fly.leftPx + fly.widthPx + fly.marginPx;
 
-  switch (fly.surround) {
+  // `ideal` n'a pas de géométrie propre : il désigne celui des quatre autres
+  // modes que la place restante rend praticable. On le résout ici, une fois
+  // les bords connus, marges comprises — ce sont eux que mesure `TEXT_MIN`.
+  const surround =
+    fly.surround === 'ideal'
+      ? resolveIdealSurround(left, right, contentWidthPx)
+      : fly.surround;
+
+  switch (surround) {
     case 'none':
       return { topPx: top, bottomPx: bottom, leftPx: 0, rightPx: contentWidthPx };
     case 'left':
@@ -247,7 +402,7 @@ export function nextClearY(
  *
  * Seuls les cadres **ancrés à ce paragraphe** sont résolus ici : un cadre ancré
  * à la page ne connaît sa position relative qu'une fois le paragraphe posé,
- * c'est donc la pagination qui les injecte (cf. `pageAnchoredExclusions`).
+ * c'est donc la pagination qui les injecte (cf. `projectedExclusions`).
  */
 export function paragraphExclusions(
   flies: readonly FlyFrame[],
@@ -263,30 +418,71 @@ export function paragraphExclusions(
   return out;
 }
 
+/** Où un cadre s'est réellement posé, une fois la page connue. */
+export interface FlyPlacement {
+  /** Page 0-indexée portant le cadre. */
+  pageIndex: number;
+  /** Ordonnée du cadre depuis le haut de la zone de contenu de cette page. */
+  topPx: number;
+}
+
 /**
- * Exclusions dues aux cadres ancrés **à la page**, ramenées au repère d'un
- * paragraphe posé à `paragraphTopPx` du haut de la zone de contenu.
+ * Exclusions dues aux cadres posés **ailleurs** que dans ce paragraphe,
+ * ramenées à son repère.
  *
- * La translation est la seule différence avec le cas précédent : un cadre de
- * page est fixe sur la feuille, c'est le paragraphe qui se déplace sous lui.
+ * ## Pourquoi il en faut deux sortes
+ *
+ * `paragraphExclusions` ne connaît qu'une chose : les cadres ancrés au
+ * paragraphe qu'on est en train de composer. C'est suffisant tant qu'un cadre
+ * ne dépasse pas de son ancre — et faux dès qu'il la dépasse, ce qui est le cas
+ * courant : une image de huit centimètres ancrée à un paragraphe de deux lignes
+ * déborde forcément sur ce qui suit, et le texte suivant lui passait au travers.
+ *
+ * `SwTxtFly` n'a pas ce problème parce qu'il interroge la liste des cadres de
+ * la **page**, non celle de l'ancre. C'est ce que fait cette fonction : elle
+ * projette tout cadre dont la page coïncide, quel que soit son ancrage.
+ *
+ * ## Ce qu'elle demande en échange
+ *
+ * Une position **absolue**, que seul un placement déjà fait peut donner : la
+ * page d'un cadre ancré au paragraphe dépend de l'endroit où ce paragraphe est
+ * tombé. D'où le paramètre `placements`, que la pagination remplit à partir de
+ * sa passe précédente — le même mécanisme, et la même raison, que pour la table
+ * des matières.
  */
-export function pageAnchoredExclusions(
+export function projectedExclusions(
   flies: readonly FlyFrame[],
   pageIndex: number,
-  anchorPages: ReadonlyMap<string, number>,
+  placements: ReadonlyMap<string, FlyPlacement>,
   paragraphTopPx: number,
   contentWidthPx: number,
+  /**
+   * Paragraphe en cours de composition. Ses propres cadres sont écartés :
+   * `paragraphExclusions` les a déjà donnés, et les compter deux fois n'aurait
+   * pas d'effet visible mais ferait grossir la liste à chaque ligne.
+   */
+  currentBlockId?: string,
 ): FlyExclusion[] {
   const out: FlyExclusion[] = [];
   for (const fly of flies) {
-    if (fly.anchor !== 'to-page') continue;
-    if (anchorPages.get(fly.anchorBlockId) !== pageIndex) continue;
+    if (fly.anchorBlockId === currentBlockId) continue;
+
+    const place = placements.get(fly.anchorBlockId);
+    if (!place || place.pageIndex !== pageIndex) continue;
+
     const exclusion = exclusionOf(fly, contentWidthPx);
     if (!exclusion) continue;
+
+    // Un cadre de page est fixe sur la feuille ; un cadre de paragraphe suit
+    // son ancre. Dans les deux cas on aboutit à une ordonnée comptée depuis le
+    // haut de la zone de contenu, puis ramenée au repère du paragraphe.
+    const originePx = fly.anchor === 'to-page' ? 0 : place.topPx;
+    const decalagePx = originePx - paragraphTopPx;
+
     out.push({
       ...exclusion,
-      topPx: exclusion.topPx - paragraphTopPx,
-      bottomPx: exclusion.bottomPx - paragraphTopPx,
+      topPx: exclusion.topPx + decalagePx,
+      bottomPx: exclusion.bottomPx + decalagePx,
     });
   }
   return out;

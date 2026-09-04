@@ -1,11 +1,27 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
 
 interface ModalProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
-  /** Largeur maximale ; le contenu reste défilable au-delà. */
+  /**
+   * Largeur **souhaitée**, en pixels.
+   *
+   * Ce n'est pas une largeur ferme : le CSS la ramène à ce que l'écran offre
+   * (`min(largeur, 100vw - marges)`). Une valeur en dur débordait des petits
+   * écrans, et il fallait alors faire défiler la fenêtre horizontalement pour
+   * atteindre un bouton — le pire des défauts d'un dialogue.
+   */
   width?: number;
+  /**
+   * Barre d'actions, épinglée **hors** de la zone défilante.
+   *
+   * Sans elle, « Appliquer » descend avec le contenu et disparaît sous le bord
+   * de l'écran dès que le formulaire dépasse la hauteur disponible : on croit
+   * le dialogue sans issue. Les dialogues courts peuvent l'ignorer et garder
+   * leurs boutons dans le flux.
+   */
+  footer?: ReactNode;
 }
 
 const FOCUSABLE =
@@ -16,7 +32,7 @@ const FOCUSABLE =
  * **piégé** pendant, et **restitué au déclencheur** à la fermeture ; `Échap` ferme ;
  * `aria-modal` isole le reste de la page pour les technologies d'assistance.
  */
-export function Modal({ title, onClose, children, width = 640 }: ModalProps) {
+export function Modal({ title, onClose, children, width = 640, footer }: ModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
 
@@ -73,7 +89,10 @@ export function Modal({ title, onClose, children, width = 640 }: ModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        style={{ width }}
+        // Largeur souhaitée passée en variable : c'est le CSS qui arbitre entre
+        // elle et la place réellement disponible, et lui seul connaît les
+        // marges du fond et le point de rupture mobile.
+        style={{ '--modal-width': `${width}px` } as CSSProperties}
         ref={panelRef}
       >
         <header className="modal__header">
@@ -96,7 +115,8 @@ export function Modal({ title, onClose, children, width = 640 }: ModalProps) {
             </svg>
           </button>
         </header>
-        {children}
+        <div className="modal__body">{children}</div>
+        {footer ? <footer className="modal__footer">{footer}</footer> : null}
       </div>
     </div>
   );

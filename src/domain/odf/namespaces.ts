@@ -30,6 +30,18 @@ export const NS = {
    */
   loext: 'urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0',
   manifest: 'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0',
+  /**
+   * Réglages de légende propres à cet éditeur.
+   *
+   * ODF sait écrire une légende — un cadre englobant, un `draw:text-box`, un
+   * paragraphe — mais rien n'y distingue « numérotation automatique » de
+   * « texte saisi tel quel », ni ne conserve l'alignement voulu quand le texte
+   * a déjà été composé. On écrit donc la légende **deux fois** : en clair, dans
+   * la structure ODF normale, pour que tout lecteur l'affiche ; et sous forme
+   * d'attributs, ici, pour se relire sans perte. Un lecteur tiers ignore un
+   * attribut d'espace de noms inconnu, comme le veut la spécification.
+   */
+  writer: 'urn:cloudantille:names:writer:caption:1.0',
 } as const;
 
 /** Déclarations à poser sur l'élément racine de tout fichier que l'on écrit. */
@@ -45,6 +57,7 @@ export const NS_DECLARATIONS = [
   `xmlns:xlink="${NS.xlink}"`,
   `xmlns:dc="${NS.dc}"`,
   `xmlns:loext="${NS.loext}"`,
+  `xmlns:writer="${NS.writer}"`,
 ].join(' ');
 
 /**
