@@ -18,7 +18,7 @@ import {
   newId,
 } from '../document/document';
 import { A4_PORTRAIT } from '../document/pageSetup';
-import { makeRun, normalizeRuns } from '../document/runs';
+import { makeRun, normalizeRuns, runFormatting } from '../document/runs';
 import {
   DEFAULT_FURNITURE,
   type PageFurniture,
@@ -53,6 +53,7 @@ import { clampSize, cropFormatting, isSafeImageSrc, IMAGE_PLACEHOLDER } from '..
 import { collectStyles, resolveStyle, type StyleTable } from './styles';
 import { parseLengthMm } from './units';
 import { normalizeUrl } from '../document/url';
+import { mmToPt } from '../document/units';
 
 export interface ImportResult {
   document: WriterDocumentState;
@@ -612,8 +613,24 @@ function readToc(element: Element): TocNode {
 
 const EMPTY_PICTURES: ReadonlyMap<string, string> = new Map();
 
+/**
+ * Texte des paragraphes d'un `draw:text-box`, hors cadres imbriqués.
+ *
+ * Sert de repli quand la légende vient d'un autre producteur : le texte est
+ * alors déjà composé, numéro compris.
+ */
+function lisibleDuTextBox(textBox: Element): string | null {
+  const morceaux: string[] = [];
+  for (const p of Array.from(textBox.getElementsByTagNameNS(NS.text, 'p'))) {
+    if (p.getElementsByTagNameNS(NS.draw, 'frame').length > 0) continue;
+    const t = (p.textContent ?? '').trim();
+    if (t.length > 0) morceaux.push(t);
+  }
+  return morceaux.length > 0 ? morceaux.join(' ') : null;
+}
+
 /** Points par millimètre — `svg:width` est donné en unité XSL-FO (cm, mm, in…). */
-const PT_PER_MM = 72 / 25.4;
+const PT_PER_MM = mmToPt(1);
 
 /**
  * Transcrit un `<draw:frame>` portant une image.
@@ -629,6 +646,40 @@ function readImageFrame(
   pictures: ReadonlyMap<string, string>,
   styles: StyleTable,
 ): TextRun | null {
+  /*
+   * Cadre englobant d'une image légendée : le nôtre à l'export, celui de
+   * Writer à la relecture. L'image vit dans un `draw:text-box`, à l'intérieur
+   * d'un cadre imbriqué. On descend le chercher, puis on lui rend ses réglages
+   * de légende — nos attributs quand ils sont là, à défaut le texte visible.
+   */
+  const textBox = firstChildNamed(frame, 'text-box');
+  if (textBox) {
+    const inner = textBox.getElementsByTagNameNS(NS.draw, 'frame')[0];
+    if (!inner) return null;
+    const base = readImageFrame(inner, pictures, styles);
+    if (!base) return null;
+
+    const texte = attr(frame, NS.writer, 'caption');
+    const position = attr(frame, NS.writer, 'caption-position');
+    const align = attr(frame, NS.writer, 'caption-align');
+    const manual = attr(frame, NS.writer, 'caption-manual') === 'true';
+
+    // Cadre venu d'ailleurs : on récupère au moins le texte affiché, faute de
+    // quoi la légende disparaîtrait à la relecture.
+    const visible = texte ?? lisibleDuTextBox(textBox);
+    if (visible === null) return base;
+
+    return makeRun(base.text, {
+      ...runFormatting(base),
+      imageCaption: visible,
+      imageCaptionPosition: position === 'above' ? 'above' : 'below',
+      imageCaptionAlign: align === 'left' || align === 'right' ? align : 'center',
+      // Sans nos attributs, le texte lu contient déjà « Figure n°X : » : le
+      // renuméroter le doublerait. Il est donc repris tel quel, en manuel.
+      ...(texte === null || manual ? { imageCaptionManual: true } : {}),
+    });
+  }
+
   const image = firstChildNamed(frame, 'image');
   if (!image) return null;
 
@@ -685,6 +736,16 @@ function readImageFrame(
           ...(graphic?.wrapMarginPt !== undefined
             ? { imageWrapMarginPt: graphic.wrapMarginPt }
             : {}),
+          // Alignement et calque : absents du style, ils restent absents du
+          // run, qui retombe alors sur `from-left` et le calque du dessous —
+          // exactement ce que valaient les cadres avant qu'ils n'existent.
+          ...(graphic?.horiOrient !== undefined
+            ? { imageHoriOrient: graphic.horiOrient }
+            : {}),
+          ...(graphic?.horiRelation !== undefined
+            ? { imageHoriRelation: graphic.horiRelation }
+            : {}),
+          ...(graphic?.inFront ? { imageInFront: true } : {}),
         };
 
   return makeRun(IMAGE_PLACEHOLDER, {

@@ -139,6 +139,24 @@
   box-shadow: var(--elevation-popover);
 }
 
+/*
+ * Hôte du menu contextuel.
+ *
+ * Il ne fait que positionner : l'apparence vient de `.menu`, partagée avec la
+ * barre de menus. Le décalage vertical de `.menu` (`top: 100% + 2px`, calibré
+ * pour pendre sous un déclencheur) est annulé ici — un menu contextuel s'ouvre
+ * au point cliqué, pas deux pixels sous lui.
+ */
+.context-menu {
+  position: fixed;
+  z-index: 60;
+}
+
+.context-menu > .menu {
+  position: static;
+  top: auto;
+}
+
 .menu__group {
   border-top: 1px solid var(--border-subtle);
   margin-top: var(--space-2);
@@ -2172,29 +2190,111 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-5);
+  padding: var(--space-6);
   background: rgba(16, 24, 40, 0.45);
 }
 
+/*
+ * Une fenêtre est une **colonne** : en-tête fixe, corps défilant, actions
+ * fixes.
+ *
+ * C'est tout le contraire de faire défiler la fenêtre entière, où le titre
+ * s'en va vers le haut et « Appliquer » vers le bas — on croit alors le
+ * dialogue sans issue, et l'on cherche le bouton en tâtonnant.
+ */
 .modal {
-  max-width: 100%;
-  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  /*
+   * La largeur demandée, ramenée à la place disponible.
+   *
+   * Une largeur en dur débordait des écrans étroits : le contenu se coupait à
+   * droite et il fallait un ascenseur **horizontal** pour atteindre la moitié
+   * des champs. `min()` fait de la valeur passée un souhait, pas une exigence.
+   */
+  width: min(var(--modal-width, 640px), 100%);
+  max-height: 100%;
+  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-modal);
+  /* Les angles arrondis coupent le contenu défilant, en-tête compris. */
+  overflow: hidden;
+}
+
+.modal__body {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   /* Place de l'ascenseur réservée en permanence. Sans cela, un contenu dont la
      hauteur dépend de la largeur — la bande d'en-tête, mise à l'échelle de la
      place disponible — entre en oscillation : l'ascenseur apparaît, la largeur
      diminue, la bande rétrécit, l'ascenseur disparaît, et ainsi de suite. */
   scrollbar-gutter: stable;
+}
+
+.modal__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  padding: var(--space-4) var(--space-5);
   background: var(--bg-raised);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--elevation-modal);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/*
+ * Sur mobile, une fenêtre **prend l'écran**.
+ *
+ * Une boîte flottante de 700 px sur un téléphone de 390 se réduit à une bande
+ * étroite entourée de fond grisé : on perd la place là où elle manque le plus,
+ * et le moindre formulaire y devient un tunnel. Les fenêtres plein écran sont
+ * la convention de toutes les plateformes tactiles, et elles rendent d'un coup
+ * la largeur entière au contenu.
+ *
+ * `dvh` plutôt que `vh` : sur mobile la barre d'adresse se rétracte au
+ * défilement, et `vh` fige la hauteur à celle du navigateur déployé — le bas de
+ * la fenêtre, donc les boutons, passait alors sous le bord de l'écran.
+ */
+@media (max-width: 767px) {
+  .modal-backdrop {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: none;
+    /*
+     * La hauteur du **fond**, non celle de la fenêtre du navigateur.
+     *
+     * `100dvh` paraissait plus juste, mais il se mesure sur la fenêtre physique
+     * là où le fond, posé en `fixed; inset: 0`, épouse la zone d'affichage
+     * réelle. Sur une page mise à l'échelle par le navigateur, les deux
+     * diffèrent d'un bon tiers — la fenêtre s'arrêtait alors aux deux tiers de
+     * l'écran, le pied flottant au milieu du vide.
+     */
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .modal__header,
+  .modal__footer {
+    padding: var(--space-4);
+    /* Encoches et barres système des téléphones. */
+    padding-left: max(var(--space-4), env(safe-area-inset-left));
+    padding-right: max(var(--space-4), env(safe-area-inset-right));
+  }
+
+  .modal__footer {
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  }
 }
 
 .modal__header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
@@ -2429,11 +2529,30 @@
   color: var(--accent);
 }
 
+/*
+ * Cibles tactiles (WCAG 2.5.8 « Target Size »).
+ *
+ * La règle ne couvrait que les boutons. Les champs y échappaient, et une liste
+ * déroulante de 19 px de haut se vise mal au doigt : on ouvre le champ voisin
+ * une fois sur trois. Elle vaut donc pour tout ce qui se touche.
+ */
 @media (pointer: coarse) {
   .btn,
   .btn--icon {
     min-height: 44px;
     min-width: 44px;
+  }
+
+  .modal input:not([type='checkbox']):not([type='radio']),
+  .modal select,
+  .modal textarea {
+    min-height: 44px;
+  }
+
+  .modal input[type='checkbox'],
+  .modal input[type='radio'] {
+    width: 20px;
+    height: 20px;
   }
 }
 
@@ -2655,6 +2774,8 @@
   .document-area,
   .writer-workspace,
   .writer-surface,
+  .writer-zoom,
+  .writer-zoom__contenu,
   .writer-pages {
     display: block !important;
     position: static !important;
@@ -2857,10 +2978,19 @@
   font-size: var(--text-xs);
 }
 
+/*
+ * Aperçu à gauche, onglets à droite.
+ *
+ * `minmax(0, …)` et non `minmax(180px, 1fr)` : le minimum d'une piste `1fr`
+ * est sa largeur **de contenu**, et c'est par là que le dialogue débordait —
+ * les cinq modes d'habillage réclamaient 550 px dans une colonne qui en offrait
+ * 450, et le surplus sortait à droite sous un ascenseur horizontal. Avec un
+ * minimum nul, ce sont les grilles intérieures qui se replient.
+ */
 .image-dialog__corps {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -2903,8 +3033,12 @@
 .image-dialog__colonne-apercu {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
   min-width: 0;
+  /* L'aperçu est le sujet de toutes les pages : il reste en vue pendant qu'on
+     fait défiler les réglages d'un onglet long. */
+  position: sticky;
+  top: 0;
 }
 
 .image-dialog__rognage {
@@ -3047,8 +3181,10 @@
 
 .image-dialog__dimensions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  /* Minimum nul, comme la grille du corps : sinon les deux champs imposent
+     leur largeur de contenu et poussent le panneau hors de la fenêtre. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
 }
 
 .image-dialog__ratio {
@@ -3064,22 +3200,8 @@
   flex-wrap: wrap;
 }
 
-.image-dialog__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-subtle);
-}
-
 .image-dialog__spacer {
   flex: 1;
-}
-
-@media (max-width: 640px) {
-  .image-dialog__corps {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ── Partage ─────────────────────────────────────────────────────────────── */
@@ -3259,4 +3381,391 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+
+/* ------------------------------------------------ légende, atelier d'image */
+
+.image-dialog__legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.image-dialog__switch {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.image-dialog__switch small {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-secondary);
+}
+
+/* Aperçu : le rendu exact de la légende, numéro compris. */
+.image-dialog__preview {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-xs);
+}
+
+.image-dialog__preview-label {
+  flex: none;
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.image-dialog__preview-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.image-dialog__preview-text--left { text-align: left; }
+.image-dialog__preview-text--center { text-align: center; }
+.image-dialog__preview-text--right { text-align: right; }
+
+.image-dialog__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+/*
+ * Un champ descend d'une ligne plutôt que de se laisser écraser.
+ *
+ * `flex: 1` seul laissait trois champs se partager 450 px : le libellé
+ * « Mesuré par rapport à » se coupait et la liste déroulante devenait illisible.
+ * Sous 9 rem, mieux vaut passer à la ligne suivante.
+ */
+.image-dialog__row .field {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+
+/* -- Intégration d'une image au texte (`SwFmtSurround`) -------------------- */
+
+.image-dialog__wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.image-dialog__wrap-hint {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--text-sm);
+}
+
+/*
+ * Les cinq modes en une rangée qui se replie.
+ *
+ * `1fr` par colonne plutôt qu'une largeur fixe : les libellés n'ont pas la même
+ * longueur, et des cases inégales feraient lire une hiérarchie là où les cinq
+ * choix sont de même rang.
+ */
+.wrap-picker__choices {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-2);
+}
+
+@media (max-width: 620px) {
+  .wrap-picker__choices {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.wrap-picker__choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3) var(--space-2);
+  color: var(--fg-primary);
+  text-align: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.wrap-picker__choice:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.wrap-picker__choice--active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  /* Deux signaux plutôt qu'un : la couleur seule ne suffit pas (WCAG 1.4.1). */
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.wrap-picker__choice-label {
+  font-size: var(--text-xs);
+  line-height: 1.25;
+}
+
+/* -- Le même choix, en menu (barre de l'image sélectionnée) ---------------- */
+
+.wrap-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.writer-image__action--icon {
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+}
+
+.wrap-picker__menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 15rem;
+}
+
+.wrap-picker__item {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  color: var(--fg-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  /* Jamais l'interligne du document : la barre vit dans une ligne de texte
+     dont l'interligne vaut la hauteur de l'image. */
+  line-height: normal;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.wrap-picker__item:hover {
+  background: var(--accent-subtle);
+}
+
+.wrap-picker__item-label {
+  flex: 1;
+}
+
+.wrap-picker__check {
+  width: 1em;
+  color: var(--accent);
+}
+
+/* -- Onglets du dialogue d'image ------------------------------------------
+ *
+ * Trois pages plutôt qu'un formulaire de vingt champs. La barre est une
+ * `tablist` ARIA complète : un seul onglet atteignable à la tabulation, les
+ * autres aux flèches (cf. `naviguerOnglets`).
+ */
+
+.image-dialog__panneaux {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.image-dialog__onglets {
+  display: flex;
+  gap: var(--space-1);
+  /* Sur écran étroit la barre glisse plutôt que de replier les onglets : trois
+     libellés sur deux lignes se lisent comme deux groupes distincts. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.image-dialog__onglets::-webkit-scrollbar {
+  display: none;
+}
+
+.image-dialog__onglet {
+  flex: none;
+  padding: var(--space-3) var(--space-4);
+  color: var(--fg-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  /* Le trait actif est posé en permanence, transparent au repos : sans lui,
+     l'onglet sélectionné grandirait de 2 px et la barre sauterait. */
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.image-dialog__onglet:hover {
+  color: var(--fg-primary);
+  background: var(--accent-subtle);
+}
+
+.image-dialog__onglet--actif {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.image-dialog__onglet:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.image-dialog__panneau {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* Le panneau reçoit le focus au changement d'onglet ; pas de liseré pour
+   autant, il n'est pas un contrôle. */
+.image-dialog__panneau:focus {
+  outline: none;
+}
+
+/*
+ * Les panneaux n'ont plus besoin d'un cadre : l'onglet dit déjà de quoi il
+ * s'agit, et une bordure de plus à l'intérieur d'une page qui n'en contient
+ * qu'une seule chose est du bruit.
+ */
+.image-dialog__panneau > .image-dialog__wrap,
+.image-dialog__panneau > .image-dialog__legend {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.image-dialog__panneau > .image-dialog__wrap > legend,
+.image-dialog__panneau > .image-dialog__legend > legend {
+  /* Le titre du groupe ferait doublon avec le libellé de l'onglet. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* -- Dialogue d'image sur mobile ------------------------------------------ */
+
+@media (max-width: 767px) {
+  /* Une seule colonne : l'aperçu passe au-dessus des réglages, et cesse d'être
+     collant — il occuperait sinon le tiers d'un écran de téléphone en
+     permanence. */
+  .image-dialog__corps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .image-dialog__colonne-apercu {
+    position: static;
+  }
+
+  .image-dialog__apercu {
+    min-height: 0;
+    /* Assez pour reconnaître l'image, pas au point de chasser les réglages
+       sous la ligne de flottaison. */
+    max-height: 28vh;
+  }
+
+  .image-dialog__apercu img,
+  .image-dialog__cadre {
+    max-height: 26vh;
+  }
+
+  .image-dialog {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+
+  /* Cinq modes de front sont illisibles sur 390 px : deux colonnes laissent au
+     libellé la place de tenir sur une ligne. */
+  .wrap-picker__choices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .wrap-picker__choice {
+    /* Cible tactile : 44 px de haut au minimum (WCAG 2.5.8). */
+    flex-direction: row;
+    gap: var(--space-3);
+    min-height: 44px;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .wrap-picker__choice-label {
+    font-size: var(--text-md);
+  }
+
+  /* Un champ par ligne : deux listes déroulantes côte à côte sur un téléphone
+     ne laissent lire ni l'une ni l'autre. */
+  .image-dialog__row .field,
+  .image-dialog__dimensions .field {
+    flex: 1 1 100%;
+  }
+
+  .image-dialog__dimensions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* La barre d'actions garde « Annuler » et « Appliquer » côte à côte, et
+     renvoie la suppression à la ligne du dessus : c'est l'action dangereuse,
+     elle ne doit pas voisiner avec le bouton qu'on vise. */
+  .modal__footer {
+    flex-wrap: wrap;
+  }
+
+  .modal__footer .btn--danger {
+    order: 1;
+    flex: 1 1 100%;
+  }
+
+  .modal__footer .image-dialog__spacer {
+    display: none;
+  }
+
+  .modal__footer .btn:not(.btn--danger) {
+    flex: 1 1 0;
+    min-height: 44px;
+  }
+
+  /*
+   * Mêmes cibles qu'en pointeur grossier.
+   *
+   * Un navigateur de bureau réduit à la largeur d'un téléphone n'annonce pas
+   * `pointer: coarse`, et les champs y restaient hauts de 19 px — or c'est
+   * exactement la fenêtre qu'on regarde pour vérifier le rendu mobile.
+   */
+  .modal input:not([type='checkbox']):not([type='radio']),
+  .modal select,
+  .modal textarea {
+    min-height: 40px;
+  }
+
+  /* Les onglets ne sont pas des `.btn` : la règle des cibles les manquait. */
+  .image-dialog__onglet {
+    min-height: 44px;
+    flex: 1 0 auto;
+  }
 }

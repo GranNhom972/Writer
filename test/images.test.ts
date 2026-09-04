@@ -44,6 +44,7 @@ import {
   sameFormatting,
 } from '../src/domain/document/runs';
 import { createEmptyDocument, createParagraph } from '../src/domain/document/document';
+import { moveImageRun } from '../src/domain/engine/edit';
 import { layoutParagraph } from '../src/domain/engine/lineBreak';
 import { MetricTextMeasurer } from '../src/domain/engine/measure';
 import { DEFAULT_DEFAULTS } from '../src/domain/document/document';
@@ -642,5 +643,133 @@ describe('rognage : PDF', () => {
     expect(texte).toMatch(/72\.00 36\.00 re W n/);
     // L'image est posée à sa taille **entière** — 144 pt pour une moitié gardée.
     expect(texte).toContain('144.00 0 0 36.00');
+  });
+});
+
+/**
+ * Déplacement d'un cadre — `SwFEShell::SetAnchor` (`fefly1.cxx`).
+ *
+ * Un glissement ne corrige pas seulement des coordonnées : il **change
+ * l'ancre**. C'est elle qui décide de la page d'un cadre, et un cadre traîné
+ * loin de son paragraphe mais resté ancré à lui sortait de la feuille.
+ */
+describe('déplacement d’un cadre image', () => {
+  const IMAGE = { imageSrc: GIF_1PX, imageWidthPt: 40, imageHeightPt: 30 };
+
+  function docAvecCadre(extra: Record<string, unknown> = {}) {
+    const porteur = createParagraph('avant après', {
+      runs: [makeRun('avant '), makeRun('￼', { ...IMAGE, ...extra }), makeRun('après')],
+    });
+    const voisin = createParagraph('Un autre paragraphe, ailleurs dans le document.');
+    return { doc: { ...createEmptyDocument(), blocks: [porteur, voisin] }, porteur, voisin };
+  }
+
+  /** Le cadre d'un paragraphe, et l'offset où il se trouve. */
+  function cadreDans(doc: ReturnType<typeof createEmptyDocument>, blockId: string) {
+    const bloc = doc.blocks.find((b) => b.id === blockId);
+    if (!bloc || bloc.type === undefined || !('runs' in bloc)) return null;
+    let offset = 0;
+    for (const run of bloc.runs) {
+      if (run.imageSrc) return { run, offset };
+      offset += run.text.length;
+    }
+    return null;
+  }
+
+  it('change de paragraphe, et le cadre quitte l’ancien', () => {
+    const { doc, porteur, voisin } = docAvecCadre();
+    const apres = moveImageRun(doc, porteur.id, 6, { blockId: voisin.id, offset: 3 }, {
+      xPt: 0,
+      yPt: 0,
+    });
+
+    expect(cadreDans(apres, porteur.id)).toBeNull();
+    expect(cadreDans(apres, voisin.id)?.offset).toBe(3);
+  });
+
+  it('conserve le texte des deux paragraphes', () => {
+    const { doc, porteur, voisin } = docAvecCadre();
+    const apres = moveImageRun(doc, porteur.id, 6, { blockId: voisin.id, offset: 3 }, {
+      xPt: 0,
+      yPt: 0,
+    });
+
+    const texte = (id: string) => {
+      const bloc = apres.blocks.find((b) => b.id === id);
+      return bloc && 'runs' in bloc ? bloc.runs.map((r) => r.text).join('') : '';
+    };
+    expect(texte(porteur.id)).toBe('avant après');
+    expect(texte(voisin.id)).toContain('￼');
+  });
+
+  it('corrige l’offset visé quand on déplace vers la droite dans le même paragraphe', () => {
+    /*
+     * « avant ￼après » : le cadre est à l'offset 6. Le déposer à l'offset 9
+     * désigne un point situé après lui ; une fois le cadre retiré, ce même
+     * caractère est à 8. Sans la correction, l'image reculait au lieu d'avancer.
+     */
+    const { doc, porteur } = docAvecCadre();
+    const apres = moveImageRun(doc, porteur.id, 6, { blockId: porteur.id, offset: 9 }, {
+      xPt: 0,
+      yPt: 0,
+    });
+    expect(cadreDans(apres, porteur.id)?.offset).toBe(8);
+  });
+
+  it('déplace sans correction vers la gauche', () => {
+    const { doc, porteur } = docAvecCadre();
+    const apres = moveImageRun(doc, porteur.id, 6, { blockId: porteur.id, offset: 2 }, {
+      xPt: 0,
+      yPt: 0,
+    });
+    expect(cadreDans(apres, porteur.id)?.offset).toBe(2);
+  });
+
+  it('inscrit la position d’un cadre flottant, en position libre', () => {
+    const { doc, porteur, voisin } = docAvecCadre({
+      imageAnchor: 'to-para',
+      imageSurround: 'ideal',
+      // Un alignement à droite : le glissement doit le remplacer, sinon le
+      // cadre reviendrait à sa place au prochain calcul.
+      imageHoriOrient: 'right',
+    });
+    const apres = moveImageRun(doc, porteur.id, 6, { blockId: voisin.id, offset: 0 }, {
+      xPt: 120,
+      yPt: 45,
+    });
+
+    const cadre = cadreDans(apres, voisin.id)?.run;
+    expect(cadre?.imageHoriOrient).toBe('from-left');
+    expect(cadre?.imageXPt).toBe(120);
+    expect(cadre?.imageYPt).toBe(45);
+    expect(cadre?.imageSurround).toBe('ideal');
+  });
+
+  it('ne donne pas de coordonnées à une image du fil du texte', () => {
+    const { doc, porteur, voisin } = docAvecCadre();
+    const apres = moveImageRun(doc, porteur.id, 6, { blockId: voisin.id, offset: 0 }, {
+      xPt: 120,
+      yPt: 45,
+    });
+
+    const cadre = cadreDans(apres, voisin.id)?.run;
+    expect(cadre?.imageXPt).toBeUndefined();
+    expect(cadre?.imageYPt).toBeUndefined();
+    expect(cadre?.imageHoriOrient).toBeUndefined();
+  });
+
+  it('laisse le document intact si l’offset ne désigne aucun cadre', () => {
+    const { doc, porteur, voisin } = docAvecCadre();
+    expect(moveImageRun(doc, porteur.id, 0, { blockId: voisin.id, offset: 0 }, { xPt: 0, yPt: 0 }))
+      .toBe(doc);
+  });
+
+  it('borne l’offset d’arrivée à la longueur du paragraphe visé', () => {
+    const { doc, porteur, voisin } = docAvecCadre();
+    const apres = moveImageRun(doc, porteur.id, 6, { blockId: voisin.id, offset: 9999 }, {
+      xPt: 0,
+      yPt: 0,
+    });
+    expect(cadreDans(apres, voisin.id)).not.toBeNull();
   });
 });

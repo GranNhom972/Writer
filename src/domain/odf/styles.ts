@@ -15,6 +15,8 @@
 import type {
   Alignment,
   FlyAnchor,
+  FlyHoriOrient,
+  FlyHoriRelation,
   FlySurround,
   ListKind,
   ParagraphNode,
@@ -60,6 +62,12 @@ export interface GraphicAttributes {
   surround?: FlySurround;
   /** `fo:margin-left` du cadre : la marge d'habillage, en points. */
   wrapMarginPt?: number;
+  /** `style:horizontal-pos` — alignement horizontal (`SwFmtHoriOrient`). */
+  horiOrient?: FlyHoriOrient;
+  /** `style:horizontal-rel` — repère de cet alignement (`text::RelOrientation`). */
+  horiRelation?: FlyHoriRelation;
+  /** `style:run-through="foreground"` — le cadre couvre le texte (`RES_OPAQUE`). */
+  inFront?: boolean;
 }
 
 export interface ColumnAttributes {
@@ -86,8 +94,10 @@ export type StyleTable = Map<string, OdfStyle>;
  * `style:wrap` d'ODF vers `SwSurround`.
  *
  * `dynamic` et `biggest` sont les deux formes du « côté le plus large » de
- * Writer (`SURROUND_IDEAL`) : le modèle les ramène à `parallel`, dont c'est
- * exactement le comportement quand les deux côtés sont libres.
+ * Writer, et elles se relisent en `ideal` — `SURROUND_IDEAL`, dont c'est
+ * exactement la règle. Les ramener à `parallel`, comme on le faisait, perdait
+ * l'arbitrage : le texte s'obstinait à écrire des deux côtés d'une image large
+ * plutôt que de choisir le sien.
  */
 function readSurround(value: string | null): FlySurround | null {
   switch (value) {
@@ -96,13 +106,73 @@ function readSurround(value: string | null): FlySurround | null {
     case 'run-through':
       return 'through';
     case 'parallel':
+      return 'parallel';
     case 'dynamic':
     case 'biggest':
-      return 'parallel';
+      return 'ideal';
     case 'left':
       return 'left';
     case 'right':
       return 'right';
+    default:
+      return null;
+  }
+}
+
+/**
+ * `style:run-through` d'ODF vers le calque de Writer.
+ *
+ * `foreground` est le calque `heaven` — le cadre couvre le texte —, tout le
+ * reste est `hell`. C'est un booléen dans le modèle (`imageInFront`) parce que
+ * c'en est un dans `RES_OPAQUE`.
+ */
+function readRunThrough(value: string | null): boolean | null {
+  if (value === 'foreground') return true;
+  if (value === 'background') return false;
+  return null;
+}
+
+/** `style:horizontal-pos` d'ODF vers `text::HoriOrientation`. */
+function readHoriOrient(value: string | null): FlyHoriOrient | null {
+  switch (value) {
+    case 'left':
+    case 'inside':
+      return 'left';
+    case 'center':
+      return 'center';
+    case 'right':
+    case 'outside':
+      return 'right';
+    case 'from-left':
+    case 'from-inside':
+      return 'from-left';
+    default:
+      return null;
+  }
+}
+
+/**
+ * `style:horizontal-rel` d'ODF vers `text::RelOrientation`.
+ *
+ * ODF en connaît une dizaine ; seule la feuille entière se distingue ici de la
+ * colonne de texte, et tout ce qui n'est pas explicitement la feuille s'y
+ * ramène — mieux vaut un cadre dans la colonne qu'un cadre dans la marge.
+ */
+function readHoriRelation(value: string | null): FlyHoriRelation | null {
+  switch (value) {
+    case 'page':
+    case 'page-start-margin':
+    case 'page-end-margin':
+      return 'page';
+    case 'paragraph':
+    case 'paragraph-content':
+    case 'paragraph-start-margin':
+    case 'paragraph-end-margin':
+    case 'page-content':
+    case 'char':
+    case 'frame':
+    case 'frame-content':
+      return 'text';
     default:
       return null;
   }
@@ -274,6 +344,15 @@ export function collectStyles(root: Element | Document): StyleTable {
 
         const margin = parseLengthPt(attr(child, NS.fo, 'margin-left'));
         if (margin !== null && margin >= 0) style.graphic.wrapMarginPt = margin;
+
+        const horiOrient = readHoriOrient(attr(child, NS.style, 'horizontal-pos'));
+        if (horiOrient) style.graphic.horiOrient = horiOrient;
+
+        const horiRelation = readHoriRelation(attr(child, NS.style, 'horizontal-rel'));
+        if (horiRelation) style.graphic.horiRelation = horiRelation;
+
+        const runThrough = readRunThrough(attr(child, NS.style, 'run-through'));
+        if (runThrough !== null) style.graphic.inFront = runThrough;
       } else if (kind === 'table-column-properties') {
         const colWidth = parseLengthPt(attr(child, NS.style, 'column-width'));
         if (colWidth !== null && colWidth > 0) style.column.widthPt = colWidth;
@@ -355,6 +434,12 @@ export interface FrameFlyStyle {
   anchor: FlyAnchor;
   surround: FlySurround;
   marginPt?: number;
+  /** `text::HoriOrientation` du cadre. Absent = `from-left`. */
+  horiOrient?: FlyHoriOrient;
+  /** `text::RelOrientation` du cadre. Absent = la colonne de texte. */
+  horiRelation?: FlyHoriRelation;
+  /** `RES_OPAQUE` : le cadre passe devant le texte. */
+  inFront?: boolean;
 }
 
 /**
@@ -368,8 +453,25 @@ const ODF_WRAP: Record<FlySurround, string> = {
   none: 'none',
   through: 'run-through',
   parallel: 'parallel',
+  // `SURROUND_IDEAL` s'écrit `dynamic` : c'est le nom qu'ODF donne au « côté le
+  // plus large », et celui que `readSurround` relit.
+  ideal: 'dynamic',
   left: 'left',
   right: 'right',
+};
+
+/** `text::HoriOrientation` → `style:horizontal-pos`. */
+const ODF_HORI_POS: Record<FlyHoriOrient, string> = {
+  left: 'left',
+  center: 'center',
+  right: 'right',
+  'from-left': 'from-left',
+};
+
+/** `text::RelOrientation` → `style:horizontal-rel`. */
+const ODF_HORI_REL: Record<FlyHoriRelation, string> = {
+  page: 'page',
+  text: 'paragraph',
 };
 
 export class AutomaticStyles {
@@ -415,7 +517,18 @@ export class AutomaticStyles {
     // `style:wrap` sont tous deux portés par le style et non par le cadre, donc
     // deux images qui en diffèrent ne peuvent pas partager le leur. Les images
     // simples, elles, se partagent toujours `Fr1`.
-    const key = `${clip ?? ''}|${fly ? `${fly.anchor}:${fly.surround}:${fly.marginPt ?? ''}` : ''}`;
+    const key = `${clip ?? ''}|${
+      fly
+        ? [
+            fly.anchor,
+            fly.surround,
+            fly.marginPt ?? '',
+            fly.horiOrient ?? '',
+            fly.horiRelation ?? '',
+            fly.inFront ? 'front' : '',
+          ].join(':')
+        : ''
+    }`;
     const existing = this.frameStyles.get(key);
     if (existing) return existing;
 
@@ -425,12 +538,25 @@ export class AutomaticStyles {
     // Un cadre « comme caractère » s'aligne sur la ligne de base du texte ; un
     // cadre flottant se positionne dans son ancre. Confondre les deux fait
     // rouvrir le document avec les images empilées en haut de page.
+    // Le repère « colonne de texte » n'a pas le même nom des deux côtés : ODF
+    // l'appelle `paragraph` sous une ancre de paragraphe et `page-content` sous
+    // une ancre de page. Écrire `paragraph` sur un cadre ancré à la page rend
+    // le style invalide, et Writer replace alors l'image en haut à gauche.
+    const relColonne = fly?.anchor === 'to-page' ? 'page-content' : 'paragraph';
     const position = fly
-      ? `style:vertical-pos="from-top" style:vertical-rel="${fly.anchor === 'to-page' ? 'page-content' : 'paragraph'}" ` +
-        `style:horizontal-pos="from-left" style:horizontal-rel="${fly.anchor === 'to-page' ? 'page-content' : 'paragraph'}"`
+      ? `style:vertical-pos="from-top" style:vertical-rel="${relColonne}" ` +
+        `style:horizontal-pos="${ODF_HORI_POS[fly.horiOrient ?? 'from-left']}" ` +
+        `style:horizontal-rel="${
+          (fly.horiRelation ?? 'text') === 'page' ? ODF_HORI_REL.page : relColonne
+        }"`
       : `style:vertical-pos="baseline" style:vertical-rel="baseline"`;
 
     const wrap = `style:wrap="${fly ? ODF_WRAP[fly.surround] : 'none'}"`;
+    // `style:run-through` n'est écrit que sur un cadre flottant : un cadre dans
+    // la ligne n'a pas de calque, il est le texte.
+    const runThrough = fly
+      ? ` style:run-through="${fly.inFront ? 'foreground' : 'background'}"`
+      : '';
     const margins =
       fly && fly.marginPt !== undefined
         ? ` fo:margin-left="${formatPt(fly.marginPt)}" fo:margin-right="${formatPt(fly.marginPt)}"` +
@@ -442,6 +568,7 @@ export class AutomaticStyles {
         `<style:graphic-properties ` +
         `${position} ` +
         `fo:padding="0cm" fo:border="none" ${wrap}` +
+        runThrough +
         margins +
         (clip ? ` fo:clip="${clip}"` : '') +
         `/>` +

@@ -291,7 +291,7 @@ export function readShareLink(search: string): { tokenSession: string; email: st
 /* ------------------------------------------------------- ouverture CloudServ */
 
 /**
- * Ouverture depuis CloudServ : `#doc=<uuid>&token=<billet>`.
+ * Ouverture depuis CloudServ : `/doc/<uuid>#token=<billet>` ou `#doc=<uuid>&token=<billet>`.
  *
  * Le billet voyage dans le **fragment**, jamais dans la query string. Un
  * fragment n'est pas transmis au serveur : il n'apparaît donc ni dans les
@@ -299,14 +299,47 @@ export function readShareLink(search: string): { tokenSession: string; email: st
  * C'est la même raison qui fait passer le jeton par le sous-protocole WebSocket
  * plutôt que par l'URL de connexion.
  *
- * L'appelant est tenu d'effacer le fragment aussitôt lu — il resterait sinon
- * dans la barre d'adresse et dans l'historique du navigateur.
+ * L'identifiant de document est porté par la route `/doc/:docId` pour isoler
+ * proprement chaque onglet et fenêtre. Le jeton est sauvegardé dans `sessionStorage`
+ * pour permettre le rechargement de page (F5) sans interruption.
  */
-export function readCloudServLink(hash: string): { docId: string; token: string } | null {
-  const params = new URLSearchParams(hash.replace(/^#/, ''));
-  const docId = params.get('doc');
-  const token = params.get('token');
+export function readCloudServLink(
+  hash: string = typeof window !== 'undefined' ? window.location.hash : '',
+  pathname: string = typeof window !== 'undefined' ? window.location.pathname : '',
+  search: string = typeof window !== 'undefined' ? window.location.search : '',
+): { docId: string; token: string } | null {
+  const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+  const searchParams = new URLSearchParams(search.replace(/^\?/, ''));
+
+  // 1. Extraire le docId : soit depuis le chemin d'URL /doc/:docId, soit depuis hash/query
+  const pathMatch = pathname.match(/^\/(?:doc|documents|d)\/([a-zA-Z0-9_-]+)/i);
+  let docId = pathMatch ? pathMatch[1] : null;
+
+  if (!docId) {
+    docId = hashParams.get('doc') || searchParams.get('doc');
+  }
+
+  // 2. Extraire le token : soit depuis le hash/query, soit depuis sessionStorage
+  let token = hashParams.get('token') || searchParams.get('token');
+  if (!token && docId && typeof sessionStorage !== 'undefined') {
+    try {
+      token = sessionStorage.getItem(`writer_token_${docId}`);
+    } catch {
+      // sessionStorage non accessible
+    }
+  }
+
   if (!docId || !token) return null;
+
+  // Persister le jeton pour les rechargements F5 de cet onglet
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      sessionStorage.setItem(`writer_token_${docId}`, token);
+    } catch {
+      // ignore
+    }
+  }
+
   return { docId, token };
 }
 

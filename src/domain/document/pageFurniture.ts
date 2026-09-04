@@ -15,6 +15,8 @@
  * Module pur : aucune dépendance à React ni au DOM.
  */
 
+import { ptToMm } from './units';
+
 export type FurnitureAlign = 'left' | 'center' | 'right';
 
 /** Les deux bandes d'une feuille physique. */
@@ -225,7 +227,7 @@ export const DEFAULT_FURNITURE: PageFurniture = {
 export const PAGE_GAP_MM = 5;
 
 /** Millimètres par point typographique (72 pt = 1 pouce = 25,4 mm). */
-const MM_PAR_POINT = 25.4 / 72;
+const MM_PAR_POINT = ptToMm(1);
 
 const FURNITURE_LEADING = 1.3;
 

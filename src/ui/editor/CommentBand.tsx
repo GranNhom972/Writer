@@ -14,7 +14,7 @@
  * commentaires sur la même ligne se superposeraient.
  */
 
-import { useState, type JSX } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type JSX } from 'react';
 import { commentThreads, type CommentThread } from '../../domain/document/comments';
 import type { WriterDocumentState } from '../../domain/document/types';
 import type { DocumentLayout } from '../../domain/engine/paginate';
@@ -22,8 +22,26 @@ import type { DocumentLayout } from '../../domain/engine/paginate';
 /** Écart minimal entre deux bulles, en pixels (`SwPostItMgr::GetSpaceBetween`). */
 const BUBBLE_GAP_PX = 12;
 
-/** Hauteur supposée d'une bulle repliée, pour l'empilement. */
+/**
+ * Hauteur de repli, pour la première passe d'empilement.
+ *
+ * Elle ne sert qu'avant la mesure : une bulle qui porte des réponses ou une
+ * citation dépasse largement cette valeur — 284 px relevés pour deux réponses —
+ * et empiler tout le monde sur 92 px faisait recouvrir la précédente par la
+ * suivante. La hauteur réelle est relevée après le rendu (cf. `useLayoutEffect`
+ * dans `CommentBand`), et c'est elle qui décide de l'empilement définitif.
+ */
 const COLLAPSED_HEIGHT_PX = 92;
+
+/**
+ * Largeur de la bande, en pixels.
+ *
+ * Exportée parce que la surface doit réserver cette largeur **avant** de
+ * mettre la pile à l'échelle : la boîte du zoom se dimensionne sur la largeur
+ * du contenu, et une seconde valeur écrite en dur ailleurs finirait par
+ * diverger de celle-ci.
+ */
+export const COMMENT_BAND_WIDTH_PX = 260;
 
 export interface CommentBandProps {
   doc: WriterDocumentState;
@@ -58,22 +76,62 @@ export function CommentBand({
   onEdit,
   onGoToAnchor,
 }: CommentBandProps): JSX.Element | null {
+  /*
+   * Hauteurs réelles des bulles, relevées après le rendu.
+   *
+   * L'empilement a besoin de la hauteur de la bulle précédente pour poser la
+   * suivante, et cette hauteur n'existe qu'une fois le texte mis en page : elle
+   * dépend du nombre de réponses, de la longueur de la citation et de
+   * l'ouverture du champ de réponse. On peint donc une première fois sur la
+   * hauteur de repli, on mesure, et le second rendu est le bon — c'est ce
+   * qu'obtient `SwPostItMgr::LayoutPostIts` en interrogeant chaque fenêtre.
+   *
+   * Les hooks précèdent le retour anticipé : leur ordre doit être le même à
+   * chaque rendu, y compris celui où le document n'a plus aucun commentaire.
+   */
+  const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const nodes = useRef(new Map<string, HTMLElement>());
+
+  const register = useCallback((threadId: string, node: HTMLElement | null): void => {
+    if (node) nodes.current.set(threadId, node);
+    else nodes.current.delete(threadId);
+  }, []);
+
+  useLayoutEffect(() => {
+    const mesures = new Map<string, number>();
+    nodes.current.forEach((node, id) => mesures.set(id, node.offsetHeight));
+
+    // Comparaison avant d'écrire : un `setState` inconditionnel dans un effet
+    // sans dépendances relancerait le rendu sans fin.
+    let identique = mesures.size === heights.size;
+    if (identique) {
+      for (const [id, h] of mesures) {
+        if (heights.get(id) !== h) {
+          identique = false;
+          break;
+        }
+      }
+    }
+    if (!identique) setHeights(mesures);
+  });
+
   const threads = commentThreads(doc);
   if (threads.length === 0) return null;
 
-  const positioned = stackThreads(threads, layout, pageStridePx, contentTopPx);
+  const positioned = stackThreads(threads, layout, pageStridePx, contentTopPx, heights);
 
   return (
     <aside
       className="writer-comment-band"
       aria-label="Commentaires du document"
-      style={{ position: 'relative', width: '260px', flexShrink: 0 }}
+      style={{ position: 'relative', width: `${COMMENT_BAND_WIDTH_PX}px`, flexShrink: 0 }}
     >
       {positioned.map(({ thread, topPx }) => (
         <CommentBubble
           key={thread.id}
           thread={thread}
           topPx={topPx}
+          register={register}
           author={author}
           isActive={thread.id === activeThreadId}
           readOnly={readOnly}
@@ -101,6 +159,8 @@ function stackThreads(
   layout: DocumentLayout,
   pageStridePx: number,
   contentTopPx: number,
+  /** Hauteurs relevées au rendu précédent ; la hauteur de repli à défaut. */
+  heights: ReadonlyMap<string, number>,
 ): { thread: CommentThread; topPx: number }[] {
   const out: { thread: CommentThread; topPx: number }[] = [];
   let floor = 0;
@@ -116,7 +176,7 @@ function stackThreads(
 
     const topPx = Math.max(ideal, floor);
     out.push({ thread, topPx });
-    floor = topPx + COLLAPSED_HEIGHT_PX + BUBBLE_GAP_PX;
+    floor = topPx + (heights.get(thread.id) ?? COLLAPSED_HEIGHT_PX) + BUBBLE_GAP_PX;
   }
 
   return out;
@@ -125,6 +185,7 @@ function stackThreads(
 function CommentBubble({
   thread,
   topPx,
+  register,
   author,
   isActive,
   readOnly,
@@ -136,6 +197,8 @@ function CommentBubble({
 }: {
   thread: CommentThread;
   topPx: number;
+  /** Confie l'élément à la bande, qui mesure sa hauteur pour l'empilement. */
+  register: (threadId: string, node: HTMLElement | null) => void;
   author: string;
   isActive: boolean;
   readOnly: boolean;
@@ -167,6 +230,7 @@ function CommentBubble({
 
   return (
     <article
+      ref={(node) => register(thread.id, node)}
       className={`writer-comment${thread.resolved ? ' writer-comment--resolved' : ''}${
         isActive ? ' writer-comment--active' : ''
       }`}
@@ -199,7 +263,7 @@ function CommentBubble({
             padding: 0,
             marginBottom: '6px',
             cursor: 'pointer',
-            color: 'var(--text-muted, #5f6368)',
+            color: 'var(--fg-secondary)',
             fontStyle: 'italic',
             // Une seule ligne : la citation situe le fil, elle ne le remplace pas.
             overflow: 'hidden',
@@ -217,7 +281,7 @@ function CommentBubble({
             <strong style={{ fontSize: '12px' }}>{comment.author}</strong>
             <time
               dateTime={comment.createdAt}
-              style={{ fontSize: '11px', color: 'var(--text-muted, #5f6368)' }}
+              style={{ fontSize: '11px', color: 'var(--fg-secondary)' }}
             >
               {formatDate(comment.createdAt)}
             </time>
@@ -299,7 +363,7 @@ const bareButtonStyle = {
   background: 'transparent',
   padding: 0,
   fontSize: '12px',
-  color: 'var(--text-muted, #5f6368)',
+  color: 'var(--fg-secondary)',
   cursor: 'pointer',
   textDecoration: 'underline',
 } as const;

@@ -1,5 +1,5 @@
 /**
- * Édition atomique (§4.2 du CLAUDE.md) et historique (`SwUndo`).
+ * Édition atomique et historique (`SwUndo`).
  */
 import { describe, expect, it } from 'vitest';
 import {

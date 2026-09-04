@@ -41,8 +41,9 @@ import {
 import { FurnitureBandView, type BlockMetrics, type GestureReadout } from './FurnitureBand';
 import { Button } from '../../design/components/Button';
 import { Mesure } from './Mesure';
+import { mmToPx } from '../../domain/document/units';
 
-const PX_PAR_MM = 96 / 25.4;
+const PX_PAR_MM = mmToPx(1);
 
 const HAUTEUR_MINIMALE_MM = 14;
 

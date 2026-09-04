@@ -10,12 +10,40 @@
 import { memo, type JSX } from 'react';
 import type { PageGeometry } from '../../domain/document/pageSetup';
 import type { ParagraphLayout } from '../../domain/engine/lineBreak';
-import type { LaidOutPage, PlacedParagraph, PlacedTable } from '../../domain/engine/paginate';
+import type { LaidOutFly, LaidOutPage, PlacedParagraph, PlacedTable } from '../../domain/engine/paginate';
+import { cellFrameHeightPx } from '../../domain/engine/paginate';
 import type { SelectionRect } from '../../domain/engine/cursor';
 import type { PageFurniture, FurnitureBand } from '../../domain/document/pageFurniture';
 import { showsOn, resolveGeometry, bandIsEmpty } from '../../domain/document/pageFurniture';
 import { FurnitureBandView } from '../components/FurnitureBand';
-import { ParagraphView } from './ParagraphView';
+import { ParagraphView, type ImageContext } from './ParagraphView';
+import { ImageFrame } from './ImageFrame';
+import { imageKey } from '../../domain/document/images';
+import { mmToPx, ptToPx, pxToMm } from '../../domain/document/units';
+
+/** Repli de hauteur de bande quand le document n'a pas de mobilier de page. */
+const DEFAULT_BAND_PX = 40;
+import { TableHandles, TableTint, type TableFocus } from './TableOverlay';
+
+/** Une occurrence de recherche posée sur la page. */
+export interface SearchRect {
+  rect: SelectionRect;
+  current: boolean;
+}
+
+/**
+ * Tableaux vides partagés, gelés.
+ *
+ * `A4Page` est mémoïsé, donc comparé prop à prop par identité. Un `?? []`
+ * écrit sur le site d'appel rendrait un tableau neuf à chaque rendu et
+ * suffirait à faire échouer la comparaison — la mémoïsation ne servirait plus
+ * à rien pour toute page sans sélection ni occurrence, c'est-à-dire presque
+ * toutes. Ces constantes sont la valeur de repli à utiliser à leur place.
+ */
+export const AUCUN_RECT: readonly SelectionRect[] = Object.freeze([]);
+export const AUCUNE_OCCURRENCE: readonly SearchRect[] = Object.freeze([]);
+export const AUCUN_PLACEMENT: readonly { blockId: string; placed: PlacedParagraph }[] =
+  Object.freeze([]);
 
 export interface A4PageProps {
   page: LaidOutPage;
@@ -24,13 +52,25 @@ export interface A4PageProps {
   furniture?: PageFurniture;
   geometry: PageGeometry;
   paragraphLayouts: ReadonlyMap<string, ParagraphLayout>;
-  placements: { blockId: string; placed: PlacedParagraph }[];
-  selectionRects: SelectionRect[];
+  placements: readonly { blockId: string; placed: PlacedParagraph }[];
+  selectionRects: readonly SelectionRect[];
   /** Occurrences de la recherche à peindre sur cette page. */
-  searchRects: { rect: SelectionRect; current: boolean }[];
+  searchRects: readonly SearchRect[];
   caret: { pageIndex: number; xPx: number; topPx: number; heightPx: number } | null;
   caretIdle: boolean;
   showMargins: boolean;
+  /** Zoom courant — les poignées de tableau convertissent les gestes avec. */
+  zoom: number;
+  /** Tableau et cellule sous le curseur, pour peindre les poignées. */
+  activeTable: ({ tableId: string } & TableFocus) | null;
+  onResizeColumn: (tableId: string, boundaryIndex: number, deltaPercent: number) => void;
+  onSelectRow: (tableId: string, rowIndex: number) => void;
+  onSelectColumn: (tableId: string, columnIndex: number) => void;
+  onSelectTable: (tableId: string) => void;
+  /** Document non modifiable : les poignées de largeur ne s'affichent pas. */
+  readOnly?: boolean;
+  /** Contexte des cadres image : légendes, sélection, poignées. */
+  images?: ImageContext | undefined;
   onToggleTask: (blockId: string) => void;
   onOpenFurniture?: (band: FurnitureBand) => void;
   onEditMath?: (blockId: string, latex: string, display: boolean) => void;
@@ -38,17 +78,29 @@ export interface A4PageProps {
   onPointerDown: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => void;
+  onContextMenu: (event: React.MouseEvent<HTMLDivElement>, pageIndex: number) => void;
 }
 
 /** Cadres des cellules d'un tableau posé sur cette page. */
 function TableFrames({ table }: { table: PlacedTable }): JSX.Element {
-  const color = table.table.borderColor ?? 'var(--border-strong)';
-  const widthPx = table.table.borderWidthPt ? `${table.table.borderWidthPt * (96 / 72)}px` : '1px';
+  // Jeton « papier » : la grille est imprimée, elle ne suit pas le thème.
+  const color = table.table.borderColor ?? 'var(--paper-border)';
+  const widthPx = table.table.borderWidthPt ? `${ptToPx(table.table.borderWidthPt)}px` : '1px';
 
   return (
     <>
-      {table.rows.flatMap((row) =>
-        row.cells.map((cell) => (
+      {table.rows.flatMap((row, rowPos) =>
+        row.cells.map((cell) =>
+          /*
+           * Une cellule recouverte par une fusion ne se peint pas.
+           *
+           * Le moteur lui donne une largeur nulle, ce qui n'annule pas son
+           * cadre : `border-box` réduit le contenu à zéro mais garde les deux
+           * bordures d'un pixel, et il restait un trait de 2 px au milieu de
+           * chaque cellule fusionnée, exactement là où la frontière effacée
+           * passait. C'est la maîtresse qui porte le cadre de la zone entière.
+           */
+          cell.covered ? null : (
           <div
             key={`${row.rowId}-${cell.cellId}`}
             className="writer-table-cell"
@@ -56,14 +108,15 @@ function TableFrames({ table }: { table: PlacedTable }): JSX.Element {
               left: `${cell.leftPx}px`,
               top: `${table.topPx + row.topPx}px`,
               width: `${cell.widthPx}px`,
-              height: `${row.heightPx}px`,
+              height: `${cellFrameHeightPx(table.rows, rowPos, cell)}px`,
               borderColor: color,
               borderWidth: widthPx,
-              background: row.isHeader ? 'var(--bg-sunken)' : undefined,
+              background: row.isHeader ? 'var(--paper-sunken)' : undefined,
             }}
             aria-hidden="true"
           />
-        )),
+          ),
+        ),
       )}
     </>
   );
@@ -82,6 +135,14 @@ export const A4Page = memo(function A4Page({
   caret,
   caretIdle,
   showMargins,
+  zoom,
+  activeTable,
+  onResizeColumn,
+  onSelectRow,
+  onSelectColumn,
+  onSelectTable,
+  readOnly,
+  images,
   onToggleTask,
   onOpenFurniture,
   onEditMath,
@@ -89,11 +150,119 @@ export const A4Page = memo(function A4Page({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onContextMenu,
 }: A4PageProps): JSX.Element {
   const pageNumber = page.index + 1;
+
+  /**
+   * Un cadre flottant, peint à sa place sur la feuille.
+   *
+   * Le même rendu sert aux **deux calques** : `SwRootFrm::Paint` peint `hell`
+   * avant le texte et `heaven` après, mais c'est le même cadre — seul l'ordre
+   * de passage change, et avec lui ce qui recouvre quoi.
+   */
+  const peindreCadre = (laid: LaidOutFly, index: number): JSX.Element => (
+    <div
+      key={`fly-${laid.fly.anchorBlockId}-${index}`}
+      className="writer-fly"
+      style={{
+        position: 'absolute',
+        left: `${laid.leftPx}px`,
+        top: `${laid.topPx}px`,
+        width: `${laid.widthPx}px`,
+        height: `${laid.heightPx}px`,
+        /*
+         * Le cadre reste saisissable, y compris en `through`.
+         *
+         * Le laisser traverser les clics rendait le texte du dessous plus
+         * commode à sélectionner, mais fermait la porte : une image posée
+         * « derrière le texte » n'était plus jamais atteignable, donc plus
+         * jamais réglable ni supprimable. Le texte, lui, se sélectionne
+         * toujours — il suffit de commencer le geste hors du cadre.
+         */
+        pointerEvents: 'auto',
+      }}
+    >
+      {/*
+        Même cadre que dans le fil : c'est ici, et ici seulement, qu'une
+        image flottante est peinte. Elle gagne du même coup la légende et
+        les poignées de redimensionnement, au lieu d'être une simple
+        vignette inerte.
+      */}
+      {images ? (
+        <ImageFrame
+          formatting={laid.fly.run}
+          blockId={laid.fly.anchorBlockId}
+          offset={laid.fly.anchorOffset}
+          widthPx={laid.widthPx}
+          // La hauteur posée par `flyLayout` comprend la légende : c'est
+          // celle du cadre entier. L'image en occupe le reste.
+          imageHeightPx={laid.heightPx - (laid.fly.captionHeightPx ?? 0)}
+          captionHeightPx={laid.fly.captionHeightPx ?? 0}
+          figureNumber={
+            images.figureNumbers.get(
+              imageKey(laid.fly.anchorBlockId, laid.fly.anchorOffset),
+            ) ?? null
+          }
+          bodyFontSizePt={images.bodyFontSizePt}
+          selected={
+            images.selected?.blockId === laid.fly.anchorBlockId &&
+            images.selected.offset === laid.fly.anchorOffset
+          }
+          zoom={images.zoom}
+          readOnly={images.readOnly}
+          onSelect={images.onSelect}
+          onOpenDialog={(b, o) => {
+            images.onOpenDialog(b, o);
+            onEditImage?.(b, o);
+          }}
+          onResize={images.onResize}
+          onWrapChange={images.onWrapChange}
+          onMove={images.onMove}
+          onDrop={images.onDrop}
+        />
+      ) : (
+        <img
+          src={laid.fly.run.imageSrc ?? ''}
+          alt={laid.fly.run.imageAlt ?? ''}
+          draggable={false}
+          style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
+        />
+      )}
+    </div>
+  );
+
   const showFurniture = furniture ? showsOn(furniture, pageNumber) : false;
   const geom = furniture ? resolveGeometry(furniture, pageNumber) : null;
-  const pageWidthMm = geometry.pageWidthPx * (25.4 / 96);
+  const pageWidthMm = pxToMm(geometry.pageWidthPx);
+
+  /*
+   * Hauteurs des bandes d'en-tête et de pied.
+   *
+   * Bornées à la zone **hors texte**, et c'est tout l'enjeu : la bande est
+   * posée en `zIndex: 4` au-dessus de `.writer-page__content`, qui n'a pas de
+   * `z-index` propre, et elle arrête la propagation de `pointerdown` pour que
+   * le clic ouvre l'atelier plutôt que de poser le curseur. Une bande plus
+   * haute que la marge recouvre donc les premières lignes du texte et y rend
+   * le curseur impossible à placer — le clic ouvre l'en-tête à la place.
+   *
+   * Le cas n'était pas théorique : `resolveGeometry` plancher le contenu d'une
+   * bande à 16 mm, bande vide comprise, alors que la marge, elle, suit le
+   * réglage de l'utilisateur. Sous 16 mm de marge haute la bande débordait —
+   * 22,7 px de texte inaccessibles à 10 mm de marge. Le gabarit A4 par défaut
+   * (20 mm) masquait le défaut.
+   *
+   * `geom` ne sert donc plus qu'à réclamer **moins** que la marge, jamais plus.
+   */
+  const headerBandPx = Math.min(
+    geometry.contentTopPx,
+    geom ? mmToPx(geom.headerContentMm) : DEFAULT_BAND_PX,
+  );
+  const footerZonePx = geometry.pageHeightPx - (geometry.contentTopPx + geometry.contentHeightPx);
+  const footerBandPx = Math.min(
+    footerZonePx,
+    geom ? mmToPx(geom.footerContentMm) : DEFAULT_BAND_PX,
+  );
   const contexte = { page: pageNumber, pages: totalPages, titre: documentTitle };
   const headerVide = !furniture || bandIsEmpty(furniture, 'header', pageNumber);
   const footerVide = !furniture || bandIsEmpty(furniture, 'footer', pageNumber);
@@ -101,10 +270,15 @@ export const A4Page = memo(function A4Page({
   return (
     <div
       className="writer-page"
+      // Index de la feuille, lu au dépôt d'une image : le glissement écoute la
+      // fenêtre et n'a donc pas le `pageIndex` que reçoivent les gestionnaires
+      // de pointage de ce composant.
+      data-page-index={page.index}
       style={{ width: `${geometry.pageWidthPx}px`, height: `${geometry.pageHeightPx}px` }}
       onPointerDown={(event) => onPointerDown(event, page.index)}
       onPointerMove={(event) => onPointerMove(event, page.index)}
       onPointerUp={(event) => onPointerUp(event, page.index)}
+      onContextMenu={(event) => onContextMenu(event, page.index)}
     >
       {/* En-tête de page physique interactif */}
       <div
@@ -114,7 +288,8 @@ export const A4Page = memo(function A4Page({
           top: 0,
           left: 0,
           width: `${geometry.pageWidthPx}px`,
-          height: `${Math.max(geometry.contentTopPx, geom ? (geom.headerContentMm * 96 / 25.4) : 40)}px`,
+          height: `${headerBandPx}px`,
+          overflow: 'hidden',
           zIndex: 4,
           cursor: 'pointer',
         }}
@@ -137,7 +312,7 @@ export const A4Page = memo(function A4Page({
             band="header"
             contexte={contexte}
             usableMm={pageWidthMm}
-            heightMm={geom.headerContentMm}
+            heightMm={pxToMm(headerBandPx)}
           />
         )}
         <button
@@ -208,40 +383,25 @@ export const A4Page = memo(function A4Page({
         ))}
 
         {/*
-          Cadres flottants (`SwFlyFreeFrm`). Peints **avant** le texte, donc
-          dessous : c'est l'ordre de `SwRootFrm::Paint`, et il n'a de
-          conséquence visible que pour l'habillage `through`, où le texte doit
-          passer par-dessus l'image.
+          Cadres flottants du calque `hell` (`SwFlyFreeFrm`). Peints **avant**
+          le texte, donc dessous : c'est l'ordre de `SwRootFrm::Paint`, et il
+          n'a de conséquence visible que pour l'habillage `through`, où le
+          texte doit passer par-dessus l'image.
         */}
-        {page.flies?.map((laid, index) => (
-          <div
-            key={`fly-${laid.fly.anchorBlockId}-${index}`}
-            className="writer-fly"
-            style={{
-              position: 'absolute',
-              left: `${laid.leftPx}px`,
-              top: `${laid.topPx}px`,
-              width: `${laid.widthPx}px`,
-              height: `${laid.heightPx}px`,
-              // Un cadre `through` laisse passer le clic : le texte qu'il
-              // recouvre doit rester sélectionnable.
-              pointerEvents: laid.fly.surround === 'through' ? 'none' : 'auto',
-            }}
-          >
-            <img
-              src={laid.fly.run.imageSrc ?? ''}
-              alt={laid.fly.run.imageAlt ?? ''}
-              draggable={false}
-              style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
-            />
-          </div>
+        {page.fliesHell.map(peindreCadre)}
+
+        {page.tables.map((table) => (
+          <TableFrames key={`${table.blockId}-${table.topPx}`} table={table} />
         ))}
 
-        {page.blocks
-          .filter((block): block is PlacedTable => block.kind === 'table')
-          .map((table) => (
-            <TableFrames key={`${table.blockId}-${table.topPx}`} table={table} />
-          ))}
+        {/* Teinte de sélection — sous le texte, pour ne pas le délaver. */}
+        {page.tables.map((table) => (
+          <TableTint
+            key={`tint-${table.blockId}-${table.topPx}`}
+            table={table}
+            focus={activeTable?.tableId === table.table.id ? activeTable : null}
+          />
+        ))}
 
         {placements.map(({ blockId, placed }) => {
           const layout = paragraphLayouts.get(blockId);
@@ -257,10 +417,30 @@ export const A4Page = memo(function A4Page({
                 onToggleTask={onToggleTask}
                 onEditMath={onEditMath}
                 onEditImage={onEditImage}
+                images={images}
               />
             </div>
           );
         })}
+
+        {/*
+          Poignées de tableau — après le texte, donc au-dessus : une poignée
+          qu'un mot recouvrirait ne serait pas saisissable.
+        */}
+        {page.tables.map((table) => (
+          <TableHandles
+            key={`poignees-${table.blockId}-${table.topPx}`}
+            table={table}
+            contentWidthPx={geometry.contentWidthPx}
+            zoom={zoom}
+            focus={activeTable?.tableId === table.table.id ? activeTable : null}
+            readOnly={readOnly ?? false}
+            onResizeColumn={onResizeColumn}
+            onSelectRow={onSelectRow}
+            onSelectColumn={onSelectColumn}
+            onSelectTable={onSelectTable}
+          />
+        ))}
 
         {caret ? (
           <div
@@ -291,11 +471,13 @@ export const A4Page = memo(function A4Page({
               bottom: 0,
               left: 0,
               right: 0,
-              borderTop: '1px solid var(--border-strong, #ccc)',
+              borderTop: '1px solid var(--paper-border)',
               paddingTop: '8px',
               fontSize: '11px',
               lineHeight: '1.4',
-              color: 'var(--text-muted, #555)',
+              // `--text-muted` n'existe dans aucune feuille : la règle tombait
+              // systématiquement sur sa valeur de repli.
+              color: 'var(--paper-secondary)',
               pointerEvents: 'auto',
             }}
           >
@@ -307,6 +489,25 @@ export const A4Page = memo(function A4Page({
             ))}
           </div>
         )}
+
+        {/*
+          Calque `heaven` : les cadres « devant le texte » (`RES_OPAQUE`).
+
+          Peints en **dernier**, après les poignées, le curseur et les notes :
+          c'est la fin de `SwRootFrm::Paint`, et c'est ce qui donne son sens à
+          « devant le texte ». Un cadre opaque recouvre donc tout ce que la page
+          porte, sans exception.
+
+          Ils étaient jusqu'ici insérés entre les poignées et le curseur, ce qui
+          les faisait passer *sous* le curseur et sous le bandeau de notes —
+          l'ordre des calques s'inversait sur ces deux éléments, et une image
+          posée devant le texte n'en cachait pourtant pas le curseur.
+
+          Conséquence assumée : un cadre opaque posé sur la zone de saisie
+          masque le curseur. C'est le comportement demandé d'un objet
+          « devant le texte » ; le geste de retour est de le renvoyer derrière.
+        */}
+        {page.fliesHeaven.map(peindreCadre)}
       </div>
 
       {/* Pied de page physique interactif */}
@@ -317,7 +518,8 @@ export const A4Page = memo(function A4Page({
           bottom: 0,
           left: 0,
           width: `${geometry.pageWidthPx}px`,
-          height: `${Math.max(geometry.pageHeightPx - (geometry.contentTopPx + geometry.contentHeightPx), geom ? (geom.footerContentMm * 96 / 25.4) : 40)}px`,
+          height: `${footerBandPx}px`,
+          overflow: 'hidden',
           zIndex: 4,
           cursor: 'pointer',
         }}
@@ -340,7 +542,7 @@ export const A4Page = memo(function A4Page({
             band="footer"
             contexte={contexte}
             usableMm={pageWidthMm}
-            heightMm={geom.footerContentMm}
+            heightMm={pxToMm(footerBandPx)}
           />
         )}
         <button

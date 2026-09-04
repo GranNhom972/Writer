@@ -21,7 +21,13 @@
 
 import { pxToPt } from './units';
 import { makeRun, runFormatting } from './runs';
-import type { RunFormatting, TextRun } from './types';
+import type {
+  FlyAnchor,
+  FlyHoriOrient,
+  FlyHoriRelation,
+  RunFormatting,
+  TextRun,
+} from './types';
 
 /** `CH_TXTATR_BREAKWORD` — la place que l'objet occupe dans le texte. */
 export const IMAGE_PLACEHOLDER = '￼';
@@ -63,6 +69,75 @@ export interface ImageAttributes {
   heightPt: number;
   alt?: string;
   crop?: ImageCrop;
+  /** Réglages de légende. Absent = pas de légende du tout. */
+  caption?: ImageCaption;
+  /** Marge autour du cadre, en points. `0` est une valeur légitime. */
+  marginPt?: number;
+  /** Blanc entre l'image et sa légende, en points. `0` est légitime. */
+  captionGapPt?: number;
+  /** Intégration au texte. Absent = dans le fil (`FLY_AS_CHAR`). */
+  wrap?: ImageWrapPlacement;
+}
+
+/**
+ * Position d'un cadre flottant : les items de placement d'OpenOffice, réunis.
+ *
+ * `mode` porte l'habillage et le calque, les cinq autres champs portent
+ * `SwFmtHoriOrient`, `SwFmtVertOrient` et la marge d'habillage. Un seul objet
+ * pour tout ce qui n'a de sens que **hors du fil du texte** : `mode: 'inline'`
+ * les rend tous inutiles d'un coup, ce qu'aucune combinaison de champs plats
+ * n'exprimerait aussi clairement.
+ */
+export interface ImageWrapPlacement {
+  mode: ImageWrapMode;
+  horiOrient?: FlyHoriOrient;
+  horiRelation?: FlyHoriRelation;
+  /** Décalage horizontal, en points. Lu par le seul `from-left`. */
+  xPt?: number;
+  /** Décalage vertical depuis le haut de l'ancre, en points. */
+  yPt?: number;
+  /** Blanc que le texte laisse autour du cadre, en points. */
+  wrapMarginPt?: number;
+}
+
+/**
+ * Champs de run pour les espacements — marge et blanc de légende.
+ *
+ * `0` est une **valeur**, pas une absence : la tester par vérité (`x ? … : …`)
+ * la ferait disparaître, et le run retomberait sur le blanc par défaut. C'était
+ * exactement le symptôme « les marges ne sont pas tout à fait à zéro ».
+ */
+export function spacingFormatting(
+  marginPt: number | undefined,
+  captionGapPt: number | undefined,
+): Partial<TextRun> {
+  return {
+    ...(marginPt !== undefined
+      ? { imageMarginPt: Math.min(MAX_IMAGE_MARGIN_PT, Math.max(0, marginPt)) }
+      : {}),
+    ...(captionGapPt !== undefined
+      ? { imageCaptionGapPt: Math.min(MAX_IMAGE_MARGIN_PT, Math.max(0, captionGapPt)) }
+      : {}),
+  };
+}
+
+/**
+ * Champs de run correspondant à des réglages de légende.
+ *
+ * Renvoie `{}` quand il n'y a pas de légende — même convention que
+ * `cropFormatting` : c'est l'appelant qui efface les clés existantes avant de
+ * répandre ce résultat, faute de quoi retirer une légende ne l'effacerait
+ * jamais.
+ */
+export function captionFormatting(caption: ImageCaption | undefined): Partial<TextRun> {
+  if (!caption) return {};
+  return {
+    imageCaption: caption.text,
+    imageCaptionPosition: caption.position,
+    imageCaptionAlign: caption.align,
+    // Le mode automatique étant le défaut, on ne stocke que l'exception.
+    ...(caption.manual ? { imageCaptionManual: true } : {}),
+  };
 }
 
 /** Un run porte-t-il une image ? */
@@ -84,6 +159,24 @@ export function imageAttributes(run: TextRun): ImageAttributes | null {
     heightPt: clampSize(run.imageHeightPt ?? 0),
     ...(run.imageAlt !== undefined ? { alt: run.imageAlt } : {}),
     ...(hasCrop(crop) ? { crop } : {}),
+    ...(hasCaption(run) ? { caption: imageCaptionOf(run) } : {}),
+    ...(run.imageMarginPt !== undefined ? { marginPt: run.imageMarginPt } : {}),
+    ...(run.imageCaptionGapPt !== undefined ? { captionGapPt: run.imageCaptionGapPt } : {}),
+    wrap: imageWrapPlacement(run),
+  };
+}
+
+/** Placement d'un cadre, valeurs par défaut résolues. */
+export function imageWrapPlacement(run: RunFormatting): ImageWrapPlacement {
+  const mode = imageWrapMode(run);
+  if (mode === 'inline') return { mode };
+  return {
+    mode,
+    horiOrient: run.imageHoriOrient ?? 'from-left',
+    horiRelation: run.imageHoriRelation ?? 'text',
+    xPt: run.imageXPt ?? 0,
+    yPt: run.imageYPt ?? 0,
+    wrapMarginPt: run.imageWrapMarginPt ?? DEFAULT_WRAP_MARGIN_PT,
   };
 }
 
@@ -233,7 +326,41 @@ export function makeImageRun(attributes: ImageAttributes): TextRun {
     imageHeightPt: clampSize(attributes.heightPt),
     ...(attributes.alt ? { imageAlt: attributes.alt } : {}),
     ...cropFormatting(attributes.crop),
+    ...captionFormatting(attributes.caption),
+    ...spacingFormatting(attributes.marginPt, attributes.captionGapPt),
+    ...placementFormatting(attributes.wrap),
   });
+}
+
+/**
+ * Champs de run correspondant à un placement.
+ *
+ * Même convention que `cropFormatting` : les clés absentes valent effacement,
+ * et c'est à l'appelant de vider `WRAP_FORMAT_KEYS` avant d'y répandre ce
+ * résultat. Un cadre ramené dans le fil du texte rend ici `{}`, et laisserait
+ * donc intacte une géométrie flottante qu'on aurait négligé d'effacer.
+ */
+export function placementFormatting(
+  placement: ImageWrapPlacement | undefined,
+): Partial<TextRun> {
+  if (!placement || placement.mode === 'inline') return {};
+  return {
+    ...wrapFormatting(placement.mode),
+    ...(placement.horiOrient !== undefined ? { imageHoriOrient: placement.horiOrient } : {}),
+    ...(placement.horiRelation !== undefined
+      ? { imageHoriRelation: placement.horiRelation }
+      : {}),
+    ...(placement.xPt !== undefined ? { imageXPt: placement.xPt } : {}),
+    ...(placement.yPt !== undefined ? { imageYPt: placement.yPt } : {}),
+    ...(placement.wrapMarginPt !== undefined
+      ? {
+          imageWrapMarginPt: Math.min(
+            MAX_IMAGE_MARGIN_PT,
+            Math.max(0, placement.wrapMarginPt),
+          ),
+        }
+      : {}),
+  };
 }
 
 /**
@@ -330,6 +457,76 @@ export function isSafeImageSrc(src: string): boolean {
  * Sert au dépôt des images sur le serveur au partage, et à la collecte des
  * `Pictures/` à l'écriture d'un `.odt`.
  */
+/* -------------------------------------------------------------- légendes */
+
+/** Réglages de légende d'une image, valeurs par défaut résolues. */
+export interface ImageCaption {
+  text: string;
+  position: 'above' | 'below';
+  align: 'left' | 'center' | 'right';
+  /** `false` = numérotation automatique (le défaut). */
+  manual: boolean;
+}
+
+/** Blanc par défaut entre l'image et sa légende, en points. */
+export const DEFAULT_CAPTION_GAP_PT = 3;
+
+/**
+ * Blanc par défaut que le texte laisse autour d'un cadre flottant, en points.
+ * C'est le `SvxLRSpaceItem` du cadre dans Writer.
+ */
+export const DEFAULT_WRAP_MARGIN_PT = 4;
+/** Plafond des marges réglables, en points (≈ 50 mm). */
+export const MAX_IMAGE_MARGIN_PT = 142;
+
+/** Marge autour du cadre, bornée. */
+export function imageMarginPt(run: Pick<TextRun, 'imageMarginPt'>): number {
+  return Math.min(MAX_IMAGE_MARGIN_PT, Math.max(0, run.imageMarginPt ?? 0));
+}
+
+/** Blanc entre l'image et sa légende, borné. */
+export function imageCaptionGapPt(run: Pick<TextRun, 'imageCaptionGapPt'>): number {
+  return Math.min(MAX_IMAGE_MARGIN_PT, Math.max(0, run.imageCaptionGapPt ?? DEFAULT_CAPTION_GAP_PT));
+}
+
+/** Préfixe engendré par la numérotation automatique. */
+export const FIGURE_LABEL = 'Figure';
+
+export function imageCaptionOf(run: Pick<TextRun, 'imageCaption' | 'imageCaptionPosition' | 'imageCaptionAlign' | 'imageCaptionManual'>): ImageCaption {
+  return {
+    text: run.imageCaption ?? '',
+    position: run.imageCaptionPosition ?? 'below',
+    align: run.imageCaptionAlign ?? 'center',
+    manual: run.imageCaptionManual === true,
+  };
+}
+
+/** Une image porte-t-elle une légende à peindre ? */
+export function hasCaption(run: Pick<TextRun, 'imageCaption' | 'imageCaptionManual'>): boolean {
+  // En mode automatique, « Figure n°3 » se justifie seul : une image numérotée
+  // sans texte reste légendée. En manuel, sans texte il n'y a rien à écrire.
+  if (run.imageCaptionManual === true) return (run.imageCaption ?? '').trim().length > 0;
+  return run.imageCaption !== undefined;
+}
+
+/**
+ * Texte complet d'une légende, numéro compris.
+ *
+ * `number` vaut `null` hors numérotation automatique. Le séparateur ne paraît
+ * que s'il y a quelque chose à séparer : « Figure n°2 » sans texte ne doit pas
+ * traîner un « : » orphelin.
+ */
+export function captionText(caption: ImageCaption, number: number | null): string {
+  if (caption.manual || number === null) return caption.text;
+  const prefix = `${FIGURE_LABEL} n°${number}`;
+  return caption.text.trim().length > 0 ? `${prefix} : ${caption.text}` : prefix;
+}
+
+/** Clé d'une image dans la table de numérotation : paragraphe et offset. */
+export function imageKey(blockId: string, offset: number): string {
+  return `${blockId}:${offset}`;
+}
+
 export function collectImageRuns(
   runs: readonly TextRun[],
 ): { run: TextRun; offset: number; index: number }[] {
@@ -340,4 +537,118 @@ export function collectImageRuns(
     offset += run.text.length;
   });
   return out;
+}
+
+/* --------------------------------------------- intégration au texte (habillage) */
+
+/**
+ * Les cinq façons dont une image s'intègre au texte.
+ *
+ * Writer n'a pas ce type : il conserve **trois** attributs indépendants —
+ * l'ancrage (`SwFmtAnchor`, `RndStdIds`), l'habillage (`SwFmtSurround`,
+ * `SwSurround`) et le calque (`RES_OPAQUE`, `SvxOpaqueItem`) — et le menu
+ * « Format ▸ Adaptation du texte » n'en montre que les combinaisons utiles.
+ *
+ * Ce type **est** cette liste de combinaisons utiles, nommée une fois pour
+ * toutes. Il ne remplace pas les trois attributs, il les indexe : le modèle
+ * continue de porter les items d'OpenOffice, et eux seuls voyagent en ODF.
+ * Sans ce détour, chaque bouton de l'interface devrait décider seul de trois
+ * valeurs à la fois, et « devant le texte » — qui est un habillage `through`
+ * **plus** un calque — finirait tôt ou tard écrit à moitié.
+ *
+ *  - `inline` — `FLY_AS_CHAR`, l'image coule dans la ligne comme un caractère ;
+ *  - `wrap` — `SURROUND_IDEAL`, le texte contourne du côté le plus large ;
+ *  - `break` — `SURROUND_NONE`, le texte s'arrête au-dessus et reprend dessous ;
+ *  - `behind` — `SURROUND_THROUGHT`, calque `hell` : le texte passe par-dessus ;
+ *  - `front` — `SURROUND_THROUGHT`, calque `heaven` : l'image couvre le texte.
+ */
+export type ImageWrapMode = 'inline' | 'wrap' | 'break' | 'behind' | 'front';
+
+/** Libellés du menu, dans l'ordre où ils y paraissent. */
+export const IMAGE_WRAP_MODES: readonly {
+  mode: ImageWrapMode;
+  label: string;
+  hint: string;
+}[] = [
+  { mode: 'inline', label: 'Aligner', hint: "L'image suit le texte, comme un caractère" },
+  { mode: 'wrap', label: 'Retour à la ligne', hint: 'Le texte contourne l’image' },
+  { mode: 'break', label: 'Intercaler le texte', hint: 'Le texte s’arrête au-dessus et reprend dessous' },
+  { mode: 'behind', label: 'Derrière le texte', hint: 'L’image passe sous le texte' },
+  { mode: 'front', label: 'Devant le texte', hint: 'L’image recouvre le texte' },
+];
+
+/** Mode d'intégration d'un cadre, déduit de ses trois attributs. */
+export function imageWrapMode(
+  run: Pick<TextRun, 'imageAnchor' | 'imageSurround' | 'imageInFront'>,
+): ImageWrapMode {
+  if (!run.imageAnchor || run.imageAnchor === 'as-char') return 'inline';
+  switch (run.imageSurround) {
+    case 'through':
+      return run.imageInFront ? 'front' : 'behind';
+    case 'none':
+      return 'break';
+    default:
+      return 'wrap';
+  }
+}
+
+/**
+ * Attributs de cadre correspondant à un mode, ancrage compris.
+ *
+ * `anchor` n'est consulté que pour les modes flottants, et il y sert à
+ * **conserver** un ancrage à la page déjà choisi : basculer de « derrière » à
+ * « devant » ne doit pas ramener au paragraphe un cadre posé sur la feuille.
+ *
+ * Les clés absentes valent effacement — `wrapFormatting('inline')` ne renvoie
+ * pas `imageAnchor: undefined` mais rien du tout, et c'est à l'appelant de
+ * retirer les clés existantes avant d'y répandre ce résultat. Même convention
+ * que `cropFormatting` et `captionFormatting` plus haut.
+ */
+export function wrapFormatting(
+  mode: ImageWrapMode,
+  anchor: FlyAnchor = 'to-para',
+): Partial<TextRun> {
+  if (mode === 'inline') return {};
+
+  const flottant: FlyAnchor = anchor === 'as-char' ? 'to-para' : anchor;
+  switch (mode) {
+    case 'break':
+      return { imageAnchor: flottant, imageSurround: 'none' };
+    case 'behind':
+      return { imageAnchor: flottant, imageSurround: 'through' };
+    case 'front':
+      return { imageAnchor: flottant, imageSurround: 'through', imageInFront: true };
+    case 'wrap':
+    default:
+      // `SURROUND_IDEAL` plutôt que `PARALLEL` : c'est ce que choisit Writer
+      // pour l'habillage courant, et il se ramène de lui-même à `left` ou
+      // `right` quand le cadre est trop près d'un bord pour qu'on y écrive.
+      return { imageAnchor: flottant, imageSurround: 'ideal' };
+  }
+}
+
+/** Les clés que `wrapFormatting` gouverne — à effacer avant de le répandre. */
+export const WRAP_FORMAT_KEYS = [
+  'imageAnchor',
+  'imageSurround',
+  'imageInFront',
+  'imageHoriOrient',
+  'imageHoriRelation',
+  'imageXPt',
+  'imageYPt',
+  'imageWrapMarginPt',
+] as const satisfies readonly (keyof RunFormatting)[];
+
+/** Position par défaut d'un cadre qui vient de quitter le fil du texte. */
+export function defaultFlyPlacement(mode: ImageWrapMode): Partial<TextRun> {
+  // Un cadre qui recouvre le texte se pose là où il est ; un cadre habillé se
+  // range contre un bord, faute de quoi il tomberait au coin haut-gauche du
+  // paragraphe et couperait la première ligne en deux.
+  const orient: FlyHoriOrient = mode === 'wrap' ? 'right' : 'left';
+  return {
+    imageHoriOrient: orient,
+    imageHoriRelation: 'text',
+    imageXPt: 0,
+    imageYPt: 0,
+  };
 }

@@ -56,7 +56,12 @@ export type IconName =
   | 'minus'
   | 'chevron-up'
   | 'chevron-down'
-  | 'replace';
+  | 'replace'
+  | 'wrap-inline'
+  | 'wrap-around'
+  | 'wrap-break'
+  | 'wrap-behind'
+  | 'wrap-front';
 
 const dot = (cx: number, cy: number): ReactNode => (
   <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.15" fill="currentColor" stroke="none" />
@@ -82,6 +87,22 @@ const listLines = (x = 10, length = 10): ReactNode => (
 const STROKE_OVERRIDES: Partial<Record<IconName, number>> = {
   bold: 2.6,
 };
+
+/**
+ * Icônes d'habillage : un pavé pour l'image, des filets pour le texte.
+ *
+ * Les cinq se lisent d'un coup d'œil parce qu'elles partagent le **même** pavé
+ * et ne diffèrent que par le tracé des filets — c'est le rapport entre les deux
+ * que l'usager compare, pas leur dessin.
+ */
+const wrapBox = (x: number, y: number, w: number, h: number): ReactNode => (
+  <rect x={x} y={y} width={w} height={h} rx="1.5" />
+);
+
+/** Un filet de texte, plein ou interrompu à l'endroit du pavé. */
+const wrapRule = (y: number, from = 3, to = 21): ReactNode => (
+  <path key={`${y}-${from}`} d={`M${from} ${y}h${to - from}`} />
+);
 
 const SHAPES: Record<IconName, ReactNode> = {
   undo: (
@@ -360,6 +381,55 @@ const SHAPES: Record<IconName, ReactNode> = {
   plus: (
     <>
       <path d="M12 5v14M5 12h14" />
+    </>
+  ),
+  /* Dans la ligne : le pavé et le texte partagent la même hauteur d'assise. */
+  'wrap-inline': (
+    <>
+      {wrapBox(3, 8.5, 7, 7)}
+      {wrapRule(10.5, 12)}
+      {wrapRule(14, 12)}
+    </>
+  ),
+  /* Habillage : le texte contourne le pavé, dessus, dessous et à côté. */
+  'wrap-around': (
+    <>
+      {wrapRule(5)}
+      {wrapBox(3, 8.5, 7, 7)}
+      {wrapRule(10.5, 12)}
+      {wrapRule(14, 12)}
+      {wrapRule(19)}
+    </>
+  ),
+  /* Intercalé : le texte s'arrête au-dessus et reprend dessous, jamais à côté. */
+  'wrap-break': (
+    <>
+      {wrapRule(4.5)}
+      {wrapRule(7.5)}
+      {wrapBox(5, 10, 14, 5)}
+      {wrapRule(17.5)}
+      {wrapRule(20.5)}
+    </>
+  ),
+  /* Derrière : les filets traversent le pavé sans être coupés. */
+  'wrap-behind': (
+    <>
+      {wrapBox(6, 6.5, 12, 11)}
+      {wrapRule(9)}
+      {wrapRule(12)}
+      {wrapRule(15)}
+    </>
+  ),
+  /* Devant : le pavé coupe les filets, qui reparaissent de part et d'autre. */
+  'wrap-front': (
+    <>
+      {wrapRule(9, 3, 6)}
+      {wrapRule(9, 18, 21)}
+      {wrapRule(12, 3, 6)}
+      {wrapRule(12, 18, 21)}
+      {wrapRule(15, 3, 6)}
+      {wrapRule(15, 18, 21)}
+      {wrapBox(6, 6.5, 12, 11)}
     </>
   ),
 };

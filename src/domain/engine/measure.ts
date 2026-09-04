@@ -221,9 +221,8 @@ function createCanvasContext(): CanvasRenderingContext2D | null {
  * Mesure analytique, sans Canvas.
  *
  * Table d'avances approchant une fonte à empattements. Elle sert aux tests et
- * au Web Worker : le moteur doit rester exécutable là où il n'y a pas de DOM,
- * exigence de la couche 2 du CLAUDE.md. Les largeurs sont exprimées en fraction
- * de cadratin, donc indépendantes du corps.
+ * au Web Worker : le moteur doit rester exécutable là où il n'y a pas de DOM.
+ * Les largeurs sont exprimées en fraction de cadratin, donc indépendantes du corps.
  */
 const EM_WIDTHS: Readonly<Record<string, number>> = {
   ' ': 0.25, '\u00a0': 0.25 /* insécable */, '\t': 1,

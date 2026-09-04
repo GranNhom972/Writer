@@ -29,6 +29,14 @@ export function pxToPt(px: number): number {
   return (px * PT_PER_INCH) / PX_PER_INCH;
 }
 
+export function mmToPt(mm: number): number {
+  return (mm * PT_PER_INCH) / MM_PER_INCH;
+}
+
+export function ptToMm(pt: number): number {
+  return (pt * MM_PER_INCH) / PT_PER_INCH;
+}
+
 export function twipsToPx(twips: number): number {
   return (twips * PX_PER_INCH) / TWIPS_PER_INCH;
 }

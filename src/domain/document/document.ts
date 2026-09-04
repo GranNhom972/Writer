@@ -9,6 +9,7 @@
  */
 
 import { A4_PORTRAIT } from './pageSetup';
+import { hasCaption, imageKey, isImageRun } from './images';
 import { makeRun, runsText } from './runs';
 import {
   isParagraph,
@@ -102,17 +103,42 @@ export interface ParagraphLocation {
   cell?: { rowIndex: number; cellIndex: number; innerIndex: number };
 }
 
+/** Résultat de `paragraphIndex` — mémoïsé par document. */
+export interface ParagraphIndex {
+  order: string[];
+  byId: Map<string, ParagraphLocation>;
+}
+
+/**
+ * Index mémoïsé, une entrée par version du document.
+ *
+ * Un `WeakMap` et non une `Map` : la clé est l'état du document lui-même, et
+ * chaque frappe en produit un nouveau. Une `Map` retiendrait indéfiniment tous
+ * les états traversés depuis l'ouverture — l'historique complet du document en
+ * mémoire. Le `WeakMap` laisse le ramasse-miettes reprendre chaque entrée dès
+ * que plus personne ne tient l'état correspondant ; en pratique il ne reste
+ * que l'état courant et ceux que la pile d'annulation retient encore.
+ */
+const indexParDocument = new WeakMap<WriterDocumentState, ParagraphIndex>();
+
 /**
  * Index plat de tous les paragraphes, dans l'ordre de lecture.
  *
  * Construit à la demande plutôt que maintenu : le document est immuable, donc
- * un index conservé serait périmé dès la première frappe. Le coût est linéaire
- * et n'est payé qu'une fois par transaction.
+ * un index conservé serait périmé dès la première frappe.
+ *
+ * Le résultat est en revanche **mémoïsé sur l'état du document**, et c'est
+ * l'immuabilité qui rend ce cache exact : tant que l'objet `doc` est le même,
+ * son index l'est aussi, sans invalidation à écrire. La correction compte —
+ * l'index est reconstruit depuis près de quatre-vingts sites d'appel, dont
+ * plusieurs sur le chemin de la frappe (`currentParagraph`, les statistiques,
+ * la plupart des commandes d'édition), où le coût linéaire était payé
+ * plusieurs fois par caractère saisi et non « une fois par transaction ».
  */
-export function paragraphIndex(doc: WriterDocumentState): {
-  order: string[];
-  byId: Map<string, ParagraphLocation>;
-} {
+export function paragraphIndex(doc: WriterDocumentState): ParagraphIndex {
+  const memoise = indexParDocument.get(doc);
+  if (memoise) return memoise;
+
   const order: string[] = [];
   const byId = new Map<string, ParagraphLocation>();
 
@@ -142,7 +168,76 @@ export function paragraphIndex(doc: WriterDocumentState): {
     });
   });
 
-  return { order, byId };
+  const index: ParagraphIndex = { order, byId };
+  indexParDocument.set(doc, index);
+  return index;
+}
+
+/**
+ * Numéro de figure de chaque image à numérotation automatique.
+ *
+ * Dérivé de l'**ordre de lecture** du document — cellules de tableau comprises,
+ * puisque `paragraphIndex` les y range — et recalculé à chaque appel. C'est ce
+ * qui rend la numérotation juste par construction : ajouter, supprimer ou
+ * déplacer une image change l'ordre, donc les numéros, sans qu'aucun code n'ait
+ * à renuméroter quoi que ce soit. Aucun doublon n'est possible, un compteur
+ * unique attribuant les valeurs.
+ *
+ * Les images en mode **manuel** ne consomment pas de numéro : elles sont hors
+ * séquence, comme un `SwSetExpField` que l'on aurait ôté de sa suite.
+ *
+ * La clé est `blockId:offset` — l'identité d'une image dans un document
+ * immuable, valable le temps d'un rendu, qui part du même état.
+ */
+const figuresParDocument = new WeakMap<WriterDocumentState, Map<string, number>>();
+
+/**
+ * Dernière table de numéros produite, tous documents confondus.
+ *
+ * Sert à **canoniser** : une frappe produit un nouvel état de document, donc
+ * une nouvelle table — de contenu identique dans l'immense majorité des cas,
+ * puisque les numéros de figure ne bougent qu'à l'insertion ou au retrait d'une
+ * image légendée. Rendre l'ancienne table quand la nouvelle lui est égale rend
+ * son identité stable, et avec elle celle du contexte d'images transmis aux
+ * paragraphes — sans quoi chaque frappe ferait échouer leur mémoïsation.
+ */
+let dernieresFigures: Map<string, number> | null = null;
+
+function memesFigures(a: Map<string, number>, b: Map<string, number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [cle, valeur] of a) {
+    if (b.get(cle) !== valeur) return false;
+  }
+  return true;
+}
+
+export function figureNumbering(doc: WriterDocumentState): Map<string, number> {
+  const memoise = figuresParDocument.get(doc);
+  if (memoise) return memoise;
+
+  const numbers = new Map<string, number>();
+  let counter = 0;
+
+  const { order, byId } = paragraphIndex(doc);
+  for (const id of order) {
+    const paragraph = byId.get(id)?.paragraph;
+    if (!paragraph) continue;
+
+    let offset = 0;
+    for (const run of paragraph.runs) {
+      if (isImageRun(run) && hasCaption(run) && run.imageCaptionManual !== true) {
+        counter += 1;
+        numbers.set(imageKey(id, offset), counter);
+      }
+      offset += run.text.length;
+    }
+  }
+
+  const canonique =
+    dernieresFigures && memesFigures(dernieresFigures, numbers) ? dernieresFigures : numbers;
+  dernieresFigures = canonique;
+  figuresParDocument.set(doc, canonique);
+  return canonique;
 }
 
 export function findParagraph(
@@ -353,11 +448,15 @@ export function insertTableRow(
     const targetRow = block.rows[rowIndex] ?? block.rows[0];
     if (!targetRow) return block;
 
-    const colCount = Math.max(1, targetRow.cells.length);
-    const newCells: TableCellNode[] = targetRow.cells.map((cell) => ({
+    // Les largeurs viennent de la **grille**, pas de la ligne modèle : celle-ci
+    // peut porter une fusion, auquel cas ses `widthPercent` valent deux colonnes
+    // pour l'une et rien pour l'autre. La nouvelle ligne, elle, est simple, et
+    // ses bords doivent tomber sur ceux des lignes voisines.
+    const columns = tableColumnWidths(block);
+    const newCells: TableCellNode[] = targetRow.cells.map((cell, index) => ({
       id: newId('tc'),
       blocks: [createParagraph('')],
-      widthPercent: cell.widthPercent ?? 100 / colCount,
+      widthPercent: columns[index] ?? 100 / Math.max(1, targetRow.cells.length),
       ...(cell.paddingPt !== undefined ? { paddingPt: cell.paddingPt } : {}),
       ...(cell.borderColor !== undefined ? { borderColor: cell.borderColor } : {}),
     }));
@@ -424,21 +523,29 @@ export function insertTableColumn(
 
     const oldCols = Math.max(1, block.rows[0]?.cells.length ?? 1);
     const newCols = oldCols + 1;
-    const newWidthPercent = 100 / newCols;
+
+    // La nouvelle colonne prend la part d'une colonne moyenne, et les
+    // anciennes se resserrent **proportionnellement** pour lui faire place.
+    // Les réinitialiser toutes à `100 / newCols` effacerait les largeurs du
+    // document importé comme celles réglées à la souris : ajouter une colonne
+    // ne doit pas être une remise à plat de la grille.
+    const share = 100 / newCols;
+    const shrink = (100 - share) / 100;
 
     const rows = block.rows.map((row) => {
       const insertAt = position === 'left' ? Math.max(0, colIndex) : colIndex + 1;
+      const fallback = 100 / Math.max(1, row.cells.length);
       const newCell: TableCellNode = {
         id: newId('tc'),
         blocks: [createParagraph('')],
-        widthPercent: newWidthPercent,
+        widthPercent: share,
       };
-      const cells = [...row.cells];
+      const cells: TableCellNode[] = row.cells.map((c) => ({
+        ...c,
+        widthPercent: (c.widthPercent ?? fallback) * shrink,
+      }));
       cells.splice(insertAt, 0, newCell);
-      return {
-        ...row,
-        cells: cells.map((c) => ({ ...c, widthPercent: newWidthPercent })),
-      };
+      return { ...row, cells };
     });
 
     return { ...block, rows };
@@ -470,14 +577,17 @@ export function deleteTableColumn(
       continue;
     }
 
-    const newCols = firstRow.cells.length - 1;
-    const newWidthPercent = 100 / newCols;
-
     const rows = block.rows.map((row) => {
+      const fallback = 100 / Math.max(1, row.cells.length);
       const cells = row.cells.filter((_, idx) => idx !== colIndex);
+      // La largeur libérée se redistribue **au prorata** sur les colonnes qui
+      // restent, plutôt que de les égaliser : supprimer une colonne étroite ne
+      // doit pas défaire la mise en page des autres.
+      const total = cells.reduce((sum, c) => sum + (c.widthPercent ?? fallback), 0);
+      const scale = total > 0 ? 100 / total : 1;
       return {
         ...row,
-        cells: cells.map((c) => ({ ...c, widthPercent: newWidthPercent })),
+        cells: cells.map((c) => ({ ...c, widthPercent: (c.widthPercent ?? fallback) * scale })),
       };
     });
 
@@ -537,6 +647,87 @@ export function tableColumnCount(table: TableNode): number {
 }
 
 /**
+ * Largeur de chaque **colonne de grille**, en pourcentage, normalisée à 100.
+ *
+ * Une largeur est portée par les cellules, mais appartient à la colonne : dans
+ * Writer, c'est `SwTable::GetTabCols` qui fait foi, pas la boîte individuelle.
+ * Les cellules fusionnées n'en disent rien d'utile — une maîtresse de `colSpan`
+ * 2 mesure deux colonnes, une recouverte n'en mesure aucune — donc seules les
+ * cellules simples renseignent leur colonne, et le reste retombe sur la part
+ * égale. La normalisation finale garantit l'invariant dont dépend le rendu :
+ * la somme des colonnes fait la largeur du tableau, jamais 97 % ni 103 %.
+ */
+export function tableColumnWidths(table: TableNode): number[] {
+  const count = Math.max(1, tableColumnCount(table));
+  const even = 100 / count;
+  const widths = new Array<number>(count).fill(NaN);
+
+  for (const row of table.rows) {
+    row.cells.forEach((cell, index) => {
+      if (index >= count) return;
+      // Une maîtresse de fusion mesure plusieurs colonnes : sa largeur ne dit
+      // rien de la sienne propre. Une cellule **recouverte**, en revanche, a
+      // conservé celle de sa colonne au moment de la fusion — c'est par elle
+      // que les largeurs survivent à un `MergeTbl`, et donc que la scission
+      // peut les rendre.
+      if ((cell.colSpan ?? 1) > 1) return;
+      if (cell.widthPercent === undefined) return;
+      if (!Number.isNaN(widths[index]!)) return;
+      widths[index] = cell.widthPercent;
+    });
+  }
+
+  const resolved = widths.map((w) => (Number.isNaN(w) || w <= 0 ? even : w));
+  const total = resolved.reduce((sum, w) => sum + w, 0);
+  return total > 0 ? resolved.map((w) => (w * 100) / total) : resolved;
+}
+
+/**
+ * Réécrit les largeurs de colonne d'un tableau (`SwTable::SetTabCols`).
+ *
+ * Une cellule fusionnée reçoit la **somme** des colonnes qu'elle couvre : c'est
+ * ce qui maintient l'alignement de ses bords avec ceux des lignes voisines
+ * quand l'utilisateur tire une poignée.
+ */
+export function setTableColumnWidths(
+  doc: WriterDocumentState,
+  tableId: string,
+  widths: number[],
+): WriterDocumentState {
+  const blocks = doc.blocks.map((block): DocumentBlock => {
+    if (!isTable(block) || block.id !== tableId) return block;
+
+    const total = widths.reduce((sum, w) => sum + w, 0);
+    if (total <= 0) return block;
+    const normalized = widths.map((w) => (Math.max(0, w) * 100) / total);
+
+    const rows = block.rows.map((row) => ({
+      ...row,
+      cells: row.cells.map((cell, index) => {
+        const span = Math.max(1, cell.colSpan ?? 1);
+        let width = 0;
+        for (let i = index; i < index + span; i += 1) width += normalized[i] ?? 0;
+        return { ...cell, widthPercent: width };
+      }),
+    }));
+
+    return { ...block, rows };
+  });
+
+  return touch({ ...doc, blocks });
+}
+
+/** Supprime un tableau entier, et le remplace par un paragraphe s'il était seul. */
+export function deleteTable(doc: WriterDocumentState, tableId: string): WriterDocumentState {
+  const blocks = doc.blocks.filter((block) => !(isTable(block) && block.id === tableId));
+  if (blocks.length === doc.blocks.length) return doc;
+  // Un document sans aucun nœud de texte n'a nulle part où poser un curseur :
+  // `SwDoc` garde toujours au moins un `SwTxtNode`, on fait de même.
+  if (!blocks.some((block) => !isTable(block))) blocks.push(createParagraph(''));
+  return touch({ ...doc, blocks });
+}
+
+/**
  * Index dans `row.cells` de la cellule occupant une colonne de grille donnée.
  *
  * Identité, par l'invariant de `gridColumnsOf` — la fonction nomme l'intention
@@ -586,6 +777,20 @@ export function mergeTableCells(
     const masterIndex = cellIndexAtColumn(masterRow, fromCol);
     if (masterIndex < 0) return block;
 
+    /*
+     * Largeur de la cellule maîtresse : la **somme** des colonnes absorbées.
+     *
+     * `colSpan` ne suffit pas. Le moteur lit `widthPercent` en priorité
+     * (`measureRow`), et la maîtresse gardait la sienne : une fusion de trois
+     * colonnes produisait un cadre large d'une seule, et la zone libérée
+     * restait béante à sa droite. C'est aussi la convention qu'applique
+     * `setTableColumnWidths` quand on tire une poignée — les deux chemins
+     * doivent écrire la même chose.
+     */
+    const columns = tableColumnWidths(block);
+    let mergedWidth = 0;
+    for (let c = fromCol; c <= toCol; c += 1) mergedWidth += columns[c] ?? 0;
+
     // Contenu absorbé, dans l'ordre de lecture : ligne par ligne, colonne par
     // colonne. Les paragraphes vides sont écartés — une fusion de six cellules
     // vides ne doit pas produire six lignes blanches.
@@ -619,6 +824,7 @@ export function mergeTableCells(
             ...cell,
             colSpan: toCol - fromCol + 1,
             rowSpan: lastRow - fromRow + 1,
+            widthPercent: mergedWidth,
             blocks: [...cell.blocks, ...absorbed],
           };
           delete merged.covered;
@@ -686,21 +892,41 @@ export function splitTableCell(
       const endColumn = startColumn + colSpan - 1;
       const lastRow = Math.min(rowIndex + rowSpan - 1, block.rows.length - 1);
 
+      /*
+       * Rendre à la maîtresse la largeur de **sa** colonne, et non celle de
+       * toutes celles qu'elle couvrait.
+       *
+       * La fusion lui donne la somme des colonnes absorbées ; sans cette
+       * restitution, elle gardait ce total après scission. Redevenue simple aux
+       * yeux de `tableColumnWidths`, elle imposait alors sa largeur à sa seule
+       * colonne, et la normalisation écrasait toutes les autres : scinder une
+       * cellule fusionnée sur trois colonnes faisait passer une grille
+       * régulière à 60 / 20 / 20. Une opération locale ne doit pas redessiner
+       * le tableau entier.
+       */
+      const columns = tableColumnWidths(block);
+
       const rows = block.rows.map((current, r) => {
         if (r < rowIndex || r > lastRow) return current;
         const starts = gridColumnsOf(current);
         const cells = current.cells.map((candidate, index) => {
+          const start = starts[index] ?? 0;
+
           if (r === rowIndex && index === cellIndex) {
             const restored: TableCellNode = { ...candidate };
             delete restored.colSpan;
             delete restored.rowSpan;
+            const own = columns[start];
+            if (own !== undefined) restored.widthPercent = own;
             return restored;
           }
-          const start = starts[index] ?? 0;
+
           if (start < startColumn || start > endColumn) return candidate;
           if (!candidate.covered) return candidate;
           const freed: TableCellNode = { ...candidate };
           delete freed.covered;
+          const own = columns[start];
+          if (own !== undefined) freed.widthPercent = own;
           return freed;
         });
         return { ...current, cells };

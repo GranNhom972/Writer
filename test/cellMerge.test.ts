@@ -268,7 +268,84 @@ describe('Mise en page des cellules fusionnées', () => {
 
     const cells = placed.rows[0]!.cells;
     const largeurSimple = cells[2]!.widthPx;
-    expect(cells[0]!.widthPx).toBeCloseTo(largeurSimple * 2, 3);
+
+    /*
+     * La fusion cumule bien deux colonnes, mais l'égalité n'est pas flottante :
+     * les frontières de colonnes sont des cumuls **arrondis** au pixel
+     * (`columnBoundariesPx`), si bien que deux colonnes nominalement égales
+     * peuvent différer d'un pixel. Exiger `2 × largeurSimple` au millième
+     * reviendrait à exiger le contraire de ce que l'arrondi garantit.
+     *
+     * Ce qui doit tenir exactement, c'est la **fermeture de la grille** : le
+     * bord droit de la fusion tombe sur le bord gauche de la cellule suivante,
+     * sans trou ni recouvrement.
+     */
+    expect(cells[0]!.leftPx + cells[0]!.widthPx).toBe(cells[2]!.leftPx);
+    expect(cells[0]!.widthPx).toBeGreaterThanOrEqual(largeurSimple * 2 - 2);
+    expect(cells[0]!.widthPx).toBeLessThanOrEqual(largeurSimple * 2 + 2);
+  });
+
+  it('aligne correctement les cellules après fusion puis scission sans trou ni débordement', () => {
+    let table = createTable(3, 3);
+    table.rows.forEach((ligne, r) =>
+      ligne.cells.forEach((cellule, c) => {
+        cellule.blocks = [createParagraph(`L${r + 1}C${c + 1}`)];
+      }),
+    );
+
+    let doc = mergeTableCells(docOf([table]), table.id, {
+      fromRow: 0,
+      toRow: 0,
+      fromCol: 0,
+      toCol: 1,
+    });
+    doc = splitTableCell(doc, table.id, 2, 2, 'horizontal', 2);
+
+    const layout = paginateDocument(doc, { measurer: new MetricTextMeasurer() });
+    const placed = layout.pages[0]?.blocks.find((b) => b.kind === 'table');
+    if (placed?.kind !== 'table') throw new Error('tableau non posé');
+
+    /*
+     * La grille ferme sur le cumul **arrondi** de la largeur de contenu, et non
+     * sur sa valeur flottante : `columnBoundariesPx` arrondit chaque borne
+     * cumulée, la dernière comprise. L'écart avec le bord du texte est donc
+     * borné par un demi-pixel — et surtout il ne s'accumule pas d'une colonne
+     * à l'autre, ce qui était le défaut visé.
+     */
+    const totalWidth = Math.round(layout.geometry.contentWidthPx);
+    for (const row of placed.rows) {
+      for (const cell of row.cells) {
+        if (cell.covered) continue;
+        expect(cell.leftPx + cell.widthPx).toBeLessThanOrEqual(totalWidth);
+        // Bornes entières : c'est ce qui rend les traits nets à tout zoom.
+        expect(Number.isInteger(cell.leftPx)).toBe(true);
+        expect(Number.isInteger(cell.widthPx)).toBe(true);
+      }
+
+      // Aucune couture : chaque cellule visible touche exactement la suivante,
+      // et la dernière ferme sur le bord de la zone de texte.
+      const visibles = row.cells.filter((cell) => !cell.covered);
+      visibles.forEach((cell, i) => {
+        const suivante = visibles[i + 1];
+        expect(cell.leftPx + cell.widthPx).toBe(suivante ? suivante.leftPx : totalWidth);
+      });
+    }
+
+    /*
+     * Ligne 0 : la fusion L1C1+L1C2 et la cellule L1C3 se joignent.
+     *
+     * Chaque borne est à moins d'un demi-pixel de sa position idéale — c'est
+     * exactement la garantie d'un cumul arrondi, et c'est tout ce qu'un arrondi
+     * au pixel peut promettre. Le contrôle porte donc sur cette borne d'erreur,
+     * et non sur une égalité décimale que l'arrondi rend inatteignable ; la
+     * jointure exacte, elle, est déjà vérifiée plus haut.
+     */
+    const DEMI_PIXEL = 0.5;
+    const row0 = placed.rows[0]!;
+    expect(row0.cells[0]?.leftPx).toBe(0);
+    expect(Math.abs(row0.cells[0]!.widthPx - totalWidth * (2 / 3))).toBeLessThanOrEqual(DEMI_PIXEL);
+    expect(Math.abs(row0.cells[2]!.leftPx - totalWidth * (2 / 3))).toBeLessThanOrEqual(DEMI_PIXEL);
+    expect(Math.abs(row0.cells[2]!.widthPx - totalWidth * (1 / 3))).toBeLessThanOrEqual(DEMI_PIXEL);
   });
 
   it('survit à l\'insertion d\'une colonne après fusion', () => {

@@ -8,7 +8,9 @@
  */
 
 import { isParagraph, type WriterDocumentState } from '../document/types';
-import type { DocumentLayout, PlacedParagraph, PlacedTable } from '../engine/paginate';
+import { MM_PER_INCH, PT_PER_INCH, PX_PER_INCH } from '../document/units';
+import type { DocumentLayout, LaidOutFly, PlacedParagraph, PlacedTable } from '../engine/paginate';
+import { cellFrameHeightPx } from '../engine/paginate';
 import type { LayoutSegment } from '../engine/lineBreak';
 import { hasCrop, imageCrop, visibleFraction } from '../document/images';
 import {
@@ -19,9 +21,15 @@ import {
   blocksOf,
 } from '../document/pageFurniture';
 
-/** Ratio standard de conversion des pixels CSS (96 DPI) vers les points PDF (72 DPI). */
-const PX_TO_PT = 72 / 96; // 0.75
-const MM_TO_PT = 72 / 25.4; // ~2.83464567
+/**
+ * Ratios de conversion vers le point PDF (72 DPI).
+ *
+ * Dérivés du socle d'unités et non réécrits : l'export et l'écran doivent
+ * partager exactement les mêmes définitions, faute de quoi une géométrie juste
+ * à l'affichage peut dériver sur le papier.
+ */
+const PX_TO_PT = PT_PER_INCH / PX_PER_INCH; // 0.75
+const MM_TO_PT = PT_PER_INCH / MM_PER_INCH; // ~2.83464567
 
 /** Table de correspondance des polices vers les 14 polices PDF de base (Base 14). */
 type PdfFontKey =
@@ -341,16 +349,18 @@ export interface PdfExportOptions {
 function paintImage(
   pdf: PdfDocumentBuilder,
   images: PdfExportOptions['images'],
-  seg: LayoutSegment,
+  seg: Pick<LayoutSegment, 'formatting'>,
   xPt: number,
   baselineYPt: number,
+  /** Taille imposée, pour un cadre flottant dont la boîte comprend la légende. */
+  taille?: { widthPt: number; heightPt: number },
 ): string {
   const src = seg.formatting.imageSrc;
   if (!src) return '';
 
   const raster = images?.get(src);
-  const widthPt = (seg.formatting.imageWidthPt ?? 0);
-  const heightPt = (seg.formatting.imageHeightPt ?? 0);
+  const widthPt = taille?.widthPt ?? (seg.formatting.imageWidthPt ?? 0);
+  const heightPt = taille?.heightPt ?? (seg.formatting.imageHeightPt ?? 0);
   if (widthPt <= 0 || heightPt <= 0) return '';
 
   if (!raster) {
@@ -389,6 +399,45 @@ function paintImage(
 
   out += `/I${id} Do\nQ\n`;
   return out;
+}
+
+/**
+ * Peint un cadre flottant à sa place sur la feuille.
+ *
+ * `paginate` a déjà résolu la géométrie — alignement, ancre, marges — et
+ * `LaidOutFly` la porte en pixels depuis le coin haut-gauche de la **zone de
+ * contenu**. Il ne reste qu'à passer au repère du PDF, dont l'origine est en
+ * bas à gauche de la feuille : d'où le renversement de l'ordonnée.
+ *
+ * La **légende** n'est pas peinte. Sa hauteur est comprise dans celle du cadre,
+ * et c'est elle qu'on retranche ici pour retrouver la boîte de l'image seule :
+ * la dessiner sans retrancher étirerait l'image sur la place de son texte.
+ */
+function paintFly(
+  pdf: PdfDocumentBuilder,
+  images: PdfExportOptions['images'],
+  laid: LaidOutFly,
+  contentLeftPt: number,
+  contentTopPt: number,
+  pageHeightPt: number,
+): string {
+  const widthPt = laid.widthPx * PX_TO_PT;
+  const imageHeightPt = (laid.heightPx - (laid.fly.captionHeightPx ?? 0)) * PX_TO_PT;
+  if (widthPt <= 0 || imageHeightPt <= 0) return '';
+
+  const leftPt = contentLeftPt + laid.leftPx * PX_TO_PT;
+  const topPt = contentTopPt + laid.topPx * PX_TO_PT;
+  // Une légende posée **au-dessus** décale l'image d'autant vers le bas.
+  const decalagePt =
+    laid.fly.run.imageCaptionPosition === 'above'
+      ? (laid.fly.captionHeightPx ?? 0) * PX_TO_PT
+      : 0;
+  const basPt = pageHeightPt - topPt - decalagePt - imageHeightPt;
+
+  return paintImage(pdf, images, { formatting: laid.fly.run }, leftPt, basPt, {
+    widthPt,
+    heightPt: imageHeightPt,
+  });
 }
 
 /**
@@ -594,6 +643,20 @@ export function exportToPdfBytes(
       }
     }
 
+    /*
+     * B0. Cadres flottants du calque `hell` (`SwFlyFreeFrm`).
+     *
+     * Peints **avant** le texte, comme à l'écran : c'est l'ordre de
+     * `SwRootFrm::Paint`, et c'est lui qui fait qu'une image « derrière le
+     * texte » l'est aussi sur le papier. Les omettre, comme on le faisait,
+     * revenait à ce qu'une image habillée disparaisse à l'export : le PDF ne
+     * montrait plus que le trou qu'elle avait creusé dans le texte.
+     */
+    for (const laid of page.flies ?? []) {
+      if (laid.fly.run.imageInFront) continue;
+      stream += paintFly(pdf, options?.images, laid, contentLeftPt, contentTopPt, pageHeightPt);
+    }
+
     // B. Rendu des blocs placés sur la page
     for (const block of page.blocks) {
       if (block.kind === 'paragraph') {
@@ -682,12 +745,15 @@ export function exportToPdfBytes(
         const [br, bg, bb] = parseColorToRgb(borderColor);
 
         // Tracé des cellules du tableau
-        for (const row of tableBlock.rows) {
+        for (const [rowPos, row] of tableBlock.rows.entries()) {
           for (const cell of row.cells) {
+            if (cell.covered || cell.widthPx <= 0) continue;
             const cellLeftPt = contentLeftPt + cell.leftPx * PX_TO_PT;
             const cellTopPt = contentTopPt + (tableBlock.topPx + row.topPx) * PX_TO_PT;
             const cellWidthPt = cell.widthPx * PX_TO_PT;
-            const cellHeightPt = row.heightPx * PX_TO_PT;
+            // Même fonction que l'écran : une fusion verticale doit produire le
+            // même cadre sur le papier et à l'affichage.
+            const cellHeightPt = cellFrameHeightPx(tableBlock.rows, rowPos, cell) * PX_TO_PT;
             const cellBottomPt = pageHeightPt - cellTopPt - cellHeightPt;
 
             // Fond de cellule (si ligne d'en-tête ou couleur spécifique)
@@ -745,6 +811,18 @@ export function exportToPdfBytes(
           }
         }
       }
+    }
+
+    /*
+     * D. Calque `heaven` : les cadres « devant le texte » (`RES_OPAQUE`).
+     *
+     * Peints en dernier, donc par-dessus tout. C'est la seule chose qui les
+     * distingue du calque `hell` — même habillage `through`, même géométrie,
+     * deux moments de peinture.
+     */
+    for (const laid of page.flies ?? []) {
+      if (!laid.fly.run.imageInFront) continue;
+      stream += paintFly(pdf, options?.images, laid, contentLeftPt, contentTopPt, pageHeightPt);
     }
 
     // Définition de l'objet contenu de la page

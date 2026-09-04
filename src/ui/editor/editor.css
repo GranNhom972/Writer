@@ -1,38 +1,14 @@
-/* Jetons repris de `01_DIRECTIVE_UX_ERGONOMIE.md` §2, pour rester cohérent
-   avec l'application Write existante. */
-:root {
-  --bg-canvas: #f1f2f4;
-  --bg-app: #ffffff;
-  --bg-sunken: #f7f8f9;
-  --bg-page: #ffffff;
-
-  --fg-primary: #16191d;
-  --fg-secondary: #545b64;
-  --fg-disabled: #9aa1ab;
-
-  --border-subtle: #e3e5e8;
-  --border-strong: #c4c8ce;
-
-  --accent: #1a56db;
-  --accent-subtle: #e8effc;
-  --focus-ring: #0b5cd5;
-
-  --selection: rgba(26, 86, 219, 0.22);
-
-  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
-
-  --text-sm: 12px;
-  --text-md: 13px;
-
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-
-  --radius: 6px;
-  --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.08);
-}
+/*
+ * Aucun jeton n'est défini ici : `design/tokens.css` en est la source unique.
+ *
+ * Ce fichier redéclarait autrefois un `:root` concurrent — mêmes noms, valeurs
+ * différentes (`--space-1` valait 4 px contre 2 px). Rien ne se voyait, parce
+ * que l'ordre d'injection donnait le dernier mot à `tokens.css` ; mais cet
+ * ordre n'est garanti par rien, et le jour où il s'inversait, c'est l'échelle
+ * d'espacement de toute l'application qui doublait — et le thème sombre qui
+ * repassait en clair, les surcharges sombres de `tokens.css` étant écrasées par
+ * un `:root` clair postérieur.
+ */
 
 * {
   box-sizing: border-box;
@@ -154,6 +130,49 @@ body {
   overflow: auto;
   /* Le curseur en I sur toute la surface : le document est cliquable partout. */
   cursor: text;
+  /*
+   * Rangée : la pile de pages et la gouttière de commentaires sont deux frères
+   * **côte à côte**. Sans `display: flex`, la gouttière — qui se dit pourtant
+   * `flex-shrink: 0; align-self: flex-start` — redevenait un bloc et tombait
+   * *sous* la dernière page. Comme sa boîte est plate et ses bulles posées en
+   * absolu, elle ajoutait la hauteur du document en défilement vide sous la
+   * pile : 14 000 px de blanc pour deux commentaires.
+   */
+  display: flex;
+  align-items: flex-start;
+}
+
+/*
+ * Cadre du zoom.
+ *
+ * `transform: scale()` est une opération de peinture : la boîte de mise en page
+ * garde sa taille d'origine. Mettre la pile à l'échelle directement laissait
+ * donc la surface calculer son défilement sur la pile à 100 % — du vide sous la
+ * dernière page en dessous de 100 %, et au-dessus des pages qui débordaient à
+ * gauche, là où aucun défilement ne va jamais.
+ *
+ * Ce cadre porte la taille mise à l'échelle, en pixels ; son enfant porte la
+ * transformation. Les deux coïncident exactement, à tout facteur de zoom.
+ *
+ * `margin: 0 auto` et non `justify-content: center` sur la surface : les marges
+ * automatiques tombent à zéro quand il n'y a plus d'espace libre, ce qui pousse
+ * le contenu trop large contre le bord *gauche* et rend tout son débordement
+ * atteignable à droite. Un centrage par `justify-content` l'aurait débordé des
+ * deux côtés, dont un inatteignable.
+ */
+.writer-zoom {
+  position: relative;
+  flex: none;
+  margin: 0 auto;
+}
+
+.writer-zoom__contenu {
+  display: flex;
+  align-items: flex-start;
+  /* Origine en haut à gauche : c'est ce qui fait que la boîte transformée
+     recouvre exactement le cadre, dont la taille est le produit direct de la
+     taille d'origine par le zoom. */
+  transform-origin: top left;
 }
 
 .writer-pages {
@@ -161,21 +180,22 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* La colonne fait la largeur d'une feuille : c'est cette marge automatique
-     qui la centre dans la surface, `align-items` ne centrant que son contenu.
-     L'écart entre feuilles est posé en style en ligne (cf. PAGE_GAP_PX) : la
-     position de la zone de saisie en dépend, une seconde valeur ici finirait
-     par diverger. */
-  margin: 0 auto;
-  /* Origine des transformations de zoom en haut, pour que la première page
-     reste visible quel que soit le facteur. */
-  transform-origin: top center;
+  /* La colonne fait la largeur d'une feuille. Son centrage appartient au cadre
+     de zoom, qui seul connaît la largeur réelle du contenu — gouttière de
+     commentaires comprise. L'écart entre feuilles est posé en style en ligne
+     (cf. PAGE_GAP_PX) : la position de la zone de saisie en dépend, une seconde
+     valeur ici finirait par diverger. */
+  flex: none;
 }
 
 .writer-page {
   position: relative;
   flex: none;
-  background: var(--bg-page);
+  background: var(--paper-bg);
+  /* Couleur de base du texte du document. Sans elle, un run sans couleur
+     propre hérite de `--fg-primary`, qui passe au blanc en thème sombre : le
+     texte disparaissait sur le papier resté blanc. */
+  color: var(--paper-fg);
   box-shadow: var(--shadow-page);
 }
 
@@ -232,14 +252,165 @@ body {
 }
 
 .writer-image:hover {
-  outline: 2px solid var(--accent, #2563eb);
+  outline: 2px solid var(--accent);
+}
+
+.writer-image--selected {
+  outline: 2px solid var(--accent);
+}
+
+/* -- Légende de figure ------------------------------------------------------
+ *
+ * La hauteur vient du moteur (`captionHeightPx`) et est posée en style en
+ * ligne : aucune marge ni interligne ici, qui la ferait diverger de la place
+ * réservée dans la ligne et pousserait le texte suivant.
+ */
+.writer-image__caption {
+  display: block;
+  flex: none;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  color: var(--paper-secondary);
+  /* La légende n'est pas du texte éditable : le clic y sélectionne l'image. */
+  pointer-events: none;
+  user-select: none;
+}
+
+/* -- Poignées de redimensionnement ----------------------------------------- */
+
+.writer-image__handle {
+  position: absolute;
+  z-index: 3;
+  background: var(--bg-app);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.writer-image__handle:hover {
+  background: var(--accent);
+}
+
+body.writer-resizing-image,
+body.writer-resizing-image * {
+  user-select: none !important;
+}
+
+/* -- Barre d'actions de l'image sélectionnée ------------------------------- */
+
+.writer-image__bar {
+  position: absolute;
+  left: 0;
+  z-index: 4;
+  display: inline-flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  /*
+   * Interligne repris en main.
+   *
+   * La barre vit dans une ligne de texte dont l'interligne vaut la hauteur de
+   * l'image — près de cent pixels. Sans cette remise à plat, le `font: inherit`
+   * du bouton héritait de cette valeur et la barre s'étirait à la hauteur de
+   * l'image : un rectangle vide de 145 × 119 px pour un seul bouton.
+   */
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: normal;
+  white-space: nowrap;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elevation-popover);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.writer-image__action {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  /* Idem : jamais l'interligne du document, qui est celui de l'image. */
+  line-height: normal;
+  color: var(--fg-primary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.writer-image__action:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.writer-image__action--primary {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.writer-image__action--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* -- Rognage dans l'éditeur ------------------------------------------------ */
+
+/* La zone conservée reste claire ; le reste s'assombrit par une ombre portée
+   démesurée, ce qui évite de poser quatre voiles à ajuster séparément. */
+.writer-image__crop-keep {
+  position: absolute;
+  z-index: 2;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.writer-image__crop-edge {
+  position: absolute;
+  z-index: 3;
+  background: var(--accent);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.writer-image__crop-edge--top,
+.writer-image__crop-edge--bottom {
+  left: 0;
+  right: 0;
+  height: 7px;
+  margin-top: -3px;
+  cursor: ns-resize;
+}
+
+.writer-image__crop-edge--bottom {
+  margin-top: 0;
+  margin-bottom: -3px;
+}
+
+.writer-image__crop-edge--left,
+.writer-image__crop-edge--right {
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  margin-left: -3px;
+  cursor: ew-resize;
+}
+
+.writer-image__crop-edge--right {
+  margin-left: 0;
+  margin-right: -3px;
 }
 
 .writer-image img {
   /* Une image cassée ne doit pas afficher l'icône du navigateur par-dessus la
      page : le cadre reste vide, à la taille que la pagination a réservée. */
   color: transparent;
-  background: var(--bg-sunken, #f4f4f5);
+  background: var(--paper-sunken);
 }
 
 @media print {
@@ -343,7 +514,7 @@ body {
 }
 
 .katex-fallback {
-  color: var(--fg-primary);
+  color: var(--paper-fg);
 }
 
 .katex-error {
@@ -353,7 +524,8 @@ body {
 .writer-caret {
   position: absolute;
   width: 2px;
-  background: var(--fg-primary);
+  /* Le curseur vit sur le papier : il en suit le contraste, pas celui du thème. */
+  background: var(--paper-fg);
   pointer-events: none;
   animation: writer-blink 1.06s step-end infinite;
 }
@@ -430,7 +602,123 @@ body {
 
 .writer-table-cell {
   position: absolute;
+  /* Cadre purement décoratif (`aria-hidden`) : le clic doit le traverser pour
+     atteindre la page, qui seule sait convertir un point en position. */
+  pointer-events: none;
+  border: 1px solid var(--paper-border);
+}
+
+/*
+ * Habillage interactif d'un tableau.
+ *
+ * Le conteneur ne capte rien : il n'existe que pour poser un repère de
+ * positionnement. Ce sont les poignées qui rendent le pointeur, une par une,
+ * pour qu'une sélection de texte glissée en travers du tableau les traverse
+ * sans accrocher.
+ */
+.writer-table-chrome {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Cellule portant le curseur : un liseré, pas un fond — voir TableOverlay. */
+.writer-table-cell-active {
+  position: absolute;
+  pointer-events: none;
+  /*
+   * Mêmes `left`/`top`/`width`/`height` que `.writer-table-cell`, et le même
+   * `border-box` : les deux bordures d'un pixel se superposent exactement. Tout
+   * décalage — marge négative, rayon, `outline-offset` — ferait déborder le
+   * liseré sur la cellule voisine d'un pixel, et la grille semblerait bouger au
+   * gré du curseur.
+   */
+  border: 1px solid var(--accent);
+}
+
+/* Cellules d'une sélection de bande ou de rectangle. */
+.writer-table-cell-selected {
+  position: absolute;
+  pointer-events: none;
+  background: var(--selection);
+}
+
+/* -- Poignée de largeur de colonne ----------------------------------------- */
+
+.writer-table-resize {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: col-resize;
+  /* Zone de saisie large de 8 px pour un trait d'un seul : la cible de Fitts
+     doit être atteignable, le repère visuel doit rester fin. */
+  touch-action: none;
+}
+
+.writer-table-resize__line {
+  width: 2px;
+  height: 100%;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.writer-table-resize:hover .writer-table-resize__line {
+  opacity: 1;
+}
+
+/* Pendant le glissement, le curseur reste `col-resize` où que la souris aille,
+   et plus rien ne se surligne au passage. */
+body.writer-resizing-column,
+body.writer-resizing-column * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.writer-resizing-column .writer-table-resize__line {
+  opacity: 1;
+}
+
+/* -- Réglettes de sélection de ligne et de colonne ------------------------- */
+
+.writer-table-grip {
+  position: absolute;
+  padding: 0;
+  pointer-events: auto;
+  background: var(--bg-sunken);
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 100ms ease-out, border-color 100ms ease-out;
+}
+
+.writer-table-grip:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.writer-table-grip:active,
+.writer-table-grip.is-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.writer-table-grip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.writer-table-grip--column {
+  cursor: s-resize;
+}
+
+.writer-table-grip--row {
+  cursor: e-resize;
+}
+
+.writer-table-grip--corner {
+  cursor: se-resize;
 }
 
 /* ---------------------------------------------------------------- barre d'état */
@@ -564,6 +852,8 @@ body {
   .document-area,
   .writer-workspace,
   .writer-surface,
+  .writer-zoom,
+  .writer-zoom__contenu,
   .writer-pages {
     display: block !important;
     position: static !important;
@@ -621,9 +911,11 @@ body {
 }
 
 .writer-comment-band {
-  /* Hauteur donnée par les bulles, qui sont en position absolue : sans hauteur
-     minimale la bande serait plate et le conteneur ne réserverait rien. */
-  min-height: 100%;
+  /* La gouttière reçoit la hauteur de la pile en style en ligne ; la bande la
+     reprend. `min-height: 100%` ne le faisait pas : un pourcentage contre un
+     parent de hauteur automatique se résout à zéro, la bande restait plate et
+     ses bulles, posées en absolu, débordaient dans le vide. */
+  height: 100%;
 }
 
 .writer-comment--resolved p {
