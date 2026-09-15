@@ -168,7 +168,12 @@ impl DocHandle {
         // Le compte est lu **sous le verrou** : hors de lui, une update
         // pourrait s'intercaler entre la lecture de l'état et celle du numéro,
         // et l'observateur repartirait d'un couple incohérent.
-        self.with_doc(|doc| (self.updates_total.load(Ordering::Acquire), content::project(doc)))
+        self.with_doc(|doc| {
+            (
+                self.updates_total.load(Ordering::Acquire),
+                content::project(doc),
+            )
+        })
     }
 
     pub fn revision(&self) -> u64 {
@@ -234,7 +239,9 @@ impl DocHandle {
 
     pub fn client_left(&self) -> usize {
         self.occupancy.fetch_add(1, Ordering::AcqRel);
-        self.clients.fetch_sub(1, Ordering::Relaxed).saturating_sub(1)
+        self.clients
+            .fetch_sub(1, Ordering::Relaxed)
+            .saturating_sub(1)
     }
 
     pub fn active_clients(&self) -> usize {
@@ -301,7 +308,9 @@ mod tests {
             txn.apply_update(Update::decode_v1(&update_a).unwrap());
         }
 
-        let chez_alice = alice.get_or_insert_text("corps").get_string(&alice.transact());
+        let chez_alice = alice
+            .get_or_insert_text("corps")
+            .get_string(&alice.transact());
         let chez_bob = bob.get_or_insert_text("corps").get_string(&bob.transact());
         assert_eq!(chez_alice, chez_bob, "les deux répliques doivent converger");
     }
@@ -322,7 +331,9 @@ mod tests {
         let instantane = source.full_state();
 
         let recharge = DocHandle::new(Uuid::now_v7());
-        recharge.apply_update(&instantane).expect("instantané applicable");
+        recharge
+            .apply_update(&instantane)
+            .expect("instantané applicable");
 
         let (_, relu) = recharge.snapshot();
         assert_eq!(relu["meta"]["title"], "Notes de réunion");

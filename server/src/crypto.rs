@@ -361,7 +361,10 @@ mod tests {
     #[test]
     fn base64url_refuse_une_entree_absurde() {
         assert!(base64_url_decode("###").is_err());
-        assert!(base64_url_decode("A").is_err(), "un seul caractère ne porte aucun octet");
+        assert!(
+            base64_url_decode("A").is_err(),
+            "un seul caractère ne porte aucun octet"
+        );
     }
 
     #[test]

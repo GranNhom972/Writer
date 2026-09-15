@@ -70,7 +70,9 @@ async fn main() {
     }
 
     match &cfg.cloudserv_url {
-        Some(url) => tracing::info!(%url, grace = cfg.close_grace_secs, "intégration CloudServ active"),
+        Some(url) => {
+            tracing::info!(%url, grace = cfg.close_grace_secs, "intégration CloudServ active")
+        }
         None => tracing::info!(
             "WRITER_CLOUDSERV_URL absent : serveur autonome, aucune sauvegarde ni purge externe"
         ),

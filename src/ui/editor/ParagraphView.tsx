@@ -23,6 +23,7 @@ import {
   hasCrop,
   imageCrop,
   imageKey,
+  IMAGE_PLACEHOLDER,
 } from '../../domain/document/images';
 import { ImageFrame } from './ImageFrame';
 import { safeLinkHref } from '../../domain/document/url';
@@ -230,7 +231,26 @@ function SegmentView({
   }
 
   const style = segmentStyle(segment);
-  const content = segment.text;
+  /*
+   * Le caractère de substitution d'objet ne se peint jamais.
+   *
+   * U+FFFC (`CH_TXTATR_BREAKWORD`) est un **point d'ancrage**, pas un glyphe :
+   * il donne à l'objet une position dans la chaîne du paragraphe, et Writer
+   * n'en dessine rien. Le moteur le mesure d'ailleurs à zéro — `measureText`
+   * lui rend une avance nulle — alors que le laisser dans le texte du DOM fait
+   * peindre au navigateur une case de repli de 16 px, absente de toutes les
+   * mesures.
+   *
+   * Tout ce qui suit sur la ligne s'en trouvait décalé : le rectangle de
+   * sélection s'arrêtait 16 px avant la fin, le curseur se posait à côté du
+   * clic, et la case elle-même restait blanche sous un `Ctrl+A`. Un segment
+   * n'arrive ici qu'une fois les objets traités plus haut (image, formule) : le
+   * caractère qui y subsiste a perdu son attribut — un aller-retour ODF par un
+   * autre logiciel en laisse — et n'ancre donc plus rien du tout.
+   */
+  const content = segment.text.includes(IMAGE_PLACEHOLDER)
+    ? segment.text.split(IMAGE_PLACEHOLDER).join('')
+    : segment.text;
 
   if (segment.formatting.footnoteText) {
     return (

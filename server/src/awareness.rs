@@ -82,7 +82,11 @@ mod tests {
         let payload = encode_state(42, 7, br#"{"user":{"name":"alice"}}"#);
         assert_eq!(
             parse_awareness(&payload),
-            Some(vec![AwarenessEntry { client_id: 42, clock: 7, present: true }])
+            Some(vec![AwarenessEntry {
+                client_id: 42,
+                clock: 7,
+                present: true
+            }])
         );
     }
 
@@ -125,8 +129,22 @@ mod tests {
         let entries = parse_awareness(&payload).expect("trame lisible");
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0], AwarenessEntry { client_id: 42, clock: 8, present: false });
-        assert_eq!(entries[1], AwarenessEntry { client_id: 43, clock: 1, present: false });
+        assert_eq!(
+            entries[0],
+            AwarenessEntry {
+                client_id: 42,
+                clock: 8,
+                present: false
+            }
+        );
+        assert_eq!(
+            entries[1],
+            AwarenessEntry {
+                client_id: 43,
+                clock: 1,
+                present: false
+            }
+        );
     }
 
     #[test]

@@ -84,8 +84,9 @@
   --paper-border: #c4c8ce;
   --paper-sunken: #f2f4f6;
 
-  /* Teinte de sélection de texte. Alpha, et non couleur pleine : elle se pose
-     sous les glyphes, qui doivent rester lisibles au travers. */
+  /* Teinte de sélection de texte. Alpha, et non couleur pleine : l'habillage
+     de sélection se pose **sur** le contenu, en fusion `multiply`, et les
+     glyphes doivent rester lisibles au travers (cf. `.writer-selection-layer`). */
   --selection: rgba(26, 86, 219, 0.22);
 
   /* --- Rayon --- */

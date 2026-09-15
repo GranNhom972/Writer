@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FURNITURE,
   formatPageNumber,
+  FURNITURE_PRESETS,
   getThreeZones,
   renderFurniture,
   resolveGeometry,
@@ -117,5 +118,74 @@ describe('Modèle de mobilier de page (PageFurniture)', () => {
     const pasDeSnap = snapAxis(50, 10, reperes, 1);
     expect(pasDeSnap.valeurMm).toBe(50);
     expect(pasDeSnap.reperes).toHaveLength(0);
+  });
+});
+
+/**
+ * Zones et ligne simple décrivent la **même** bande.
+ *
+ * La ligne simple n'est pas la valeur de repli d'une zone mais celle de la
+ * bande entière : la reverser dans la zone que désigne l'alignement faisait
+ * apparaître deux fois un texte écrit dans les deux représentations — ce que
+ * font les préréglages et tout en-tête importé d'ODF. « CONFIDENTIEL » posé en
+ * zone droite puis aligné à gauche s'affichait à gauche *et* à droite.
+ */
+describe('Zones et ligne simple d’une bande', () => {
+  const confidentiel: PageFurniture = {
+    ...DEFAULT_FURNITURE,
+    headerRight: 'CONFIDENTIEL',
+    // La doublure : un document ancien, ou importé, porte les deux.
+    header: 'CONFIDENTIEL',
+  };
+
+  it('ne peint pas la ligne simple quand une zone porte déjà du texte', () => {
+    for (const align of ['left', 'center', 'right'] as const) {
+      const zones = getThreeZones({ ...confidentiel, headerAlign: align }, 'header', 2);
+      const occurrences = [zones.left, zones.center, zones.right].filter(
+        (zone) => zone === 'CONFIDENTIEL',
+      );
+      expect(occurrences).toHaveLength(1);
+      expect(zones.right).toBe('CONFIDENTIEL');
+    }
+  });
+
+  it('peint la ligne simple là où l’alignement la place, zones vides', () => {
+    const simple: PageFurniture = { ...DEFAULT_FURNITURE, header: 'Mention' };
+
+    expect(getThreeZones({ ...simple, headerAlign: 'left' }, 'header', 2).left).toBe('Mention');
+    expect(getThreeZones({ ...simple, headerAlign: 'center' }, 'header', 2).center).toBe('Mention');
+    expect(getThreeZones({ ...simple, headerAlign: 'right' }, 'header', 2).right).toBe('Mention');
+
+    // Et une seule fois, quel que soit l'alignement.
+    const zones = getThreeZones({ ...simple, headerAlign: 'center' }, 'header', 2);
+    expect([zones.left, zones.center, zones.right].filter(Boolean)).toEqual(['Mention']);
+  });
+
+  it('garde le numéro de page dans un pied resté vide', () => {
+    const pied: PageFurniture = { ...DEFAULT_FURNITURE, pageNumber: true };
+    expect(getThreeZones(pied, 'footer', 2).right).toBe('{page}');
+
+    // Mais il s'efface dès que le pied porte un contenu à lui.
+    const occupe: PageFurniture = { ...pied, footerCenter: 'Interne' };
+    const zones = getThreeZones(occupe, 'footer', 2);
+    expect(zones.center).toBe('Interne');
+    expect(zones.right).toBe('');
+  });
+
+  it('n’écrit jamais les deux représentations dans un préréglage', () => {
+    // L'invariant qui empêche la doublure de revenir : un préréglage remplit
+    // les zones ou la ligne simple, jamais les deux.
+    for (const preset of FURNITURE_PRESETS) {
+      const patch = preset.patch as Record<string, unknown>;
+      const prefixe = preset.band;
+      const zones = ['Left', 'Center', 'Right']
+        .map((suffixe) => (patch[`${prefixe}${suffixe}`] as string | undefined) ?? '')
+        .filter((valeur) => valeur.length > 0);
+      const ligne = (patch[prefixe] as string | undefined) ?? '';
+
+      if (zones.length > 0) {
+        expect(`${preset.id}: ${ligne}`).toBe(`${preset.id}: `);
+      }
+    }
   });
 });

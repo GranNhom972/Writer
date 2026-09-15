@@ -41,29 +41,46 @@ pub const MAX_BLOCKS: usize = 50_000;
 pub enum Operation {
     /// Remplace un bloc existant. Le cas de la frappe : le client renvoie le
     /// paragraphe entier, qui reste petit.
-    ReplaceBlock { id: String, block: Value },
+    ReplaceBlock {
+        id: String,
+        block: Value,
+    },
     /// Insère un bloc. `after` absent = en tête du document.
     InsertBlock {
         block: Value,
         #[serde(default)]
         after: Option<String>,
     },
-    RemoveBlock { id: String },
+    RemoveBlock {
+        id: String,
+    },
     /// Réordonne : la nouvelle suite complète des identifiants.
-    ReorderBlocks { order: Vec<String> },
+    ReorderBlocks {
+        order: Vec<String>,
+    },
     /// Métadonnées (titre, auteur).
-    SetMeta { meta: Value },
-    SetPageSetup { page_setup: Value },
-    SetDefaults { defaults: Value },
+    SetMeta {
+        meta: Value,
+    },
+    SetPageSetup {
+        page_setup: Value,
+    },
+    SetDefaults {
+        defaults: Value,
+    },
     /// En-tête et pied de page. `null` retire le mobilier.
-    SetFurniture { furniture: Value },
+    SetFurniture {
+        furniture: Value,
+    },
     /// Remplace le document entier — ouverture d'un `.odt`, restauration.
     ///
     /// Volontairement distincte des autres : c'est la seule qui efface le
     /// travail d'autrui, et la journaliser sous son propre nom permet de la
     /// retrouver dans l'historique quand quelqu'un demande « où est passé mon
     /// document ? ».
-    ReplaceDocument { document: Value },
+    ReplaceDocument {
+        document: Value,
+    },
 }
 
 /// Identifiant d'un bloc JSON, s'il en porte un utilisable.
@@ -74,7 +91,9 @@ fn block_id(block: &Value) -> AppResult<String> {
         .ok_or_else(|| AppError::Operation("bloc sans identifiant".into()))?;
 
     if id.is_empty() || id.len() > MAX_BLOCK_ID_LEN {
-        return Err(AppError::Operation("identifiant de bloc hors bornes".into()));
+        return Err(AppError::Operation(
+            "identifiant de bloc hors bornes".into(),
+        ));
     }
     Ok(id.to_string())
 }

@@ -457,7 +457,9 @@ impl FileStore {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
         {
-            return Err(AppError::BadRequest("point de restauration invalide".into()));
+            return Err(AppError::BadRequest(
+                "point de restauration invalide".into(),
+            ));
         }
 
         let chemin = self.restore_dir(doc_id).join(format!("{point_id}.bin"));
@@ -506,7 +508,11 @@ fn decode_journal(bytes: &[u8]) -> (Vec<Vec<u8>>, usize) {
 }
 
 fn truncate_if_exists(path: &Path) -> AppResult<()> {
-    match std::fs::OpenOptions::new().write(true).truncate(true).open(path) {
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+    {
         Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(AppError::Storage(e)),
@@ -531,7 +537,10 @@ mod tests {
 
         let charge = store.load("doc1").unwrap();
         assert!(charge.snapshot.is_none());
-        assert_eq!(charge.updates, vec![b"premiere".to_vec(), b"seconde".to_vec()]);
+        assert_eq!(
+            charge.updates,
+            vec![b"premiere".to_vec(), b"seconde".to_vec()]
+        );
         assert_eq!(charge.corrupted, 0);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -545,7 +554,10 @@ mod tests {
 
         let charge = store.load("doc2").unwrap();
         assert_eq!(charge.snapshot.as_deref(), Some(&b"etat complet"[..]));
-        assert!(charge.updates.is_empty(), "journal tronqué après compaction");
+        assert!(
+            charge.updates.is_empty(),
+            "journal tronqué après compaction"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -588,7 +600,10 @@ mod tests {
         .unwrap();
 
         assert!(!store.has_crdt_state("ancien"));
-        let ancien = store.load_legacy("ancien").unwrap().expect("document ancien");
+        let ancien = store
+            .load_legacy("ancien")
+            .unwrap()
+            .expect("document ancien");
         assert_eq!(ancien.snapshot.as_ref().map(|(r, _)| *r), Some(3));
         assert_eq!(ancien.operations.len(), 1);
         assert_eq!(ancien.operations[0].revision, 4);
@@ -619,8 +634,12 @@ mod tests {
     #[test]
     fn une_session_se_reecrit_sans_se_perdre() {
         let (store, dir) = tmp_store();
-        store.create_session("jeton-partage-01", "{\"v\":1}").unwrap();
-        store.replace_session("jeton-partage-01", "{\"v\":2}").unwrap();
+        store
+            .create_session("jeton-partage-01", "{\"v\":1}")
+            .unwrap();
+        store
+            .replace_session("jeton-partage-01", "{\"v\":2}")
+            .unwrap();
         assert_eq!(store.read_session("jeton-partage-01").unwrap(), "{\"v\":2}");
         assert_eq!(store.list_sessions().unwrap(), vec!["jeton-partage-01"]);
         let _ = std::fs::remove_dir_all(dir);
@@ -660,7 +679,9 @@ mod tests {
     fn lidentifiant_dun_point_ne_peut_pas_sortir_du_document() {
         let (store, dir) = tmp_store();
         store.create("doc6", "{}").unwrap();
-        assert!(store.read_restore_point("doc6", "../../etc/passwd").is_err());
+        assert!(store
+            .read_restore_point("doc6", "../../etc/passwd")
+            .is_err());
         assert!(store.read_restore_point("doc6", "point/../autre").is_err());
         assert!(store.read_restore_point("doc6", "").is_err());
         let _ = std::fs::remove_dir_all(dir);

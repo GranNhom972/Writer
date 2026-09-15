@@ -341,14 +341,14 @@ export function WriterEditor({
 
   const handleTitleCommit = useCallback(
     (newTitle: string) => {
-      commands.replaceDocument({
-        ...doc,
+      commands.updateDocument('Titre du document', (current) => ({
+        ...current,
         meta: {
-          ...doc.meta,
+          ...current.meta,
           title: newTitle,
           updatedAt: new Date().toISOString(),
         },
-      });
+      }));
       onTitleChange?.(newTitle);
     },
     [commands, doc, onTitleChange],
@@ -759,11 +759,11 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   // Mise à jour des marges et styles par défaut
   const handleSavePageSetupAndDefaults = useCallback(
     (nextPageSetup: PageSetup, nextDefaults: DocumentDefaults) => {
-      commands.replaceDocument({
-        ...doc,
+      commands.updateDocument('Mise en page', (current) => ({
+        ...current,
         pageSetup: nextPageSetup,
         defaults: nextDefaults,
-      });
+      }));
       focus();
     },
     [commands, doc, focus],
@@ -772,16 +772,20 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   // Modification des marges depuis la règle
   const handleRulerMarginChange = useCallback(
     (margins: { leftMm?: number; rightMm?: number }) => {
-      commands.replaceDocument({
-        ...doc,
-        pageSetup: {
-          ...doc.pageSetup,
-          ...(margins.leftMm !== undefined ? { marginLeftMm: margins.leftMm } : {}),
-          ...(margins.rightMm !== undefined ? { marginRightMm: margins.rightMm } : {}),
-        },
-      });
+      commands.updateDocument(
+        'Marges',
+        (current) => ({
+          ...current,
+          pageSetup: {
+            ...current.pageSetup,
+            ...(margins.leftMm !== undefined ? { marginLeftMm: margins.leftMm } : {}),
+            ...(margins.rightMm !== undefined ? { marginRightMm: margins.rightMm } : {}),
+          },
+        }),
+        'marges-regle',
+      );
     },
-    [commands, doc],
+    [commands],
   );
 
   // Positionnement de la zone de saisie invisible
@@ -1278,6 +1282,13 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     [commands, onSave, doc, handleExportPdf, handlePrint, openMathDialog, openImageDialog],
   );
 
+  // Titre de l'onglet = titre du document : un lecteur d'écran l'annonce en
+  // revenant sur l'onglet, et l'impression en PDF le propose comme nom.
+  const documentTitle = doc.meta.title || 'Sans titre';
+  useEffect(() => {
+    document.title = `${documentTitle} – Writer`;
+  }, [documentTitle]);
+
   return (
     <div className="writer">
       {/* Barre de titre principale avec le titre et le menu empilés à gauche, et les actions à droite */}
@@ -1365,6 +1376,10 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           feuille `@media print` de neutraliser ce conteneur. */}
       <div
         className="writer-workspace"
+        // Repère principal : le raccourci « aller au contenu » des lecteurs
+        // d'écran mène au document plutôt qu'au ruban.
+        role="main"
+        aria-label="Document"
         style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}
       >
         {/* Plan du document (DocumentOutline) */}
@@ -1469,6 +1484,9 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
+                  // Cible de l'`aria-controls` de la barre de mise en forme :
+                  // sans cet identifiant, la référence ne menait nulle part.
+                  id="document-body"
                   aria-label="Document Writer"
                   aria-multiline="true"
                   role="textbox"
@@ -1687,10 +1705,18 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           pages={layout.pages.length}
           bandeInitiale={furnitureBandToEdit}
           onChange={(updatedFurniture) => {
-            commands.replaceDocument({
-              ...doc,
-              furniture: updatedFurniture,
-            });
+            /*
+             * Le dialogue publie à chaque frappe, pour que la page derrière lui
+             * montre l'en-tête en train de s'écrire. La commande ne doit donc
+             * ni reprendre le focus — le champ le perdrait une frappe sur deux
+             * — ni refonder la session, qui emporterait l'historique du
+             * document. `'mobilier'` regroupe la saisie en une seule annulation.
+             */
+            commands.updateDocument(
+              'En-tête et pied de page',
+              (current) => ({ ...current, furniture: updatedFurniture }),
+              'mobilier',
+            );
           }}
           onClose={() => setFurnitureBandToEdit(null)}
         />

@@ -421,6 +421,45 @@ export interface ThreeZoneContent {
   hasContent: boolean;
 }
 
+/**
+ * Compose les trois zones d'une bande à partir du modèle.
+ *
+ * La ligne simple (`header` / `footer`) est la valeur de repli de la **bande**,
+ * jamais celle d'une zone : elle ne se peint que si les trois zones sont vides.
+ *
+ * C'est ce que dit déjà l'atelier, dont le champ « ou ligne simple unifiée »
+ * disparaît dès qu'une zone porte du texte. Le modèle, lui, reversait la ligne
+ * simple dans la zone que désignait l'alignement, fût-elle la seule vide — et
+ * un contenu écrit dans les **deux** représentations se peignait alors deux
+ * fois. C'est le cas de tous les préréglages et de tout en-tête importé d'ODF,
+ * où la ligne simple est la chaîne complète et les zones ses morceaux : poser
+ * « CONFIDENTIEL » en zone droite puis demander l'alignement à gauche en
+ * affichait un à gauche et un resté à droite.
+ */
+function composerZones(
+  gaucheBrut: string | undefined,
+  centreBrut: string | undefined,
+  droiteBrut: string | undefined,
+  ligneSimple: string | undefined,
+  align: FurnitureAlign,
+): ThreeZoneContent {
+  const left = gaucheBrut?.trim() ?? '';
+  const center = centreBrut?.trim() ?? '';
+  const right = droiteBrut?.trim() ?? '';
+  const repli = left || center || right ? '' : ligneSimple?.trim() ?? '';
+
+  const finalLeft = left || (align === 'left' ? repli : '');
+  const finalCenter = center || (align === 'center' ? repli : '');
+  const finalRight = right || (align === 'right' ? repli : '');
+
+  return {
+    left: finalLeft,
+    center: finalCenter,
+    right: finalRight,
+    hasContent: !!(finalLeft || finalCenter || finalRight),
+  };
+}
+
 export function getThreeZones(
   furniture: PageFurniture,
   band: FurnitureBand,
@@ -430,82 +469,64 @@ export function getThreeZones(
   const isEven = pageNumber % 2 === 0;
 
   if (isFirst && furniture.differentFirstPage) {
-    if (band === 'header') {
-      const left = furniture.firstPageHeaderLeft?.trim() ?? '';
-      const center = furniture.firstPageHeaderCenter?.trim() ?? '';
-      const right = furniture.firstPageHeaderRight?.trim() ?? '';
-      const fallback = furniture.firstPageHeader?.trim() ?? '';
-      const align = furniture.headerAlign;
-      const finalLeft = left || (align === 'left' ? fallback : '');
-      const finalCenter = center || (align === 'center' ? fallback : '');
-      const finalRight = right || (align === 'right' ? fallback : '');
-      return { left: finalLeft, center: finalCenter, right: finalRight, hasContent: !!(finalLeft || finalCenter || finalRight) };
-    } else {
-      const left = furniture.firstPageFooterLeft?.trim() ?? '';
-      const center = furniture.firstPageFooterCenter?.trim() ?? '';
-      const right = furniture.firstPageFooterRight?.trim() ?? '';
-      const fallback = furniture.firstPageFooter?.trim() ?? '';
-      const align = furniture.footerAlign;
-      const finalLeft = left || (align === 'left' ? fallback : '');
-      const finalCenter = center || (align === 'center' ? fallback : '');
-      const finalRight = right || (align === 'right' ? fallback : '');
-      return { left: finalLeft, center: finalCenter, right: finalRight, hasContent: !!(finalLeft || finalCenter || finalRight) };
-    }
+    return band === 'header'
+      ? composerZones(
+          furniture.firstPageHeaderLeft,
+          furniture.firstPageHeaderCenter,
+          furniture.firstPageHeaderRight,
+          furniture.firstPageHeader,
+          furniture.headerAlign,
+        )
+      : composerZones(
+          furniture.firstPageFooterLeft,
+          furniture.firstPageFooterCenter,
+          furniture.firstPageFooterRight,
+          furniture.firstPageFooter,
+          furniture.footerAlign,
+        );
   }
 
   if (isEven && furniture.differentEvenOdd) {
-    if (band === 'header') {
-      const left = furniture.headerEvenLeft?.trim() ?? '';
-      const center = furniture.headerEvenCenter?.trim() ?? '';
-      const right = furniture.headerEvenRight?.trim() ?? '';
-      const fallback = furniture.headerEven?.trim() ?? '';
-      const align = furniture.headerEvenAlign ?? furniture.headerAlign;
-      const finalLeft = left || (align === 'left' ? fallback : '');
-      const finalCenter = center || (align === 'center' ? fallback : '');
-      const finalRight = right || (align === 'right' ? fallback : '');
-      return { left: finalLeft, center: finalCenter, right: finalRight, hasContent: !!(finalLeft || finalCenter || finalRight) };
-    } else {
-      const left = furniture.footerEvenLeft?.trim() ?? '';
-      const center = furniture.footerEvenCenter?.trim() ?? '';
-      const right = furniture.footerEvenRight?.trim() ?? '';
-      const fallback = furniture.footerEven?.trim() ?? '';
-      const align = furniture.footerEvenAlign ?? furniture.footerAlign;
-      const finalLeft = left || (align === 'left' ? fallback : '');
-      const finalCenter = center || (align === 'center' ? fallback : '');
-      const finalRight = right || (align === 'right' ? fallback : '');
-      return { left: finalLeft, center: finalCenter, right: finalRight, hasContent: !!(finalLeft || finalCenter || finalRight) };
-    }
+    return band === 'header'
+      ? composerZones(
+          furniture.headerEvenLeft,
+          furniture.headerEvenCenter,
+          furniture.headerEvenRight,
+          furniture.headerEven,
+          furniture.headerEvenAlign ?? furniture.headerAlign,
+        )
+      : composerZones(
+          furniture.footerEvenLeft,
+          furniture.footerEvenCenter,
+          furniture.footerEvenRight,
+          furniture.footerEven,
+          furniture.footerEvenAlign ?? furniture.footerAlign,
+        );
   }
 
   // Cas nominal (pages impaires ou toutes pages)
   if (band === 'header') {
-    const left = furniture.headerLeft?.trim() ?? '';
-    const center = furniture.headerCenter?.trim() ?? '';
-    const right = furniture.headerRight?.trim() ?? '';
-    const fallback = furniture.header.trim();
-    const align = furniture.headerAlign;
-    const finalLeft = left || (align === 'left' ? fallback : '');
-    const finalCenter = center || (align === 'center' ? fallback : '');
-    const finalRight = right || (align === 'right' ? fallback : '');
-    return { left: finalLeft, center: finalCenter, right: finalRight, hasContent: !!(finalLeft || finalCenter || finalRight) };
-  } else {
-    const left = furniture.footerLeft?.trim() ?? '';
-    const center = furniture.footerCenter?.trim() ?? '';
-    const right = furniture.footerRight?.trim() ?? '';
-    const fallback = furniture.footer.trim();
-    const pageNumStr = furniture.pageNumber ? '{page}' : '';
-    const align = furniture.footerAlign;
-
-    const baseLeft = left || (align === 'left' ? fallback : '');
-    const baseCenter = center || (align === 'center' ? fallback : '');
-    const baseRight = right || (align === 'right' ? fallback : '');
-
-    const finalRight = baseRight || (!baseLeft && !baseCenter && pageNumStr ? pageNumStr : '');
-    const finalLeft = baseLeft;
-    const finalCenter = baseCenter;
-
-    return { left: finalLeft, center: finalCenter, right: finalRight, hasContent: !!(finalLeft || finalCenter || finalRight) };
+    return composerZones(
+      furniture.headerLeft,
+      furniture.headerCenter,
+      furniture.headerRight,
+      furniture.header,
+      furniture.headerAlign,
+    );
   }
+
+  const zones = composerZones(
+    furniture.footerLeft,
+    furniture.footerCenter,
+    furniture.footerRight,
+    furniture.footer,
+    furniture.footerAlign,
+  );
+
+  // Le numéro de page occupe la zone droite d'un pied resté vide : c'est sa
+  // place par défaut, celle qu'un document attend sans qu'on la lui demande.
+  if (!furniture.pageNumber || zones.hasContent) return zones;
+  return { left: '', center: '', right: '{page}', hasContent: true };
 }
 
 /**
@@ -888,20 +909,30 @@ export interface FurniturePreset {
   patch: Partial<PageFurniture>;
 }
 
+/*
+ * Les préréglages écrivent les **zones**, et vident la ligne simple.
+ *
+ * Les deux représentations décrivent la même bande : les zones quand la mise en
+ * page est à trois colonnes, la ligne simple sinon — et la composition ne
+ * retient la seconde que si les trois premières sont vides (`getThreeZones`),
+ * exactement comme l'export ODF. Les remplir toutes deux laissait une doublure
+ * invisible, prête à ressortir au premier changement d'alignement ou dès la
+ * zone vidée.
+ */
 export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
   {
     id: 'header-titre',
     label: 'Titre à gauche',
     apercu: '{titre}',
     band: 'header',
-    patch: { headerLeft: '{titre}', headerCenter: '', headerRight: '', header: '{titre}', headerAlign: 'left' },
+    patch: { headerLeft: '{titre}', headerCenter: '', headerRight: '', header: '', headerAlign: 'left' },
   },
   {
     id: 'header-titre-date',
     label: 'Titre à gauche & Date à droite',
     apercu: '{titre} | {date}',
     band: 'header',
-    patch: { headerLeft: '{titre}', headerCenter: '', headerRight: '{date}', header: '{titre} — {date}', headerAlign: 'left' },
+    patch: { headerLeft: '{titre}', headerCenter: '', headerRight: '{date}', header: '', headerAlign: 'left' },
   },
   {
     id: 'header-elegant',
@@ -912,7 +943,7 @@ export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
       headerLeft: '',
       headerCenter: '{titre}',
       headerRight: '',
-      header: '{titre}',
+      header: '',
       headerAlign: 'center',
       headerSeparator: true,
       headerSeparatorWidthPt: 0.75,
@@ -924,7 +955,7 @@ export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
     label: 'Mention de diffusion',
     apercu: 'CONFIDENTIEL',
     band: 'header',
-    patch: { headerLeft: '', headerCenter: '', headerRight: 'CONFIDENTIEL', header: 'CONFIDENTIEL', headerAlign: 'right' },
+    patch: { headerLeft: '', headerCenter: '', headerRight: 'CONFIDENTIEL', header: '', headerAlign: 'right' },
   },
   {
     id: 'footer-numero-centre',
@@ -950,7 +981,7 @@ export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
       footerLeft: '{titre}',
       footerCenter: '',
       footerRight: 'Page {page} / {pages}',
-      footer: '{titre}',
+      footer: '',
       pageNumber: true,
       pageNumberFormat: 'fraction',
       footerAlign: 'right',
@@ -965,7 +996,7 @@ export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
       footerLeft: '{auteur}',
       footerCenter: '{date}',
       footerRight: 'Page {page} / {pages}',
-      footer: '{auteur} — {date}',
+      footer: '',
       pageNumber: true,
       pageNumberFormat: 'fraction',
       footerAlign: 'right',
@@ -983,7 +1014,7 @@ export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
       footerLeft: '{date}',
       footerCenter: '',
       footerRight: '{page}',
-      footer: '{date}',
+      footer: '',
       pageNumber: true,
       pageNumberFormat: 'simple',
       footerAlign: 'right',

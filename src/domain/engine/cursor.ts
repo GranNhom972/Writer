@@ -250,6 +250,35 @@ export function lineIndexAt(layout: ParagraphLayout, offset: number): number {
   return 0;
 }
 
+/**
+ * Largeur **réellement peinte** de la ligne, justification comprise.
+ *
+ * `widthPx` est la largeur des segments tels qu'ils ont été mesurés, donc
+ * celle de la ligne *avant* justification. Une ligne justifiée est ensuite
+ * étirée : `wordSpacingPx` s'ajoute à chacun de ses blancs, et le rendu le
+ * confie à `word-spacing` (cf. `ParagraphView`). Sa fin se trouve donc plus à
+ * droite que `widthPx` ne l'annonce — de tout l'étirement, soit jusqu'à la
+ * largeur de la colonne.
+ *
+ * Confondre les deux laissait la **queue de chaque ligne justifiée** hors du
+ * rectangle : à `Ctrl+A`, le dernier mot de la ligne restait blanc au milieu
+ * d'un paragraphe surligné. Le même écart posait le curseur de `Fin` avant ce
+ * mot, et faisait sauter à la fin de ligne un clic qui tombait dessus.
+ *
+ * Le reste de ce module compte déjà les blancs de la même façon pour placer un
+ * offset dans une ligne justifiée (`caretXOnLine`, `offsetFromX`) : cette
+ * fonction applique la même règle au bord droit, plutôt que d'ajouter au
+ * modèle une seconde largeur qui finirait par diverger de la première.
+ */
+function paintedLineWidth(line: LayoutLine): number {
+  if (line.wordSpacingPx <= 0) return line.widthPx;
+  let blanks = 0;
+  for (const segment of line.segments) {
+    blanks += countBlanksIn(segment.text, 0, segment.text.length);
+  }
+  return line.widthPx + blanks * line.wordSpacingPx;
+}
+
 /** Abscisse du curseur sur sa ligne, relative au bord gauche du contenu. */
 export function caretXOnLine(
   line: LayoutLine,
@@ -258,7 +287,7 @@ export function caretXOnLine(
 ): number {
   // Au-delà du contenu peint (espaces finales avalées), le curseur se pose au
   // bord droit : ces espaces débordent dans la marge et n'avancent plus.
-  if (offset >= line.endOffset) return line.leftPx + line.widthPx;
+  if (offset >= line.endOffset) return line.leftPx + paintedLineWidth(line);
   if (offset <= line.startOffset) return line.leftPx;
 
   for (const segment of line.segments) {
@@ -275,7 +304,7 @@ export function caretXOnLine(
     return segment.leftPx + (prefix[inner] ?? 0) + blanks * line.wordSpacingPx;
   }
 
-  return line.leftPx + line.widthPx;
+  return line.leftPx + paintedLineWidth(line);
 }
 
 function countBlanksIn(text: string, from: number, to: number): number {
@@ -404,11 +433,12 @@ export function positionFromPoint(
         // À égalité verticale, on départage horizontalement — sinon, sur une
         // page à deux cellules côte à côte, le clic irait toujours à la première.
         const localX = xPx - placed.leftPx;
+        const lineRight = line.leftPx + paintedLineWidth(line);
         const horizontal =
           localX < line.leftPx
             ? line.leftPx - localX
-            : localX > line.leftPx + line.widthPx
-              ? localX - line.leftPx - line.widthPx
+            : localX > lineRight
+              ? localX - lineRight
               : 0;
         const distance = vertical * 1000 + horizontal;
 
@@ -477,7 +507,10 @@ export function offsetFromX(
   measurer: TextMeasurer,
 ): number {
   if (xPx <= line.leftPx) return line.startOffset;
-  if (xPx >= line.leftPx + line.widthPx) return line.endOffset;
+  // Le bord droit peint, sinon un clic sur le dernier mot d'une ligne
+  // justifiée — qui tombe au-delà de la largeur mesurée — sauterait en fin de
+  // ligne au lieu de se poser dans le mot.
+  if (xPx >= line.leftPx + paintedLineWidth(line)) return line.endOffset;
 
   for (const segment of line.segments) {
     const right = segment.leftPx + segment.widthPx;
@@ -661,7 +694,7 @@ function nearestLineVertically(
           // Bande : on préfère toujours la plus proche, quelle que soit l'abscisse.
           const band = direction > 0 ? lineTop : -bottom;
           const left = placed.leftPx + line.leftPx;
-          const right = left + line.widthPx;
+          const right = left + paintedLineWidth(line);
           const distance = targetX < left ? left - targetX : targetX > right ? targetX - right : 0;
 
           const closerBand = !best || band < best.band - EPSILON;
@@ -715,6 +748,21 @@ export function selectionRects(
   return rangeRects(layout, start, end, measurer);
 }
 
+/** Les blocs de `[from, to)` de l'ordre de pose sont-ils tous engendrés ? */
+function seulementEngendre(layout: DocumentLayout, from: number, to: number): boolean {
+  for (let rank = from; rank < to; rank += 1) {
+    if (!layout.generatedBlockIds.has(layout.readingOrder[rank]!)) return false;
+  }
+  return true;
+}
+
+/** La position est-elle à la fin du contenu de son bloc ? */
+function auBoutDuBloc(layout: DocumentLayout, position: DocumentPosition): boolean {
+  const paragraphLayout = layout.paragraphLayouts.get(position.blockId);
+  const last = paragraphLayout?.lines[paragraphLayout.lines.length - 1];
+  return last ? position.offset >= last.endOffset : false;
+}
+
 /**
  * Rectangles couvrant une plage quelconque du document.
  *
@@ -736,9 +784,29 @@ export function rangeRects(
   measurer: TextMeasurer,
 ): SelectionRect[] {
   const order = layout.readingOrder;
-  const startRank = order.indexOf(start.blockId);
-  const endRank = order.indexOf(end.blockId);
+  let startRank = order.indexOf(start.blockId);
+  let endRank = order.indexOf(end.blockId);
   if (startRank === -1 || endRank === -1) return [];
+
+  /*
+   * Sommaire en tête ou en queue de document.
+   *
+   * Encadrer les lignes engendrées par deux rangs suffit tant qu'un
+   * paragraphe posable existe de chaque côté. Un sommaire qui **ouvre** le
+   * document n'en a aucun avant lui : la première position posable tombe
+   * après ses lignes, `Ctrl+A` partait donc du rang suivant et laissait toute
+   * la table en blanc — le défaut corrigé plus haut, réapparu au bord. Idem
+   * d'un sommaire qui clôt le document.
+   *
+   * L'extension exige que la plage atteigne réellement le bord : rien
+   * d'éditable avant (ou après) *et* départ au premier caractère (ou arrivée
+   * au dernier). Une sélection qui s'arrête au paragraphe précédant un
+   * sommaire du milieu ne s'étend ainsi pas jusqu'à lui.
+   */
+  if (start.offset <= 0 && seulementEngendre(layout, 0, startRank)) startRank = 0;
+  if (auBoutDuBloc(layout, end) && seulementEngendre(layout, endRank + 1, order.length)) {
+    endRank = order.length - 1;
+  }
 
   const rects: SelectionRect[] = [];
 

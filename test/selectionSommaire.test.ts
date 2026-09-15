@@ -19,8 +19,14 @@ import { paginateDocument } from '../src/domain/engine/paginate';
 import { MetricTextMeasurer } from '../src/domain/engine/measure';
 import { selectAll, type EditorState } from '../src/domain/engine/edit';
 import { selectionRects } from '../src/domain/engine/cursor';
-import { paragraphIndex } from '../src/domain/document/document';
-import type { WriterDocumentState } from '../src/domain/document/types';
+import {
+  createEmptyDocument,
+  createParagraph,
+  paragraphIndex,
+  paragraphText,
+} from '../src/domain/document/document';
+import { createToc } from '../src/domain/document/tox';
+import type { DocumentBlock, HeadingLevel, WriterDocumentState } from '../src/domain/document/types';
 
 const RACINE = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -106,5 +112,170 @@ describe('Sélection totale', () => {
     // les lignes engendrées viennent s'y intercaler, jamais s'y substituer.
     const filtre = layout.readingOrder.filter((id) => !layout.generatedBlockIds.has(id));
     expect(filtre).toEqual(order);
+  });
+});
+
+/**
+ * Le même sommaire, mais au **bord** du document.
+ *
+ * Les lignes engendrées ne portent aucune position posable. Un sommaire qui
+ * ouvre le document n'a donc rien d'éditable avant lui : la première position
+ * du document tombe après ses lignes, et les encadrer par deux rangs de
+ * l'ordre de pose ne suffit plus — c'est le même symptôme que plus haut, revenu
+ * là où l'encadrement n'a pas de borne à offrir.
+ */
+describe('Sélection totale, sommaire au bord du document', () => {
+  const titre = (texte: string, niveau: HeadingLevel) =>
+    createParagraph(texte, { headingLevel: niveau });
+
+  function docDe(blocks: DocumentBlock[]): WriterDocumentState {
+    return { ...createEmptyDocument(), blocks };
+  }
+
+  /** Les lignes engendrées effectivement recouvertes par un rectangle. */
+  function sommairePeint(document_: WriterDocumentState, selection = toutSelectionner(document_).selection) {
+    const measurer = new MetricTextMeasurer();
+    const layout = paginateDocument(document_, { measurer });
+    const rects = selectionRects(document_, layout, selection, measurer);
+
+    const peintes = [...layout.generatedBlockIds].filter((id) => {
+      const poses = layout.placements.get(id);
+      if (!poses) return false;
+      return poses.some(({ pageIndex, placed }) =>
+        rects.some(
+          (rect) =>
+            rect.pageIndex === pageIndex &&
+            rect.topPx >= placed.topPx - 1 &&
+            rect.topPx < placed.topPx + placed.heightPx + 1,
+        ),
+      );
+    });
+    return { engendrees: layout.generatedBlockIds.size, peintes: peintes.length };
+  }
+
+  const dernier = createParagraph('Un autre paragraphe.');
+  const corps: DocumentBlock[] = [
+    titre('Premier titre', 1),
+    createParagraph('Un paragraphe de corps.'),
+    titre('Second titre', 1),
+    dernier,
+  ];
+
+  it('peint un sommaire qui ouvre le document', () => {
+    const compte = sommairePeint(docDe([createToc(), ...corps]));
+    expect(compte.engendrees).toBeGreaterThan(0);
+    expect(compte.peintes).toBe(compte.engendrees);
+  });
+
+  it('peint un sommaire qui clôt le document', () => {
+    const compte = sommairePeint(docDe([...corps, createToc()]));
+    expect(compte.engendrees).toBeGreaterThan(0);
+    expect(compte.peintes).toBe(compte.engendrees);
+  });
+
+  it('laisse hors sélection un sommaire que la plage n\'atteint pas', () => {
+    // La contrepartie de l'extension : elle ne vaut que pour une plage qui
+    // touche le bord du document. Ici la sélection s'arrête à la fin du
+    // paragraphe qui précède le sommaire, lequel doit rester blanc.
+    const avant = createParagraph('Avant le sommaire.');
+    const document_ = docDe([avant, createToc(), ...corps]);
+    const selection = {
+      anchor: { blockId: avant.id, offset: 0 },
+      focus: { blockId: avant.id, offset: paragraphText(avant).length },
+      isCollapsed: false,
+    };
+
+    const compte = sommairePeint(document_, selection);
+    expect(compte.engendrees).toBeGreaterThan(0);
+    expect(compte.peintes).toBe(0);
+  });
+
+  it('ne peint rien hors de la plage quand le sommaire ouvre et que la plage commence plus loin', () => {
+    // Une plage qui part du deuxième paragraphe du corps : le sommaire qui
+    // ouvre le document est avant elle, il n'a pas à être peint.
+    const document_ = docDe([createToc(), ...corps]);
+    const selection = {
+      anchor: { blockId: dernier.id, offset: 0 },
+      focus: { blockId: dernier.id, offset: paragraphText(dernier).length },
+      isCollapsed: false,
+    };
+
+    const compte = sommairePeint(document_, selection);
+    expect(compte.peintes).toBe(0);
+  });
+});
+
+/**
+ * Une ligne **justifiée** n'a pas la largeur qu'on lui a mesurée.
+ *
+ * La justification répartit l'espace restant sur les blancs de la ligne
+ * (`wordSpacingPx`), et le rendu le confie à `word-spacing` : la ligne peinte
+ * va donc jusqu'au bord de la colonne, bien au-delà de la largeur des segments.
+ * Peindre la sélection d'après cette dernière laissait le **dernier mot de
+ * chaque ligne justifiée** en blanc — un damier de queues non surlignées au
+ * milieu d'un `Ctrl+A`.
+ */
+describe('Sélection d\'un paragraphe justifié', () => {
+  const texte =
+    'Ce document exerce chaque sous-système porté depuis le code C++ de ' +
+    'StarWriter. Il est engendré par un script qui vérifie sa longueur et son ' +
+    'aller-retour ODF avant de l\'écrire, puis relu ligne à ligne pour que la ' +
+    'justification ait de quoi étirer plusieurs lignes pleines.';
+
+  function lignesJustifiees() {
+    const measurer = new MetricTextMeasurer();
+    const paragraphe = createParagraph(texte, { alignment: 'justify' });
+    const document_ = { ...createEmptyDocument(), blocks: [paragraphe] };
+    const layout = paginateDocument(document_, { measurer });
+    const rects = selectionRects(document_, layout, toutSelectionner(document_).selection, measurer);
+    const paragraphLayout = layout.paragraphLayouts.get(paragraphe.id)!;
+    const placed = layout.placements.get(paragraphe.id)![0]!;
+
+    return { paragraphLayout, placed, rects };
+  }
+
+  it('étire le rectangle jusqu\'à la fin peinte de la ligne', () => {
+    const { paragraphLayout, placed, rects } = lignesJustifiees();
+
+    const etirees = paragraphLayout.lines.filter((line) => line.wordSpacingPx > 0);
+    expect(etirees.length).toBeGreaterThan(0);
+
+    let top = placed.placed.topPx + paragraphLayout.marginTopPx;
+    for (const line of paragraphLayout.lines) {
+      if (line.wordSpacingPx > 0) {
+        const rect = rects.find((r) => Math.abs(r.topPx - top) < 1);
+        expect(rect).toBeDefined();
+
+        // La largeur peinte : celle des segments, plus l'étirement porté par
+        // chaque blanc de la ligne.
+        const blancs = line.segments.reduce(
+          (total, segment) => total + [...segment.text].filter((c) => c === ' ').length,
+          0,
+        );
+        const peinte = line.widthPx + blancs * line.wordSpacingPx;
+
+        expect(peinte).toBeGreaterThan(line.widthPx);
+        expect(rect!.widthPx).toBeCloseTo(peinte, 1);
+      }
+      top += line.heightPx;
+    }
+  });
+
+  it('laisse la dernière ligne à sa largeur mesurée', () => {
+    // Contrepartie : la dernière ligne d'un paragraphe n'est pas justifiée, son
+    // rectangle ne doit donc pas s'étendre jusqu'au bord de la colonne.
+    const { paragraphLayout, placed, rects } = lignesJustifiees();
+    const derniere = paragraphLayout.lines[paragraphLayout.lines.length - 1]!;
+    expect(derniere.wordSpacingPx).toBe(0);
+
+    let top = placed.placed.topPx + paragraphLayout.marginTopPx;
+    for (const line of paragraphLayout.lines) {
+      if (line === derniere) break;
+      top += line.heightPx;
+    }
+
+    const rect = rects.find((r) => Math.abs(r.topPx - top) < 1);
+    expect(rect).toBeDefined();
+    expect(rect!.widthPx).toBeCloseTo(derniere.widthPx, 1);
   });
 });

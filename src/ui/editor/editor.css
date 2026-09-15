@@ -191,6 +191,22 @@ body {
 .writer-page {
   position: relative;
   flex: none;
+  /*
+   * Groupe de fusion de la teinte de sélection.
+   *
+   * `.writer-selection-layer` se fond en `multiply` avec ce qui est peint
+   * sous lui ; `isolation` borne ce « sous lui » à la feuille. Sans elle, le
+   * groupe remonterait jusqu'au plan de travail : le navigateur aurait à
+   * rassembler les vingt-cinq feuilles pour composer une teinte qui ne
+   * concerne qu'une ligne de texte, et la fusion prendrait au passage l'ombre
+   * portée de la page, qui n'appartient pas au document.
+   *
+   * La contrepartie est un contexte d'empilement par feuille : les calques
+   * d'une page (bandes de mobilier, poignées d'image) ne se classent plus
+   * qu'entre eux. C'est la lecture attendue d'une feuille de papier — aucune
+   * ne se peint par-dessus sa voisine.
+   */
+  isolation: isolate;
   background: var(--paper-bg);
   /* Couleur de base du texte du document. Sans elle, un run sans couleur
      propre hérite de `--fg-primary`, qui passe au blanc en thème sombre : le
@@ -546,6 +562,26 @@ body.writer-resizing-image * {
   .writer-caret { animation: none; }
 }
 
+/*
+ * Habillage de sélection, posé **par-dessus** le contenu de la page.
+ *
+ * La teinte traverse tout ce qu'elle recouvre au lieu d'être recouverte :
+ * ligne d'en-tête de tableau, caractère à fond coloré, image ancrée comme
+ * caractère. `multiply` garantit la lisibilité — elle ne peut qu'assombrir,
+ * donc un glyphe noir reste noir, et sur le blanc du papier le résultat est
+ * celui d'une teinte translucide ordinaire (cf. `A4Page`).
+ *
+ * `isolation` compose les rectangles entre eux avant la fusion : une
+ * occurrence de recherche sous la sélection ne doit pas assombrir deux fois.
+ */
+.writer-selection-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  isolation: isolate;
+  mix-blend-mode: multiply;
+}
+
 .writer-selection {
   position: absolute;
   background: var(--selection);
@@ -822,6 +858,7 @@ body.writer-resizing-column .writer-table-resize__line {
   .writer-status,
   .writer-input,
   .writer-caret,
+  .writer-selection-layer,
   .writer-selection,
   .writer-search,
   .writer-page__margins,

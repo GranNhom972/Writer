@@ -352,37 +352,6 @@ export const A4Page = memo(function A4Page({
         }}
       >
         {/*
-          Les occurrences trouvées se peignent **sous** la sélection : les deux
-          se superposent sur l'occurrence courante, qui est aussi sélectionnée,
-          et c'est la sélection qui doit rester lisible.
-        */}
-        {searchRects.map(({ rect, current }, index) => (
-          <div
-            key={`recherche-${index}`}
-            className={current ? 'writer-search writer-search--current' : 'writer-search'}
-            style={{
-              left: `${rect.leftPx}px`,
-              top: `${rect.topPx}px`,
-              width: `${rect.widthPx}px`,
-              height: `${rect.heightPx}px`,
-            }}
-          />
-        ))}
-
-        {selectionRects.map((rect, index) => (
-          <div
-            key={index}
-            className="writer-selection"
-            style={{
-              left: `${rect.leftPx}px`,
-              top: `${rect.topPx}px`,
-              width: `${rect.widthPx}px`,
-              height: `${rect.heightPx}px`,
-            }}
-          />
-        ))}
-
-        {/*
           Cadres flottants du calque `hell` (`SwFlyFreeFrm`). Peints **avant**
           le texte, donc dessous : c'est l'ordre de `SwRootFrm::Paint`, et il
           n'a de conséquence visible que pour l'habillage `through`, où le
@@ -422,6 +391,71 @@ export const A4Page = memo(function A4Page({
             </div>
           );
         })}
+
+        {/*
+          Teinte de sélection et occurrences de recherche.
+
+          Peintes **par-dessus** le contenu, et c'est ce qui les rend fiables :
+          sous le contenu, tout aplat opaque posé plus haut dans la pile les
+          effaçait. Le défaut se voyait à `Ctrl+A` — la ligne d'en-tête d'un
+          tableau (`--paper-sunken`), un caractère à fond coloré
+          (`RES_CHRATR_BACKGROUND`) ou une image ancrée comme caractère
+          restaient blancs au milieu d'un document entièrement surligné, alors
+          que le moteur avait bien produit leurs rectangles.
+
+          C'est l'ordre du C++ : la sélection n'est pas un calque du document
+          mais un **habillage de vue**, peint après lui — `SwRootFrm::Paint`
+          dessine le contenu, puis le gestionnaire d'habillages
+          (`sdr::overlay::OverlaySelection`) pose la teinte translucide sur ce
+          qu'il a produit, cadres et graphiques compris.
+
+          La fusion `multiply` protège la lisibilité : elle ne peut
+          qu'assombrir. Sur le blanc du papier — le cas de presque toute la
+          page — multiplier par la teinte revient exactement au rendu
+          précédent ; sur un glyphe noir, le noir l'emporte et le texte garde
+          son contraste ; sur un aplat gris ou une image, la teinte se voit
+          enfin. Les rectangles se composent d'abord entre eux (`isolation`),
+          pour que le chevauchement d'une occurrence et de la sélection ne
+          double pas l'assombrissement.
+
+          Restent au-dessus, et donc intacts : les poignées de tableau, le
+          curseur, les notes de bas de page — que `Ctrl+A` ne sélectionne pas,
+          pas plus que dans Writer — et le calque `heaven`.
+        */}
+        {searchRects.length > 0 || selectionRects.length > 0 ? (
+          <div className="writer-selection-layer" aria-hidden="true">
+            {/*
+              Les occurrences trouvées se peignent **sous** la sélection : les
+              deux se superposent sur l'occurrence courante, qui est aussi
+              sélectionnée, et c'est la sélection qui doit rester lisible.
+            */}
+            {searchRects.map(({ rect, current }, index) => (
+              <div
+                key={`recherche-${index}`}
+                className={current ? 'writer-search writer-search--current' : 'writer-search'}
+                style={{
+                  left: `${rect.leftPx}px`,
+                  top: `${rect.topPx}px`,
+                  width: `${rect.widthPx}px`,
+                  height: `${rect.heightPx}px`,
+                }}
+              />
+            ))}
+
+            {selectionRects.map((rect, index) => (
+              <div
+                key={index}
+                className="writer-selection"
+                style={{
+                  left: `${rect.leftPx}px`,
+                  top: `${rect.topPx}px`,
+                  width: `${rect.widthPx}px`,
+                  height: `${rect.heightPx}px`,
+                }}
+              />
+            ))}
+          </div>
+        ) : null}
 
         {/*
           Poignées de tableau — après le texte, donc au-dessus : une poignée

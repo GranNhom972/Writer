@@ -227,11 +227,7 @@ async fn checkpoint_document(state: &AppState, handle: &Arc<DocHandle>, doc_id: 
 /// Les images vivent dans le dépôt du serveur, désignées par une adresse
 /// relative. Remettre le document sans elles livrerait à CloudServ un fichier
 /// truffé de liens morts dès la purge.
-async fn projeter(
-    state: &AppState,
-    handle: &Arc<DocHandle>,
-    doc_id: Uuid,
-) -> Option<(u64, Value)> {
+async fn projeter(state: &AppState, handle: &Arc<DocHandle>, doc_id: Uuid) -> Option<(u64, Value)> {
     let (revision, document) = handle.snapshot();
     let store = state.store.clone();
     let cle = doc_id.to_string();
@@ -393,7 +389,11 @@ fn inline_run(store: &FileStore, doc_id: &str, prefixe: &str, run: &mut Value) {
 
     match store.read_asset(doc_id, nom) {
         Ok(octets) => {
-            let data_uri = format!("data:{};base64,{}", kind.content_type(), base64_encode(&octets));
+            let data_uri = format!(
+                "data:{};base64,{}",
+                kind.content_type(),
+                base64_encode(&octets)
+            );
             run["imageSrc"] = Value::String(data_uri);
         }
         Err(e) => {

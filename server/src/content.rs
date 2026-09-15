@@ -123,7 +123,9 @@ pub fn validate(document: &Value) -> AppResult<()> {
         // Un document sans tableau de blocs n'est pas un document Writer.
         return match document.get("blocks") {
             None => Ok(()),
-            Some(_) => Err(AppError::BadRequest("document.blocks: tableau attendu".into())),
+            Some(_) => Err(AppError::BadRequest(
+                "document.blocks: tableau attendu".into(),
+            )),
         };
     };
 
@@ -280,7 +282,11 @@ fn write_table(txn: &mut TransactionMut, yblocks: &ArrayRef, block: &Value) {
                 }
                 // Une cellule vide porte quand même un paragraphe : c'est là que
                 // le curseur se pose quand on clique dedans.
-                _ => write_paragraph(txn, &yblocs, &json!({ "id": format!("{}-p", identifier(cell, "tc")) })),
+                _ => write_paragraph(
+                    txn,
+                    &yblocs,
+                    &json!({ "id": format!("{}-p", identifier(cell, "tc")) }),
+                ),
             }
         }
     }
@@ -411,7 +417,10 @@ fn read_block<T: ReadTxn>(txn: &T, ybloc: &MapRef) -> Value {
     let mut bloc = JsonMap::new();
     bloc.insert(
         "id".into(),
-        ybloc.get(txn, "id").and_then(out_to_json).unwrap_or(json!("")),
+        ybloc
+            .get(txn, "id")
+            .and_then(out_to_json)
+            .unwrap_or(json!("")),
     );
     bloc.insert("type".into(), json!(kind));
 
@@ -451,7 +460,9 @@ fn read_row<T: ReadTxn>(txn: &T, yrow: &MapRef) -> Value {
     let mut row = JsonMap::new();
     row.insert(
         "id".into(),
-        yrow.get(txn, "id").and_then(out_to_json).unwrap_or(json!("")),
+        yrow.get(txn, "id")
+            .and_then(out_to_json)
+            .unwrap_or(json!("")),
     );
     if let Some(Out::Any(Any::Bool(true))) = yrow.get(txn, "isHeader") {
         row.insert("isHeader".into(), json!(true));
@@ -473,7 +484,10 @@ fn read_cell<T: ReadTxn>(txn: &T, ycell: &MapRef) -> Value {
     let mut cell = JsonMap::new();
     cell.insert(
         "id".into(),
-        ycell.get(txn, "id").and_then(out_to_json).unwrap_or(json!("")),
+        ycell
+            .get(txn, "id")
+            .and_then(out_to_json)
+            .unwrap_or(json!("")),
     );
     read_attrs(txn, ycell, CELL_ATTRS, &mut cell);
 
@@ -489,7 +503,12 @@ fn read_cell<T: ReadTxn>(txn: &T, ycell: &MapRef) -> Value {
     Value::Object(cell)
 }
 
-fn read_attrs<T: ReadTxn>(txn: &T, ybloc: &MapRef, cles: &[&str], sortie: &mut JsonMap<String, Value>) {
+fn read_attrs<T: ReadTxn>(
+    txn: &T,
+    ybloc: &MapRef,
+    cles: &[&str],
+    sortie: &mut JsonMap<String, Value>,
+) {
     let Some(Out::YMap(yattrs)) = ybloc.get(txn, "attrs") else {
         return;
     };
@@ -751,7 +770,10 @@ mod tests {
             "blocks": [{ "type": "paragraph", "runs": [{ "text": "anonyme" }] }]
         })));
         let id = relu["blocks"][0]["id"].as_str().unwrap();
-        assert!(id.starts_with("p-"), "identifiant fabriqué attendu, reçu {id}");
+        assert!(
+            id.starts_with("p-"),
+            "identifiant fabriqué attendu, reçu {id}"
+        );
     }
 
     #[test]

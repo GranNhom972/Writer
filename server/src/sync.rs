@@ -41,8 +41,8 @@ use crate::doc::{DocHandle, Fanout};
 use crate::error::{AppError, AppResult};
 use crate::protocol::Message;
 use crate::state::{
-    AppState, IDLE_TIMEOUT_SECS, MAX_CLIENTS_PER_DOCUMENT, MAX_FRAME_BYTES, MAX_MESSAGES_PER_SECOND,
-    MESSAGE_BURST,
+    AppState, IDLE_TIMEOUT_SECS, MAX_CLIENTS_PER_DOCUMENT, MAX_FRAME_BYTES,
+    MAX_MESSAGES_PER_SECOND, MESSAGE_BURST,
 };
 use crate::store::COMPACTION_THRESHOLD;
 
@@ -422,7 +422,9 @@ async fn persist_and_compact(
     match tokio::task::spawn_blocking(move || store.append_update(&key, &payload)).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => tracing::error!(%doc_id, author, error = %e, "échec de journalisation"),
-        Err(e) => tracing::error!(%doc_id, author, error = %e, "tâche de journalisation interrompue"),
+        Err(e) => {
+            tracing::error!(%doc_id, author, error = %e, "tâche de journalisation interrompue")
+        }
     }
 
     if handle.note_update() >= COMPACTION_THRESHOLD {
