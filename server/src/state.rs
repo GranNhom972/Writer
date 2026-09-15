@@ -67,6 +67,10 @@ pub struct Config {
     pub close_grace_secs: u64,
     pub checkpoint_quiet_secs: u64,
     pub checkpoint_max_secs: u64,
+    /// Racine du bundle de l'éditeur, servi par ce même processus quand elle
+    /// est posée (`WRITER_WEB_ROOT`). Absente : seule l'API répond, et c'est
+    /// Vite ou HAProxy qui sert la page. Voir `web.rs`.
+    pub web_root: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -84,6 +88,7 @@ impl Config {
         };
 
         Config {
+            web_root: crate::web::resolve_root(std::env::var("WRITER_WEB_ROOT").ok().as_deref()),
             bind: std::env::var("WRITER_BIND").unwrap_or_else(|_| "127.0.0.1:8081".into()),
             data_dir: std::env::var("WRITER_DATA_DIR").unwrap_or_else(|_| "./data".into()),
             auth: AuthSettings {

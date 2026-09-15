@@ -28,6 +28,7 @@ mod session;
 mod state;
 mod store;
 mod sync;
+mod web;
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -145,6 +146,13 @@ async fn main() {
         )
         // ── Synchronisation ──────────────────────────────────────────────────
         .route("/api/v1/sync/:doc_id", get(sync::sync_handler))
+        // ── Page de l'éditeur ────────────────────────────────────────────────
+        //
+        // En DERNIER, et en repli : toute URL qui n'est pas une route ci-dessus
+        // appartient au routeur React (`/doc/<id>`…). Sans cela, la page devait
+        // être servie à part — et alors son origine ne portait pas l'API, ce que
+        // ni le `fetch` relatif ni le WebSocket de synchronisation ne tolèrent.
+        .fallback(web::spa_fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
