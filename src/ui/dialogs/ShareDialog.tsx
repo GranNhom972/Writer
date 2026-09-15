@@ -24,6 +24,7 @@ import {
   type Permission,
   type SessionSummary,
 } from '../../domain/collab/api';
+import { copyText } from '../clipboard';
 
 const PERMISSIONS: readonly { value: Permission; label: string; aide: string }[] = [
   { value: 'write', label: 'Modifier', aide: 'Écrire, insérer des images, changer la mise en page' },
@@ -77,11 +78,10 @@ export function ShareDialog({
   );
 
   const copier = useCallback(async (texte: string, cle: string) => {
-    try {
-      await navigator.clipboard.writeText(texte);
+    if (await copyText(texte)) {
       setCopie(cle);
       window.setTimeout(() => setCopie(null), 2000);
-    } catch {
+    } else {
       setErreur('Copie impossible : le presse-papiers a été refusé par le navigateur.');
     }
   }, []);
