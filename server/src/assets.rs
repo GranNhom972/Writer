@@ -204,7 +204,10 @@ pub async fn get_asset(
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::CONTENT_DISPOSITION, "inline"),
             // Le contenu d'un nom donné ne change jamais (nom aléatoire par dépôt).
-            (header::CACHE_CONTROL, "private, max-age=31536000, immutable"),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable",
+            ),
         ],
         octets,
     ))
@@ -219,13 +222,19 @@ mod tests {
         assert_eq!(sniff(b"\x89PNG\r\n\x1a\n\x00\x00"), Some(ImageKind::Png));
         assert_eq!(sniff(b"\xFF\xD8\xFF\xE0rest"), Some(ImageKind::Jpeg));
         assert_eq!(sniff(b"GIF89a....."), Some(ImageKind::Gif));
-        assert_eq!(sniff(b"RIFF\x00\x00\x00\x00WEBPVP8 "), Some(ImageKind::Webp));
+        assert_eq!(
+            sniff(b"RIFF\x00\x00\x00\x00WEBPVP8 "),
+            Some(ImageKind::Webp)
+        );
     }
 
     #[test]
     fn sniff_rejects_everything_else() {
         // Le SVG est un document exécutable : refusé, quoi qu'annonce le client.
-        assert_eq!(sniff(b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), None);
+        assert_eq!(
+            sniff(b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"),
+            None
+        );
         assert_eq!(sniff(b"<!DOCTYPE html><script>alert(1)</script>"), None);
         assert_eq!(sniff(b"%PDF-1.7"), None);
         assert_eq!(sniff(b""), None);
@@ -254,7 +263,10 @@ mod tests {
             &format!("{id}"),
             &format!("{id}.png.html"),
         ] {
-            assert!(parse_asset_name(hostile).is_none(), "accepté à tort: {hostile}");
+            assert!(
+                parse_asset_name(hostile).is_none(),
+                "accepté à tort: {hostile}"
+            );
         }
     }
 }

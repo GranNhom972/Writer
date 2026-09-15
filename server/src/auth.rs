@@ -240,13 +240,10 @@ fn verify_jwt(token: &str, secret: &[u8]) -> AppResult<Identity> {
         .ok_or(AppError::Unauthorized)?;
 
     // 3. Expiration — exigée, et pas trop lointaine.
-    let exp = claims
-        .get("exp")
-        .and_then(|e| e.as_i64())
-        .ok_or_else(|| {
-            tracing::warn!("jeton refusé : sans expiration");
-            AppError::Unauthorized
-        })?;
+    let exp = claims.get("exp").and_then(|e| e.as_i64()).ok_or_else(|| {
+        tracing::warn!("jeton refusé : sans expiration");
+        AppError::Unauthorized
+    })?;
     let maintenant = chrono::Utc::now().timestamp();
     if maintenant > exp {
         return Err(AppError::Unauthorized);
@@ -432,7 +429,8 @@ mod tests {
 
     #[test]
     fn alg_none_est_refuse() {
-        let claims = serde_json::json!({ "sub": "alice", "scope": "write", "exp": dans_une_heure() });
+        let claims =
+            serde_json::json!({ "sub": "alice", "scope": "write", "exp": dans_une_heure() });
         let header_b64 = base64_url_encode(br#"{"alg":"none","typ":"JWT"}"#);
         let payload_b64 = base64_url_encode(claims.to_string().as_bytes());
         let token = format!("{header_b64}.{payload_b64}.");

@@ -14,7 +14,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { readCloudServLink, readTicketClaims } from '../src/domain/collab/session';
 
@@ -39,6 +39,11 @@ function billet(claims: Record<string, unknown>): string {
 }
 
 describe('lien d’ouverture CloudServ', () => {
+  // `readCloudServLink` mémorise le billet dans `sessionStorage` pour survivre
+  // à un F5 : sans remise à zéro, le billet d'un test précédent complétait le
+  // lien « incomplet » du suivant, et le résultat dépendait de l'ordre.
+  beforeEach(() => sessionStorage.clear());
+
   it('lit le document et le billet du fragment', () => {
     const lien = readCloudServLink('#doc=01a03d4d-0000-7000-8000-000000000001&token=abc.def.ghi');
     expect(lien).toEqual({
@@ -58,6 +63,14 @@ describe('lien d’ouverture CloudServ', () => {
     // Un lien de partage Writer n'est pas un lien CloudServ : les deux
     // ouvertures ne doivent pas se déclencher l'une sur l'autre.
     expect(readCloudServLink('#session=abc&email=a@b.fr')).toBeNull();
+  });
+
+  it('retrouve le billet après un rechargement de la page (F5)', () => {
+    expect(readCloudServLink('#token=t1', '/doc/d1')).toEqual({ docId: 'd1', token: 't1' });
+    // Le fragment a disparu de l'adresse, le billet vient de l'onglet…
+    expect(readCloudServLink('', '/doc/d1')).toEqual({ docId: 'd1', token: 't1' });
+    // … mais seulement pour CE document.
+    expect(readCloudServLink('', '/doc/d2')).toBeNull();
   });
 });
 

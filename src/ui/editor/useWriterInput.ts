@@ -152,6 +152,7 @@ import {
   deletionGroup,
   dragGroup,
   redo,
+  settingsGroup,
   typingGroup,
   undo,
   type EditorSession,
@@ -294,12 +295,34 @@ export interface WriterCommands {
   undo: () => void;
   redo: () => void;
   selectAll: () => void;
-  replaceDocument: (doc: WriterDocumentState) => void;
+  /**
+   * Modifie les **réglages** du document — mobilier de page, marges, titre —
+   * sans toucher au curseur ni au focus.
+   *
+   * Ces réglages n'appartiennent pas au fil du texte : on les change depuis un
+   * dialogue ou la règle, pendant que le curseur reste où il était. D'où les
+   * deux différences avec une commande d'édition ordinaire : rien n'est rendu
+   * à la zone de saisie invisible — le champ du dialogue garderait sinon le
+   * focus une frappe sur deux —, et la session n'est pas refondée, sous peine
+   * d'effacer l'historique du document à chaque caractère tapé dans un en-tête.
+   *
+   * La transformation est appliquée **dans** le réducteur, jamais sur le
+   * document du rendu : deux frappes groupées par React partiraient sinon du
+   * même état, et la seconde écraserait la première.
+   *
+   * `settingId` regroupe les transactions d'un même geste continu en une seule
+   * entrée d'annulation (cf. `settingsGroup`).
+   */
+  updateDocument: (
+    label: string,
+    transform: (doc: WriterDocumentState) => WriterDocumentState,
+    settingId?: string,
+  ) => void;
   /**
    * Applique une modification venue du réseau.
    *
-   * Distincte de `replaceDocument`, qui repart d'une session neuve : ici
-   * l'historique local et le curseur sont **conservés**. Défaire son propre
+   * Distincte d'`updateDocument`, qui inscrit son changement à l'historique :
+   * une modification venue du réseau n'y entre **pas**. Défaire son propre
    * travail après qu'un collègue a écrit ailleurs doit rester possible, et
    * `Ctrl+Z` ne doit jamais annuler la frappe de quelqu'un d'autre.
    *
@@ -1428,9 +1451,18 @@ export function useWriterInput(
         move((state) => selectAll(state));
         focus();
       },
-      replaceDocument: (doc) => {
-        setSession(createSession(createEditorState(doc)));
-        focus();
+      updateDocument: (label, transform, settingId) => {
+        run(
+          label,
+          (state) => {
+            const doc = transform(state.doc);
+            if (doc === state.doc) return state;
+            // Le curseur reste où il est ; le recadrage ne sert qu'au cas où le
+            // réglage aurait raccourci le document sous lui.
+            return { ...state, doc, selection: clampSelection(doc, state.selection) };
+          },
+          settingId ? () => settingsGroup(settingId) : undefined,
+        );
       },
       applyRemote: (transform, remapSelection) => {
         setSession((current) => {

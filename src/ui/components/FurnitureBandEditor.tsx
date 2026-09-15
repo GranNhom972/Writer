@@ -533,26 +533,86 @@ export function FurnitureBandEditor({
         ? (estHeader ? furniture.firstPageHeader : furniture.firstPageFooter) ?? ''
         : (estHeader ? furniture.header : furniture.footer) ?? '';
 
-  const majChamp = (champ: 'left' | 'center' | 'right' | 'single', valeur: string): void => {
-    let cle = estHeader ? 'header' : 'footer';
+  /** Clé du modèle où vit un champ, selon la bande et la page visée. */
+  const cleDe = (champ: 'left' | 'center' | 'right' | 'single'): string => {
     if (pageCible === 'even' && furniture.differentEvenOdd) {
-      if (champ === 'left') cle = estHeader ? 'headerEvenLeft' : 'footerEvenLeft';
-      else if (champ === 'center') cle = estHeader ? 'headerEvenCenter' : 'footerEvenCenter';
-      else if (champ === 'right') cle = estHeader ? 'headerEvenRight' : 'footerEvenRight';
-      else cle = estHeader ? 'headerEven' : 'footerEven';
-    } else if (pageCible === 'first' && furniture.differentFirstPage) {
-      if (champ === 'left') cle = estHeader ? 'firstPageHeaderLeft' : 'firstPageFooterLeft';
-      else if (champ === 'center') cle = estHeader ? 'firstPageHeaderCenter' : 'firstPageFooterCenter';
-      else if (champ === 'right') cle = estHeader ? 'firstPageHeaderRight' : 'firstPageFooterRight';
-      else cle = estHeader ? 'firstPageHeader' : 'firstPageFooter';
-    } else {
-      if (champ === 'left') cle = estHeader ? 'headerLeft' : 'footerLeft';
-      else if (champ === 'center') cle = estHeader ? 'headerCenter' : 'footerCenter';
-      else if (champ === 'right') cle = estHeader ? 'headerRight' : 'footerRight';
-      else cle = estHeader ? 'header' : 'footer';
+      if (champ === 'left') return estHeader ? 'headerEvenLeft' : 'footerEvenLeft';
+      if (champ === 'center') return estHeader ? 'headerEvenCenter' : 'footerEvenCenter';
+      if (champ === 'right') return estHeader ? 'headerEvenRight' : 'footerEvenRight';
+      return estHeader ? 'headerEven' : 'footerEven';
+    }
+    if (pageCible === 'first' && furniture.differentFirstPage) {
+      if (champ === 'left') return estHeader ? 'firstPageHeaderLeft' : 'firstPageFooterLeft';
+      if (champ === 'center') return estHeader ? 'firstPageHeaderCenter' : 'firstPageFooterCenter';
+      if (champ === 'right') return estHeader ? 'firstPageHeaderRight' : 'firstPageFooterRight';
+      return estHeader ? 'firstPageHeader' : 'firstPageFooter';
+    }
+    if (champ === 'left') return estHeader ? 'headerLeft' : 'footerLeft';
+    if (champ === 'center') return estHeader ? 'headerCenter' : 'footerCenter';
+    if (champ === 'right') return estHeader ? 'headerRight' : 'footerRight';
+    return estHeader ? 'header' : 'footer';
+  };
+
+  const majChamp = (champ: 'left' | 'center' | 'right' | 'single', valeur: string): void => {
+    const cle = cleDe(champ);
+    onChange({ [cle]: valeur } as unknown as Partial<PageFurniture>, `texte:${cle}`);
+  };
+
+  /**
+   * Alignement de la bande — résolu comme le fait la composition des zones :
+   * une page paire a le sien, à défaut celui des pages impaires.
+   */
+  const cleAlign =
+    pageCible === 'even' && furniture.differentEvenOdd
+      ? estHeader
+        ? 'headerEvenAlign'
+        : 'footerEvenAlign'
+      : estHeader
+        ? 'headerAlign'
+        : 'footerAlign';
+
+  const alignCourant: FurnitureAlign =
+    pageCible === 'even' && furniture.differentEvenOdd
+      ? (estHeader
+          ? furniture.headerEvenAlign ?? furniture.headerAlign
+          : furniture.footerEvenAlign ?? furniture.footerAlign)
+      : estHeader
+        ? furniture.headerAlign
+        : furniture.footerAlign;
+
+  /**
+   * Changer l'alignement **déplace** le texte quand une seule zone est remplie.
+   *
+   * Chaque zone porte déjà son propre alignement — c'est ce que disent leurs
+   * libellés —, si bien que ce réglage ne gouvernait que la ligne simple :
+   * demander « à gauche » un en-tête posé en zone droite ne déplaçait rien, et
+   * le texte restait à droite. Le déplacer est ce que le geste veut dire, et
+   * c'est sans ambiguïté tant qu'une seule zone est en jeu.
+   *
+   * Dès que deux zones portent du texte, la mise en page est délibérée — un
+   * titre à gauche et une date à droite ne doivent pas se retrouver empilés :
+   * le réglage ne touche alors qu'à lui-même, comme avant.
+   */
+  const alignerBande = (valeur: FurnitureAlign): void => {
+    const remplies = (
+      [
+        ['left', valGauche],
+        ['center', valCentre],
+        ['right', valDroite],
+      ] as const
+    ).filter(([, texte]) => texte.trim().length > 0);
+
+    const seule = remplies.length === 1 ? remplies[0] : null;
+    if (!seule || seule[0] === valeur) {
+      onChange({ [cleAlign]: valeur } as unknown as Partial<PageFurniture>);
+      return;
     }
 
-    onChange({ [cle]: valeur } as unknown as Partial<PageFurniture>, `texte:${cle}`);
+    onChange({
+      [cleDe(seule[0])]: '',
+      [cleDe(valeur)]: seule[1],
+      [cleAlign]: valeur,
+    } as unknown as Partial<PageFurniture>);
   };
 
   return (
@@ -924,7 +984,13 @@ export function FurnitureBandEditor({
               onFermer={() => onSelect(null)}
             />
           ) : (
-            <ReglagesDeBande band={band} furniture={furniture} onChange={onChange} />
+            <ReglagesDeBande
+              band={band}
+              furniture={furniture}
+              onChange={onChange}
+              alignement={alignCourant}
+              onAlignement={alignerBande}
+            />
           )}
         </aside>
       </div>
@@ -984,10 +1050,18 @@ function ReglagesDeBande({
   band,
   furniture,
   onChange,
+  alignement,
+  onAlignement,
 }: {
   band: FurnitureBand;
   furniture: PageFurniture;
   onChange: (maj: MajFurniture, fusion?: string) => void;
+  /*
+   * L'alignement vient du parent : lui seul sait quelle page est à l'écran —
+   * paire, première ou courante — donc quelles zones le réglage gouverne.
+   */
+  alignement: FurnitureAlign;
+  onAlignement: (valeur: FurnitureAlign) => void;
 }): JSX.Element {
   const estHeader = band === 'header';
   const libelles = LIBELLES[band];
@@ -1014,13 +1088,7 @@ function ReglagesDeBande({
         }
       />
 
-      <Alignement
-        label="Alignement par défaut"
-        valeur={estHeader ? furniture.headerAlign : furniture.footerAlign}
-        onChange={(valeur) =>
-          onChange(estHeader ? { headerAlign: valeur } : { footerAlign: valeur })
-        }
-      />
+      <Alignement label="Alignement du texte" valeur={alignement} onChange={onAlignement} />
 
       <Mesure
         label="Taille du texte"

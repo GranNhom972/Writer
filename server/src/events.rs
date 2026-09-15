@@ -94,7 +94,11 @@ async fn stream(
     // État courant d'abord : un observateur qui se branche en cours de route doit
     // voir le document, pas seulement les modifications à venir.
     let ouverture = event(&record, &handle, "snapshot", 0);
-    if sender.send(WsMessage::Text(ouverture.to_string())).await.is_err() {
+    if sender
+        .send(WsMessage::Text(ouverture.to_string()))
+        .await
+        .is_err()
+    {
         return;
     }
 

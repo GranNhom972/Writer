@@ -342,7 +342,8 @@ pub async fn list_restore_points(
 
     let store = state.store.clone();
     let key = doc_id.to_string();
-    let points = joined(tokio::task::spawn_blocking(move || store.list_restore_points(&key)).await)??;
+    let points =
+        joined(tokio::task::spawn_blocking(move || store.list_restore_points(&key)).await)??;
 
     Ok(Json(json!({ "restore_points": points })))
 }
@@ -383,8 +384,9 @@ pub async fn restore_document(
     let store = state.store.clone();
     let source = doc_id.to_string();
     let point = body.restore_point.clone();
-    let etat =
-        joined(tokio::task::spawn_blocking(move || store.read_restore_point(&source, &point)).await)??;
+    let etat = joined(
+        tokio::task::spawn_blocking(move || store.read_restore_point(&source, &point)).await,
+    )??;
 
     let nouveau = Uuid::now_v7();
     let titre = body

@@ -31,9 +31,9 @@ use uuid::Uuid;
 
 use crate::api::DocumentMeta;
 use crate::auth::{identity_from_headers, AuthMode, Scope};
+use crate::content;
 use crate::doc::DocHandle;
 use crate::error::{joined, AppError, AppResult};
-use crate::content;
 use crate::state::AppState;
 
 /// Longueur minimale d'un `token_session`. Un jeton court serait énumérable :
@@ -241,7 +241,8 @@ pub async fn create_session(
     {
         let store = state.store.clone();
         let token = token_session.clone();
-        let existe = joined(tokio::task::spawn_blocking(move || store.session_exists(&token)).await)?;
+        let existe =
+            joined(tokio::task::spawn_blocking(move || store.session_exists(&token)).await)?;
         if existe {
             return Err(AppError::Conflict(format!(
                 "une session porte déjà le jeton « {token_session} »"
@@ -284,7 +285,10 @@ pub async fn create_session(
 
     let store = state.store.clone();
     let token_for_claim = token_session.clone();
-    joined(tokio::task::spawn_blocking(move || store.create_session(&token_for_claim, &record_json)).await)??;
+    joined(
+        tokio::task::spawn_blocking(move || store.create_session(&token_for_claim, &record_json))
+            .await,
+    )??;
 
     if let Err(e) = install_document(&state, &record, &title, amorce).await {
         // Sans ce retrait, le jeton resterait pris par une session sans document,
@@ -503,7 +507,9 @@ pub async fn invite_participant(
         .map_err(|e| AppError::Internal(format!("session non sérialisable: {e}")))?;
     let store = state.store.clone();
     let token = token_session.clone();
-    joined(tokio::task::spawn_blocking(move || store.replace_session(&token, &record_json)).await)??;
+    joined(
+        tokio::task::spawn_blocking(move || store.replace_session(&token, &record_json)).await,
+    )??;
 
     let mise_a_jour = Arc::new(mise_a_jour);
     state.insert_session(mise_a_jour.clone());

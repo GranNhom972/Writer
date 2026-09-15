@@ -172,10 +172,13 @@ impl AppState {
             return Ok(existing.clone());
         }
 
-        let raw = self.store.read_session(token_session).map_err(|e| match e {
-            AppError::NotFound => AppError::SessionNotFound,
-            other => other,
-        })?;
+        let raw = self
+            .store
+            .read_session(token_session)
+            .map_err(|e| match e {
+                AppError::NotFound => AppError::SessionNotFound,
+                other => other,
+            })?;
         let record: SessionRecord = serde_json::from_str(&raw)
             .map_err(|e| AppError::Internal(format!("session illisible: {e}")))?;
         let record = Arc::new(record);
@@ -365,10 +368,9 @@ mod auth_mode_tests {
     /// serveur par son propre script suffisait à y retomber.
     #[test]
     fn omission_gives_jwt_not_dev() {
-        let mode = avec_env(
-            &[("WRITER_AUTH_MODE", None), ("WRITER_ENV", None)],
-            || Config::from_env().auth.mode,
-        );
+        let mode = avec_env(&[("WRITER_AUTH_MODE", None), ("WRITER_ENV", None)], || {
+            Config::from_env().auth.mode
+        });
         assert_eq!(mode, AuthMode::Jwt);
     }
 
@@ -384,7 +386,10 @@ mod auth_mode_tests {
     #[test]
     fn production_refuses_dev_mode_even_when_asked() {
         let mode = avec_env(
-            &[("WRITER_AUTH_MODE", Some("dev")), ("WRITER_ENV", Some("production"))],
+            &[
+                ("WRITER_AUTH_MODE", Some("dev")),
+                ("WRITER_ENV", Some("production")),
+            ],
             || Config::from_env().auth.mode,
         );
         assert_eq!(mode, AuthMode::Jwt);
@@ -393,7 +398,10 @@ mod auth_mode_tests {
     #[test]
     fn an_unknown_value_falls_back_to_jwt() {
         let mode = avec_env(
-            &[("WRITER_AUTH_MODE", Some("nimporte-quoi")), ("WRITER_ENV", None)],
+            &[
+                ("WRITER_AUTH_MODE", Some("nimporte-quoi")),
+                ("WRITER_ENV", None),
+            ],
             || Config::from_env().auth.mode,
         );
         assert_eq!(mode, AuthMode::Jwt);

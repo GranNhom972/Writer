@@ -28,7 +28,7 @@ interface Snapshot {
 
 /** Signature de regroupement d'une frappe. */
 export interface GroupingKey {
-  kind: 'insert' | 'delete' | 'resize';
+  kind: 'insert' | 'delete' | 'resize' | 'settings';
   blockId: string;
   /** Position du curseur **avant** l'opération. */
   offsetBefore: number;
@@ -213,6 +213,26 @@ export function dragGroup(handleId: string): GroupingKey {
   return {
     kind: 'resize',
     blockId: handleId,
+    offsetBefore: 0,
+    offsetAfter: 0,
+    isWordDelimiter: false,
+  };
+}
+
+/**
+ * Clé de regroupement d'un **réglage** modifié en continu — un champ d'en-tête
+ * qu'on tape, une marge qu'on tire à la règle.
+ *
+ * Même forme que `dragGroup`, et pour la même raison : le geste émet une
+ * transaction par frappe ou par mouvement, et c'est l'identité du réglage —
+ * portée par `blockId`, faute d'un nœud à nommer — qui décide de leur
+ * continuité. Sans elle, taper un en-tête de vingt caractères poserait vingt
+ * entrées d'annulation ; `Ctrl+Z` en défait une, comme un mot.
+ */
+export function settingsGroup(settingId: string): GroupingKey {
+  return {
+    kind: 'settings',
+    blockId: settingId,
     offsetBefore: 0,
     offsetAfter: 0,
     isWordDelimiter: false,
