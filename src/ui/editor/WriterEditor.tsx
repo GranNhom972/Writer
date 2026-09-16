@@ -72,6 +72,8 @@ import type { ConnectionStatus, PeerPresence } from '../../domain/collab/session
 import './editor.css';
 
 const PAGE_GAP_PX = 16;
+/** Rembourrage horizontal de la surface de pages, gouttières comprises. */
+const SURFACE_GUTTER_PX = 24;
 
 /** Écart entre le bord droit de la feuille et la bande de commentaires. */
 const COMMENT_GUTTER_GAP_PX = 16;
@@ -286,6 +288,31 @@ export function WriterEditor({
   const pileWidthPx =
     geometry.pageWidthPx +
     (hasComments ? COMMENT_GUTTER_GAP_PX + COMMENT_BAND_WIDTH_PX : 0);
+
+  /**
+   * Ajustement à la largeur, à l'ouverture seulement.
+   *
+   * Une page A4 fait 794px : sur un téléphone de 412px, le document s'ouvrait
+   * décalé sur sa moitié gauche et entraînait la fenêtre entière en défilement
+   * horizontal. On réduit donc le zoom d'entrée pour que la page tienne —
+   * jamais pour l'agrandir, un écran large garde son 100 %.
+   *
+   * Une seule fois : passé l'ouverture, le zoom appartient à qui écrit, et une
+   * rotation d'écran ne doit pas défaire son réglage.
+   */
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const zoomAjusteRef = useRef(false);
+  useEffect(() => {
+    if (zoomAjusteRef.current || pileWidthPx <= 0) return;
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    const disponible = surface.clientWidth - SURFACE_GUTTER_PX;
+    if (disponible <= 0) return;
+    zoomAjusteRef.current = true;
+    if (pileWidthPx <= disponible) return;
+    // `setZoom` borne lui-même à [MIN_ZOOM, MAX_ZOOM].
+    setZoom(disponible / pileWidthPx);
+  }, [pileWidthPx, setZoom]);
 
   /**
    * Message annoncé aux lecteurs d'écran.
@@ -1391,7 +1418,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         />
 
         {/* Surface des pages physiques */}
-        <div className="writer-surface" style={{ flex: 1 }}>
+        <div ref={surfaceRef} className="writer-surface" style={{ flex: 1 }}>
           {/*
             Cadre du zoom. Il ne contient rien lui-même : sa seule raison d'être
             est de porter, en pixels, la taille **mise à l'échelle** du contenu.

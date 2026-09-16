@@ -96,20 +96,11 @@ export function Ruler({
   };
 
   return (
+    // Mise en page portée par la feuille de style et non en `style` inline :
+    // un style inline l'emporte sur toute règle de classe, et empêchait de
+    // masquer la règle sur téléphone (voir `.ruler` dans app.css).
     <div
       className="ruler ruler-container"
-      style={{
-        width: '100%',
-        display: 'flex',
-        justifyContent: 'center',
-        backgroundColor: 'var(--bg-canvas)',
-        borderBottom: '1px solid var(--border-subtle)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        padding: '0 var(--space-5)',
-        boxSizing: 'border-box',
-      }}
       onDoubleClick={handleDoubleClick}
       title="Règle — Double-cliquez pour ouvrir les paramètres de marges et styles"
     >
