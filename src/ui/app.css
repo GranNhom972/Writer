@@ -3769,3 +3769,152 @@
     flex: 1 0 auto;
   }
 }
+
+/* ==========================================================================
+   Mobile — mobilier de l'éditeur
+   ==========================================================================
+   Le travail mobile déjà fait ici couvrait les fenêtres modales, les onglets
+   et les `.btn`. Restait le mobilier de l'éditeur lui-même : barre de titre,
+   barre de menus, ruban et règle, tous dessinés pour la souris. Sur un
+   téléphone, la barre de menus débordait de l'écran (« Aide » à 503px pour
+   412px de large) et entraînait toute la page en défilement horizontal.
+   ========================================================================== */
+
+/* Règle graduée (auparavant en style inline dans Ruler.tsx). */
+.ruler-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  background-color: var(--bg-canvas);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 0 var(--space-5);
+  box-sizing: border-box;
+}
+
+/* Bandeau d'état de la coque (« Document CloudServ ouvert… »). Il portait
+   --text-xs (11px) et un « Fermer » à 11px : c'est pourtant lui qui dit où
+   partent les modifications. */
+.shell-banner {
+  font-size: var(--text-md);
+}
+.shell-banner__close {
+  padding: 2px 8px;
+  font-size: var(--text-md);
+  flex: none;
+}
+
+@media (pointer: coarse) {
+  /* La densité est la même variable que sur bureau : on la relève pour le
+     doigt plutôt que de reprendre chaque commande une par une. */
+  :root {
+    --control-height: 44px;
+    --control-height-sm: 40px;
+  }
+
+  /* Entrées de menu : 21px de haut, et collées les unes aux autres. */
+  .menubar__trigger {
+    min-height: 44px;
+    padding-inline: var(--space-3);
+    font-size: var(--text-lg);
+  }
+
+  /* Listes du ruban : sous 16px, iOS zoome de lui-même à l'ouverture. */
+  .ribbon__select select,
+  .ribbon__size,
+  .titlebar__input {
+    font-size: 16px;
+  }
+  .titlebar__input {
+    min-height: 44px;
+  }
+
+  .shell-banner,
+  .shell-banner__close {
+    font-size: var(--text-lg);
+  }
+
+  /* Champ invisible qui reçoit la frappe : il est à opacité nulle, mais c'est
+     lui qui prend le focus quand on touche la page. Sous 16px, iOS zoome donc
+     le document à la première frappe, sans que rien ne l'explique. */
+  .writer-input {
+    font-size: 16px;
+  }
+
+  /* Pastilles de présence : 26px avec des initiales à 11px, chevauchées de
+     6px par leur voisine — ni visables ni lisibles. */
+  .presence__avatar {
+    width: 32px;
+    height: 32px;
+    font-size: var(--text-md);
+  }
+}
+
+@media (max-width: 767px) {
+  /* Huit menus ne tiennent pas sur 412px. Plutôt que de les replier sur
+     plusieurs lignes — ce qui repousserait le document vers le bas —, la
+     barre défile horizontalement dans sa propre bande. */
+  .menubar {
+    margin-left: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    /* Sans ça, une barre en `flex` comprime ses entrées au lieu de défiler. */
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .menubar::-webkit-scrollbar {
+    display: none;
+  }
+  .menubar__item {
+    flex: none;
+  }
+  .menubar__trigger {
+    white-space: nowrap;
+  }
+
+  /* Les deux règles graduées (`.regle` et `.ruler`) sont des instruments de
+     précision à la souris : graduations de 8 et 9px, poignées de marge à
+     faire glisser. Au doigt elles ne servent à rien, et `.ruler` impose au
+     document la largeur d'une page entière. */
+  .regle,
+  .ruler,
+  .ruler-container {
+    display: none;
+  }
+
+  .titlebar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+  .titlebar__identity {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  /* 280px de minimum sur un écran de 412 ne laissait rien aux actions. */
+  .titlebar__input {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .ribbon {
+    padding-block: var(--space-2);
+    gap: var(--space-1);
+  }
+
+  /* Le document défile dans sa propre zone : la page A4 ne doit jamais
+     entraîner la fenêtre entière en défilement horizontal. */
+  .document-area {
+    min-width: 0;
+    overscroll-behavior-x: contain;
+  }
+
+  .statusbar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding-block: var(--space-2);
+  }
+}

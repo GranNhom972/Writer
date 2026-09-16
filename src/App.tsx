@@ -570,15 +570,16 @@ export function App(): JSX.Element {
     <div className="shell">
       {message && (
         <div
+          className="shell-banner"
           role="status"
           style={{
             flex: 'none',
             padding: '6px 16px',
-            fontSize: 'var(--text-xs)',
             color: 'var(--fg-secondary)',
             background: 'var(--bg-sunken)',
             borderBottom: '1px solid var(--border-subtle)',
             display: 'flex',
+            gap: 'var(--space-3)',
             justifyContent: 'space-between',
             alignItems: 'center',
           }}
@@ -586,8 +587,7 @@ export function App(): JSX.Element {
           <span>{message}</span>
           <button
             type="button"
-            className="btn btn--ghost"
-            style={{ padding: '2px 8px', fontSize: '11px' }}
+            className="btn btn--ghost shell-banner__close"
             onClick={() => setMessage(null)}
           >
             Fermer
