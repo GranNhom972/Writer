@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Une bande d'en-tête ou de pied physique pour OpenOffice Writer.
+ * A physical header or footer band for OpenOffice Writer.
  *
- * Un seul composant pour les deux usages (rendu sur la feuille et atelier du dialogue).
- * En mode édition, il aimante les déplacements sur les repères magnétiques de la page
- * (marges, centre, ligne de base, autres blocs) et rend compte visuellement des alignements.
+ * A single component for both uses (rendering on the sheet and the dialog's workshop). In edit mode, it snaps movements to the page's magnetic guides (margins, center,
+ * baseline, other blocks) and shows the alignments visually.
  */
 
 import {
@@ -36,13 +35,13 @@ import {
   type SnapTarget,
 } from '../../domain/document/pageFurniture';
 
-/** Taille apparente d'un bloc, en millimètres — mesurée, jamais devinée. */
+/** Apparent size of a block, in millimeters: measured, never guessed. */
 export interface BlockMetrics {
   widthMm: number;
   heightMm: number;
 }
 
-/** Ce que la bande donne à lire pendant un geste. */
+/** What the band gives to read during a gesture. */
 export interface GestureReadout {
   xMm: number;
   yMm: number;
@@ -55,34 +54,34 @@ interface FurnitureBandViewProps {
   furniture: PageFurniture;
   band: FurnitureBand;
   contexte: FurnitureContext;
-  /** Largeur utile de la bande, en millimètres (page moins les marges). */
+  /** Usable width of the band, in millimeters (page minus the margins). */
   usableMm: number;
-  /** Hauteur de la bande, en millimètres. */
+  /** Height of the band, in millimeters. */
   heightMm: number;
-  /** Bloc sélectionné, en mode édition. */
+  /** Selected block, in edit mode. */
   selectedId?: string | null;
-  /** Bloc actuellement en mode rognage. */
+  /** Block currently in crop mode. */
   cropActiveId?: string | null;
   onSelect?: (id: string | null) => void;
-  /** Déplacement terminé : nouvelles coordonnées du bloc. */
+  /** Move finished: the block's new coordinates. */
   onMove?: (id: string, x: number, y: number) => void;
-  /** Redimensionnement d'un bloc. */
+  /** Resizing of a block. */
   onResize?: (id: string, widthMm: number, heightMm: number, x?: number, y?: number) => void;
-  /** Modification du rognage d'un bloc. */
+  /** Change of a block's crop. */
   onCropChange?: (id: string, cropTop: number, cropRight: number, cropBottom: number, cropLeft: number) => void;
-  /** Annuler le rognage en cours et revenir au rognage précédent. */
+  /** Cancel the crop in progress and go back to the previous crop. */
   onCropCancel?: (id: string) => void;
-  /** Bascule du mode rognage. */
+  /** Toggles crop mode. */
   onToggleCrop?: (id: string | null) => void;
-  /** Fin d'un geste. */
+  /** End of a gesture. */
   onCommit?: () => void;
-  /** Position et dimensions lues en direct pendant un geste ; `null` au repos. */
+  /** Position and dimensions read live during a gesture; `null` at rest. */
   onReadout?: (lecture: GestureReadout | null) => void;
-  /** Taille apparente de chaque bloc, mesurée après rendu. */
+  /** Apparent size of each block, measured after rendering. */
   onMetrics?: (metrics: Record<string, BlockMetrics>) => void;
 }
 
-/** Texte de la ligne de base, jetons substitués. */
+/** Text of the baseline, tokens substituted. */
 function ligneDeBase(
   furniture: PageFurniture,
   band: FurnitureBand,
@@ -704,7 +703,7 @@ export function FurnitureBandView({
         />
       )}
 
-      {/* Filet séparateur d'en-tête (en bas) */}
+      {/* Header separator line (at the bottom) */}
       {band === 'header' && furniture.headerSeparator && (
         <div
           className="bande__separator bande__separator--header"
@@ -719,7 +718,7 @@ export function FurnitureBandView({
         />
       )}
 
-      {/* Filet séparateur de pied (en haut) */}
+      {/* Footer separator line (at the top) */}
       {band === 'footer' && furniture.footerSeparator && (
         <div
           className="bande__separator bande__separator--footer"

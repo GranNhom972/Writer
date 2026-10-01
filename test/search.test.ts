@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Rechercher et remplacer — `SwCursor::Find` / `findtxt.cxx`.
+ * Find and replace: `SwCursor::Find` / `findtxt.cxx`.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -30,7 +30,7 @@ function documentOf(blocks: WriterDocumentState['blocks']): WriterDocumentState 
   return { ...createEmptyDocument('Essai'), blocks };
 }
 
-/** Texte trouvé pour chaque occurrence, dans l'ordre. */
+/** Text found for each match, in order. */
 function found(doc: WriterDocumentState, query: string, options?: Partial<SearchOptions>): string[] {
   return findMatches(doc, query, { ...DEFAULT_SEARCH_OPTIONS, ...options }).map((match) => {
     const paragraph = paragraphIndex(doc).byId.get(match.blockId)!.paragraph;
@@ -51,8 +51,7 @@ describe('recherche', () => {
   });
 
   it('traverse un changement de formatage', () => {
-    // « bon » et « jour » sont deux runs : l'occurrence les enjambe, parce que
-    // les runs ne sont qu'une découpe de la même chaîne.
+    // "bon" and "jour" are two runs: the match spans them, because runs are only a way of cutting up the same string.
     const doc = documentOf([
       createParagraph('', { runs: [makeRun('bon'), makeRun('jour', { bold: true })] }),
     ]);
@@ -66,9 +65,9 @@ describe('recherche', () => {
 
   it('délimite le mot entier, accents compris', () => {
     const doc = documentOf([createParagraph('été, étérnel, l’été')]);
-    // Sans l'option, « été » se trouve aussi dans « étérnel ».
+    // Without the option, "été" is also found inside "étérnel".
     expect(found(doc, 'été')).toHaveLength(3);
-    // Avec, « étérnel » est exclu : `\b` d'ASCII aurait coupé sur le « é ».
+    // With it, "étérnel" is excluded: an ASCII `\b` would have cut on the "é".
     expect(found(doc, 'été', { wholeWord: true })).toHaveLength(2);
   });
 
@@ -90,7 +89,7 @@ describe('recherche', () => {
   });
 
   it('ne boucle pas sur une occurrence de longueur nulle', () => {
-    // Un motif qui ne consomme rien ferait tourner `exec` sur place.
+    // A pattern that consumes nothing would make `exec` loop in place.
     const doc = documentOf([createParagraph('abc')]);
     expect(found(doc, '').length).toBe(0);
   });
@@ -110,8 +109,7 @@ describe('occurrence courante', () => {
   });
 
   it('boucle sur la première quand le curseur est après la dernière', () => {
-    // Une recherche qui s'arrêterait à la fin obligerait à revenir en haut à la
-    // main : elle reprend au début, comme partout ailleurs.
+    // A search that stopped at the end would force you to go back to the top by hand: it starts again from the beginning, as everywhere else.
     expect(matchNearest(doc, matches, { blockId, offset: 999 })).toBe(0);
   });
 
@@ -165,8 +163,7 @@ describe('remplacement', () => {
   });
 
   it('remplace de la fin vers le début sans décaler les suivantes', () => {
-    // Un remplacement plus long que l'occurrence décalerait les positions
-    // calculées si l'on procédait de gauche à droite.
+    // A replacement longer than the match would shift the computed positions if we went from left to right.
     const doc = documentOf([createParagraph('x-x-x')]);
     const { state } = replaceAll(createEditorState(doc), 'x', DEFAULT_SEARCH_OPTIONS, 'LONG');
     expect(textOf(state)).toBe('LONG-LONG-LONG');
@@ -176,8 +173,7 @@ describe('remplacement', () => {
     const state = createEditorState(documentOf([createParagraph('texte')]));
     const résultat = replaceAll(state, 'absent', DEFAULT_SEARCH_OPTIONS, 'x');
     expect(résultat.count).toBe(0);
-    // L'état est rendu tel quel : une transaction vide n'entre pas dans
-    // l'historique.
+    // The state is returned as it is: an empty transaction does not enter the history.
     expect(résultat.state).toBe(state);
   });
 

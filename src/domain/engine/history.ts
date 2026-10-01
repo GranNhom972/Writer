@@ -1,31 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Historique d'annulation. Transposition de `SwUndoManager` / `SwUndo`
- * (`sw/source/core/undo/`).
+ * Undo history. (OpenOffice: `SwUndoManager` / `SwUndo`, `sw/source/core/undo/`.)
  *
- * Writer enregistre des **objets d'annulation** qui savent se rejouer à
- * l'envers. Ici, l'état du document est immuable et partagé structurellement :
- * conserver l'état d'avant coûte une référence, pas une copie. Une entrée
- * d'historique est donc le couple (avant, après), ce qui est à la fois
- * transactionnel et exactement inversible — la propriété que `SwUndo` obtient
- * au prix d'un objet par type d'opération.
+ * Writer records **undo objects** that know how to replay themselves backwards. Here the
+ * state of the document is immutable and structurally shared: keeping the previous state
+ * costs one reference, not a copy. A history entry is therefore the pair (before, after),
+ * which is both transactional and exactly invertible, the property `SwUndo` gets at the price
+ * of one object per type of operation.
  *
- * Le regroupement de la frappe reprend `SwUndoInsert::CanGrouping`
- * (`unins.cxx`) : des caractères tapés à la suite ne forment qu'une entrée tant
- * qu'ils restent de la même classe — lettres d'un côté, séparateurs de l'autre.
- * `Ctrl+Z` défait donc un mot, pas une lettre.
+ * The grouping of typing follows `SwUndoInsert::CanGrouping` (`unins.cxx`): characters typed
+ * in a row make a single entry as long as they stay in the same class, letters on one side and
+ * separators on the other. `Ctrl+Z` therefore undoes a word, not a letter.
  */
 
 import type { DocumentSelection, WriterDocumentState } from '../document/types';
 import type { EditorState } from './edit';
 
-/** Nombre d'entrées conservées — le défaut de Writer (`SW_MAX_UNDO`). */
+/** Number of entries kept: Writer's default (`SW_MAX_UNDO`). */
 export const MAX_UNDO_STEPS = 100;
 
 interface Snapshot {
@@ -33,15 +30,15 @@ interface Snapshot {
   selection: DocumentSelection;
 }
 
-/** Signature de regroupement d'une frappe. */
+/** Grouping signature of a keystroke. */
 export interface GroupingKey {
   kind: 'insert' | 'delete' | 'resize' | 'settings';
   blockId: string;
-  /** Position du curseur **avant** l'opération. */
+  /** Cursor position **before** the operation. */
   offsetBefore: number;
-  /** Position du curseur **après** : la frappe suivante doit y reprendre. */
+  /** Cursor position **after**: the next keystroke must resume there. */
   offsetAfter: number;
-  /** Le caractère traité est-il un séparateur de mot ? */
+  /** Is the processed character a word separator? */
   isWordDelimiter: boolean;
 }
 
@@ -74,7 +71,7 @@ export function canRedo(session: EditorSession): boolean {
   return session.history.future.length > 0;
 }
 
-/** Intitulé de la prochaine annulation, pour le menu Édition. */
+/** Label of the next undo, for the Edit menu. */
 export function undoLabel(session: EditorSession): string | null {
   return session.history.past[session.history.past.length - 1]?.label ?? null;
 }
@@ -83,7 +80,7 @@ export function redoLabel(session: EditorSession): string | null {
   return session.history.future[session.history.future.length - 1]?.label ?? null;
 }
 
-/** Un caractère est-il un séparateur de mot ? (`CharClass::isLetterNumeric`) */
+/** Is a character a word separator? (`CharClass::isLetterNumeric`) */
 export function isWordDelimiter(char: string): boolean {
   return !/[\p{L}\p{N}_]/u.test(char);
 }
@@ -93,29 +90,29 @@ function snapshot(state: EditorState): Snapshot {
 }
 
 /**
- * Deux opérations successives peuvent-elles n'en faire qu'une ?
+ * Can two successive operations be merged into one?
  *
- * Condition de `SwUndoInsert::CanGrouping` : même nœud, position contiguë, et
- * même classe de caractère. Passer d'une lettre à une espace ferme le groupe,
- * ce qui donne à `Ctrl+Z` une granularité de mot.
+ * Condition of `SwUndoInsert::CanGrouping`: same node, contiguous position, and same character
+ * class. Going from a letter to a space closes the group, which gives `Ctrl+Z` a word
+ * granularity.
  */
 function canGroup(previous: GroupingKey | null, next: GroupingKey | null): boolean {
   if (!previous || !next) return false;
   return (
     previous.kind === next.kind &&
     previous.blockId === next.blockId &&
-    // Contiguïté : la nouvelle frappe reprend exactement là où la précédente
-    // s'est arrêtée. Cliquer ailleurs entre deux lettres ferme donc le groupe.
+    // Contiguity: the new keystroke resumes exactly where the previous one stopped. Clicking
+    // somewhere else between two letters therefore closes the group.
     previous.offsetAfter === next.offsetBefore &&
     previous.isWordDelimiter === next.isWordDelimiter
   );
 }
 
 /**
- * Enregistre une transaction.
+ * Records a transaction.
  *
- * Le refaire est purgé : après une nouvelle action, la branche abandonnée n'est
- * plus atteignable — même règle que `SwUndoManager::ClearRedo`.
+ * The redo stack is purged: after a new action, the abandoned branch can no longer be reached.
+ * Same rule as `SwUndoManager::ClearRedo`.
  */
 export function commit(
   session: EditorSession,
@@ -124,8 +121,8 @@ export function commit(
   grouping: GroupingKey | null = null,
 ): EditorSession {
   if (next.doc === session.state.doc) {
-    // Rien n'a changé dans le document : on met à jour le curseur sans créer
-    // d'entrée. Un déplacement de curseur n'est pas une action à annuler.
+    // Nothing has changed in the document: we update the cursor without creating an entry. Moving
+    // the cursor is not an action to undo.
     return { state: next, history: session.history };
   }
 
@@ -133,8 +130,8 @@ export function commit(
   const last = past[past.length - 1];
 
   if (last && canGroup(last.grouping, grouping)) {
-    // Le groupe s'étend : son état d'arrivée et sa position de fin avancent,
-    // mais son état de départ — donc ce que `Ctrl+Z` restaurera — ne bouge pas.
+    // The group grows: its end state and end position advance, but its start state, and so what
+    // `Ctrl+Z` will restore, does not move.
     past[past.length - 1] = {
       ...last,
       after: snapshot(next),
@@ -154,10 +151,10 @@ export function commit(
 }
 
 /**
- * Annule la dernière transaction.
+ * Undoes the last transaction.
  *
- * Le curseur revient là où il était **avant** l'action : c'est ce qui rend
- * l'annulation lisible, l'usager retrouve le point où il travaillait.
+ * The cursor goes back to where it was **before** the action: this is what makes undo readable,
+ * the user finds the spot where they were working.
  */
 export function undo(session: EditorSession): EditorSession {
   const past = [...session.history.past];
@@ -189,15 +186,15 @@ export function redo(session: EditorSession): EditorSession {
   };
 }
 
-/** Clé de regroupement d'une frappe de texte. */
+/** Grouping key of a text keystroke. */
 export function typingGroup(
   blockId: string,
   offsetBefore: number,
   offsetAfter: number,
   text: string,
 ): GroupingKey | null {
-  // Un collage ou une saisie multi-caractères (IME) n'est pas de la frappe :
-  // il forme sa propre entrée, annulable d'un seul coup.
+  // A paste or a multi-character input (IME) is not typing: it forms its own entry, which can be
+  // undone in one go.
   if (text.length !== 1) return null;
   return {
     kind: 'insert',
@@ -209,12 +206,11 @@ export function typingGroup(
 }
 
 /**
- * Clé de regroupement d'un geste continu — tirer une poignée de colonne.
+ * Grouping key of a continuous gesture, such as dragging a column handle.
  *
- * Un glissement émet une transaction par mouvement de souris. Sans
- * regroupement, défaire un seul geste demanderait autant de `Ctrl+Z` qu'il a
- * produit d'événements. Les offsets sont constants : c'est l'identité de la
- * poignée, portée par `blockId`, qui décide de la continuité.
+ * A drag emits one transaction per mouse movement. Without grouping, undoing a single gesture
+ * would take as many `Ctrl+Z` as it produced events. The offsets are constant: it is the identity
+ * of the handle, carried by `blockId`, that decides continuity.
  */
 export function dragGroup(handleId: string): GroupingKey {
   return {
@@ -227,14 +223,13 @@ export function dragGroup(handleId: string): GroupingKey {
 }
 
 /**
- * Clé de regroupement d'un **réglage** modifié en continu — un champ d'en-tête
- * qu'on tape, une marge qu'on tire à la règle.
+ * Grouping key of a **setting** changed continuously, such as a header field being typed or a
+ * margin dragged on the ruler.
  *
- * Même forme que `dragGroup`, et pour la même raison : le geste émet une
- * transaction par frappe ou par mouvement, et c'est l'identité du réglage —
- * portée par `blockId`, faute d'un nœud à nommer — qui décide de leur
- * continuité. Sans elle, taper un en-tête de vingt caractères poserait vingt
- * entrées d'annulation ; `Ctrl+Z` en défait une, comme un mot.
+ * Same shape as `dragGroup`, and for the same reason: the gesture emits one transaction per
+ * keystroke or per movement, and it is the identity of the setting, carried by `blockId` for lack
+ * of a node to name, that decides their continuity. Without it, typing a twenty-character header
+ * would put twenty undo entries; `Ctrl+Z` undoes one, like a word.
  */
 export function settingsGroup(settingId: string): GroupingKey {
   return {
@@ -246,7 +241,7 @@ export function settingsGroup(settingId: string): GroupingKey {
   };
 }
 
-/** Clé de regroupement d'un effacement caractère par caractère. */
+/** Grouping key of character-by-character deletion. */
 export function deletionGroup(
   blockId: string,
   offsetBefore: number,

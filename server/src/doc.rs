@@ -1,29 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en Rust, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to Rust. See the NOTICE and
+// LICENSE-APACHE files.
 
-//! Document répliqué en mémoire + canal de rediffusion.
+//! The replicated document in memory, plus the re-broadcast channel.
 //!
-//! Le serveur est un **relais + journal**, et non un séquenceur : il ne décide
-//! pas de l'ordre des modifications, parce que le CRDT n'en a pas besoin. Deux
-//! updates concurrentes convergent quel que soit l'ordre dans lequel chaque
-//! réplique les applique, et c'est cette propriété — et elle seule — qui permet
-//! à deux personnes d'écrire dans le même paragraphe sans s'effacer.
+//! The server is a **relay + log**, not a sequencer: it does not decide the order
+//! of modifications, because the CRDT does not need one. Two concurrent updates
+//! converge whatever order each replica applies them in, and this property, and
+//! only this one, lets two people type in the same paragraph without erasing each
+//! other.
 //!
-//! Ce que le serveur garde de son rôle précédent : la **durabilité**. La
-//! séquence reste
+//! What the server keeps from its previous role is **durability**. The sequence is
+//! still
 //!
-//!   valider → journaliser (`fsync`) → rediffuser
+//!   validate → log (`fsync`) → re-broadcast
 //!
-//! Rediffuser avant d'écrire exposerait à une perte que les pairs auraient déjà
-//! affichée.
+//! Re-broadcasting before writing would risk a loss the peers would already have
+//! displayed.
 //!
-//! Le contenu, lui, ne le regarde pas : il ne manipule que des octets opaques.
-//! Les seules routes qui ouvrent le document passent par `content.rs`, et elles
-//! sont toutes optionnelles.
+//! The content itself is none of its business: it only handles opaque bytes. The
+//! only routes that open the document go through `content.rs`, and they are all
+//! optional.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -39,13 +39,13 @@ use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
 use crate::content;
 use crate::error::{AppError, AppResult};
 
-/// Trame rediffusée aux autres clients d'un même document.
+/// A frame re-broadcast to the other clients of the same document.
 #[derive(Clone, Debug)]
 pub struct Fanout {
-    /// Connexion émettrice : elle ne se voit pas rediffuser sa propre trame.
+    /// Sending connection: it is not sent its own frame back.
     pub origin: u64,
     pub frame: Arc<Vec<u8>>,
-    /// Vrai quand la trame porte une modification durable (et non de la présence).
+    /// True when the frame carries a durable modification (and not presence).
     pub durable: bool,
 }
 
@@ -54,35 +54,35 @@ pub struct DocHandle {
     doc: Mutex<Doc>,
     pub tx: broadcast::Sender<Fanout>,
     updates_since_snapshot: AtomicUsize,
-    /// Nombre d'updates appliquées depuis le chargement.
+    /// Number of updates applied since the document was loaded.
     ///
-    /// Ce n'est **pas** une révision au sens de l'ancien séquenceur : rien ne
-    /// dépend de ce numéro, aucun client ne l'annonce, et deux répliques peuvent
-    /// parfaitement l'avoir différent tout en portant le même document. Il ne
-    /// sert qu'à renseigner la fiche du document et le flux d'observation.
+    /// This is **not** a revision in the sense of the old sequencer: nothing depends on
+    /// this number, no client announces it, and two replicas can perfectly well hold
+    /// different values while carrying the same document. It only fills in the
+    /// document's details and the observation feed.
     updates_total: AtomicU64,
     clients: AtomicUsize,
-    /// Dernière présence annoncée par chaque connexion, prête à être servie à
-    /// qui arrive.
+    /// Last presence announced by each connection, ready to be served to whoever
+    /// arrives.
     ///
-    /// La présence ne circule qu'au moment où elle change. Sans ce registre, un
-    /// arrivant ouvrirait un document partagé sur une liste de participants vide
-    /// alors que trois personnes y travaillent, et devrait attendre la
-    /// prochaine annonce de chacune — jusqu'à quinze secondes.
+    /// Presence only travels when it changes. Without this registry, a newcomer would
+    /// open a shared document on an empty participant list while three people are
+    /// working on it, and would have to wait for each one's next announcement, up to
+    /// fifteen seconds.
     ///
-    /// La table est bornée par le nombre de connexions simultanées autorisées
-    /// (`MAX_CLIENTS_PER_DOCUMENT`) : chaque entrée part à la fermeture.
+    /// The table is bounded by the number of simultaneous connections allowed
+    /// (`MAX_CLIENTS_PER_DOCUMENT`): each entry leaves when its connection closes.
     presences: Mutex<HashMap<u64, Arc<Vec<u8>>>>,
-    /// Compteur d'occupation, incrémenté à **chaque** arrivée et à chaque
-    /// départ. Voir `occupancy` : c'est lui qui distingue « le document est
-    /// resté vide » de « quelqu'un est passé pendant le délai de grâce ».
+    /// Occupancy counter, incremented on **every** arrival and every departure. See
+    /// `occupancy`: it is what tells "the document stayed empty" apart from "someone
+    /// came and went during the grace period".
     occupancy: AtomicU64,
-    /// Un déchargement vers CloudServ est-il déjà programmé ?
+    /// Is a hand-over to CloudServ already scheduled?
     ///
-    /// Chaque frappe passe par `schedule_checkpoint` : sans ce témoin, une
-    /// minute de saisie programmerait des centaines de tâches concurrentes, qui
-    /// projetteraient toutes le même document pour se doubler les unes les
-    /// autres. Une seule attend, et elle décharge l'état le plus récent.
+    /// Every keystroke goes through `schedule_checkpoint`: without this marker, a
+    /// minute of typing would schedule hundreds of concurrent tasks, all projecting the
+    /// same document only to duplicate each other. Only one waits, and it hands over the
+    /// most recent state.
     checkpoint_scheduled: AtomicBool,
 }
 
@@ -102,30 +102,29 @@ impl DocHandle {
         }
     }
 
-    /// Réserve le droit de programmer un déchargement. Rend `true` si l'appelant
-    /// l'obtient, `false` si une tâche veille déjà.
+    /// Claims the right to schedule a hand-over. Returns `true` if the caller gets it,
+    /// `false` if a task is already waiting.
     pub fn claim_checkpoint(&self) -> bool {
         !self.checkpoint_scheduled.swap(true, Ordering::AcqRel)
     }
 
-    /// Rend la place, une fois le déchargement terminé — abouti ou non.
+    /// Gives the slot back once the hand-over has finished, successful or not.
     pub fn release_checkpoint(&self) {
         self.checkpoint_scheduled.store(false, Ordering::Release);
     }
 
     fn with_doc<T>(&self, f: impl FnOnce(&Doc) -> T) -> T {
-        // Un verrou empoisonné signifierait un panic pendant une transaction :
-        // on récupère l'état plutôt que de propager le panic à tout le serveur.
-        // Les autres documents n'y sont pour rien.
+        // A poisoned lock would mean a panic during a transaction: we recover the state
+        // rather than spread the panic to the whole server. The other documents have
+        // nothing to do with it.
         match self.doc.lock() {
             Ok(guard) => f(&guard),
             Err(poisoned) => f(&poisoned.into_inner()),
         }
     }
 
-    /// Applique une update CRDT. Idempotent : rejouer le journal est sans effet
-    /// de bord, ce qui rend le rechargement sûr même après une compaction
-    /// interrompue.
+    /// Applies a CRDT update. Idempotent: replaying the log has no side effect, which
+    /// makes reloading safe even after an interrupted compaction.
     pub fn apply_update(&self, bytes: &[u8]) -> AppResult<()> {
         let update = Update::decode_v1(bytes).map_err(|e| AppError::Crdt(e.to_string()))?;
         self.with_doc(|doc| {
@@ -136,12 +135,12 @@ impl DocHandle {
         Ok(())
     }
 
-    /// Amorce un document **vide** avec un contenu JSON.
+    /// Seeds an **empty** document with JSON content.
     ///
-    /// Le résultat est une update ordinaire : elle suit ensuite le même chemin
-    /// que n'importe quelle frappe. Amorcer un document déjà rempli y
-    /// ajouterait un second exemplaire du contenu — un CRDT ne remplace jamais,
-    /// il ajoute — d'où le contrôle chez l'appelant (`content::is_seeded`).
+    /// The result is an ordinary update: it then follows the same path as any
+    /// keystroke. Seeding a document that is already filled would add a second copy
+    /// of the content (a CRDT never replaces, it adds), hence the check on the
+    /// caller's side (`content::is_seeded`).
     pub fn seed(&self, document: &Value) -> AppResult<Vec<u8>> {
         let update = content::seed_update(document)?;
         self.apply_update(&update)?;
@@ -156,13 +155,13 @@ impl DocHandle {
         self.with_doc(|doc| doc.transact().state_vector().encode_v1())
     }
 
-    /// Différentiel à envoyer à un pair qui annonce `client_sv` (SyncStep1).
+    /// The difference to send to a peer that announces `client_sv` (SyncStep1).
     pub fn diff(&self, client_sv: &[u8]) -> AppResult<Vec<u8>> {
         let sv = StateVector::decode_v1(client_sv).map_err(|e| AppError::Crdt(e.to_string()))?;
         Ok(self.with_doc(|doc| doc.transact().encode_state_as_update_v1(&sv)))
     }
 
-    /// État complet compacté — pour l'instantané et les points de restauration.
+    /// The complete compacted state, for the snapshot and the restore points.
     pub fn full_state(&self) -> Vec<u8> {
         self.with_doc(|doc| {
             doc.transact()
@@ -170,11 +169,11 @@ impl DocHandle {
         })
     }
 
-    /// Le document, projeté en JSON, et le compte d'updates qui l'a produit.
+    /// The document projected to JSON, and the count of updates that produced it.
     pub fn snapshot(&self) -> (u64, Value) {
-        // Le compte est lu **sous le verrou** : hors de lui, une update
-        // pourrait s'intercaler entre la lecture de l'état et celle du numéro,
-        // et l'observateur repartirait d'un couple incohérent.
+        // The count is read **under the lock**: outside it, an update could slip in
+        // between reading the state and reading the number, and the observer would start
+        // again from an inconsistent pair.
         self.with_doc(|doc| {
             (
                 self.updates_total.load(Ordering::Acquire),
@@ -203,7 +202,7 @@ impl DocHandle {
         self.updates_since_snapshot.store(0, Ordering::Relaxed);
     }
 
-    /* ------------------------------------------------------------ présence */
+    /* ------------------------------------------------------------ presence */
 
     fn with_presences<T>(&self, f: impl FnOnce(&mut HashMap<u64, Arc<Vec<u8>>>) -> T) -> T {
         match self.presences.lock() {
@@ -212,22 +211,22 @@ impl DocHandle {
         }
     }
 
-    /// Retient la dernière présence d'une connexion (charge utile `awareness`).
+    /// Remembers the last presence of a connection (`awareness` payload).
     pub fn note_presence(&self, connection_id: u64, payload: Arc<Vec<u8>>) {
         self.with_presences(|map| {
             map.insert(connection_id, payload);
         });
     }
 
-    /// Oublie une connexion fermée. Sans cet appel, l'arrivant suivant se
-    /// verrait servir le curseur de quelqu'un qui est parti.
+    /// Forgets a closed connection. Without this call, the next newcomer would be
+    /// served the cursor of someone who has left.
     pub fn forget_presence(&self, connection_id: u64) {
         self.with_presences(|map| {
             map.remove(&connection_id);
         });
     }
 
-    /// Les présences connues, hors celle de l'appelant.
+    /// The known presences, except the caller's own.
     pub fn known_presences(&self, except: u64) -> Vec<Arc<Vec<u8>>> {
         self.with_presences(|map| {
             map.iter()
@@ -255,14 +254,14 @@ impl DocHandle {
         self.clients.load(Ordering::Relaxed)
     }
 
-    /// Témoin de va-et-vient, à relever avant d'attendre et à comparer après.
+    /// Marker of comings and goings: read it before waiting and compare it afterwards.
     ///
-    /// Un simple `active_clients() == 0` ne suffit pas à décider qu'un document
-    /// est abandonné : quelqu'un peut être arrivé **et reparti** pendant le
-    /// délai de grâce, ce qui laisse le compte à zéro alors que le document a
-    /// été rouvert entre-temps — et deux fermetures concurrentes le
-    /// sauvegarderaient deux fois. Ce compteur ne redescend jamais : si sa
-    /// valeur a bougé, la fermeture en cours n'est plus celle qui fait foi.
+    /// A simple `active_clients() == 0` is not enough to decide that a document is
+    /// abandoned: someone may have arrived **and left** during the grace period, which
+    /// leaves the count at zero although the document was reopened in the meantime,
+    /// and two concurrent closings would save it twice. This counter never goes back
+    /// down: if its value has moved, the closing in progress is no longer the one that
+    /// counts.
     pub fn occupancy(&self) -> u64 {
         self.occupancy.load(Ordering::Acquire)
     }
@@ -278,12 +277,12 @@ mod tests {
         Arc::new(texte.as_bytes().to_vec())
     }
 
-    /// La propriété fondamentale attendue du relais : deux clients qui
-    /// appliquent les mêmes updates dans des ordres différents convergent.
+    /// The fundamental property expected from the relay: two clients that apply the
+    /// same updates in different orders converge.
     ///
-    /// C'est exactement ce que l'ancien séquenceur d'opérations de blocs ne
-    /// pouvait pas garantir : il fallait un ordre, et deux écritures sur le
-    /// même bloc se réduisaient à la dernière arrivée.
+    /// This is exactly what the old block-operation sequencer could not guarantee: it
+    /// needed an order, and two writes to the same block were reduced to the last one
+    /// to arrive.
     #[test]
     fn les_updates_concurrentes_convergent() {
         let alice = Doc::new();
@@ -303,7 +302,7 @@ mod tests {
             txn.encode_update_v1()
         };
 
-        // Le serveur reçoit dans un ordre, Alice et Bob dans l'autre.
+        // The server receives in one order, Alice and Bob in the other.
         serveur.apply_update(&update_a).unwrap();
         serveur.apply_update(&update_b).unwrap();
         {
@@ -324,9 +323,8 @@ mod tests {
 
     #[test]
     fn un_instantane_recharge_rend_le_meme_contenu() {
-        // Régression : quand ce chemin échoue, le document paraît vide après un
-        // redémarrage alors que les données sont bien sur le disque — symptôme
-        // très déroutant.
+        // Regression: when this path fails, the document looks empty after a restart even
+        // though the data is on disk, a very confusing symptom.
         let source = DocHandle::new(Uuid::now_v7());
         source
             .seed(&json!({
@@ -366,8 +364,8 @@ mod tests {
 
     #[test]
     fn larrivant_recoit_les_presences_deja_annoncees() {
-        // Sans ce registre, il faudrait attendre la prochaine annonce de chacun
-        // pour voir qui travaille sur le document.
+        // Without this registry, we would have to wait for each person's next
+        // announcement to see who is working on the document.
         let handle = DocHandle::new(Uuid::now_v7());
         handle.note_presence(1, trame("alice"));
         handle.note_presence(2, trame("bob"));
@@ -402,8 +400,8 @@ mod tests {
 
     #[test]
     fn une_presence_renouvelee_remplace_la_precedente() {
-        // Le curseur bouge : l'arrivant doit voir la dernière position, pas
-        // l'historique des annonces.
+        // The cursor moves: the newcomer must see the latest position, not the history of
+        // announcements.
         let handle = DocHandle::new(Uuid::now_v7());
         handle.note_presence(1, trame("curseur en p1"));
         handle.note_presence(1, trame("curseur en p7"));

@@ -1,32 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Identité et portées.
+//! Identity and scopes: who is calling, and what they may do.
 //!
-//! Directive : l'identité provient **exclusivement** d'un jeton vérifié, jamais du
-//! corps de requête ni d'un paramètre d'URL (faille `username` déclaratif de la v1).
+//! Rule: the identity comes **only** from a verified token, never from the request
+//! body or a URL parameter (the self-declared `username` flaw of v1).
 //!
-//! ## Deux modes, et un seul est utilisable hors du poste de développement
+//! ## Two modes, and only one is usable outside a developer's machine
 //!
-//! - `AuthMode::Dev` accepte des jetons `dev.<user>.<scope>` en clair. Il permet
-//!   de faire tourner un partage sans fournisseur d'identité. Le serveur
-//!   **refuse de démarrer** dans ce mode si `WRITER_ENV=production`.
-//! - `AuthMode::Jwt` exige un JWT **HS256 dont la signature est vérifiée** avec
-//!   le secret partagé `WRITER_JWT_SECRET`. Sans ce secret, aucun jeton n'est
-//!   accepté : le mode échoue fermé plutôt que de faire semblant.
+//! - `AuthMode::Dev` accepts plain `dev.<user>.<scope>` tokens. It lets a share run
+//!   without an identity provider. The server **refuses to start** in this mode if
+//!   `WRITER_ENV=production`.
+//! - `AuthMode::Jwt` requires an **HS256 JWT whose signature is verified** with the
+//!   shared secret `WRITER_JWT_SECRET`. Without that secret no token is accepted:
+//!   the mode fails closed instead of pretending.
 //!
-//! ## Le billet d'accès émis par CloudServ
+//! ## The access ticket issued by CloudServ
 //!
-//! Quand Writer sert d'éditeur temporaire à CloudServ, c'est CloudServ qui
-//! signe les billets, avec ce même secret. Un billet porte une revendication
-//! `doc` — l'identifiant du document qu'il ouvre — et Writer refuse de s'en
-//! servir sur un **autre** document. Sans ce lien, un billet obtenu
-//! légitimement sur un document ouvrirait tous les autres, dont l'identifiant
-//! suffirait alors à connaître.
+//! When Writer serves as a temporary editor for CloudServ, CloudServ signs the
+//! tickets with that same secret. A ticket carries a `doc` claim (the id of the
+//! document it opens) and Writer refuses to use it on **another** document. Without
+//! that link, a ticket legitimately obtained for one document would open all the
+//! others, since knowing their id would be enough.
 //!
-//! C'est ce qui permet à CloudServ de rester seul maître des droits : Writer ne
-//! conserve aucune liste de participants pour les documents qu'il héberge pour
-//! lui, et une révocation dans CloudServ prend effet à l'expiration du billet.
+//! This is what lets CloudServ stay the only master of access rights: Writer keeps
+//! no participant list for the documents it hosts for CloudServ, and a revocation
+//! in CloudServ takes effect when the ticket expires.
 
 use axum::http::HeaderMap;
 use uuid::Uuid;
@@ -34,11 +33,11 @@ use uuid::Uuid;
 use crate::crypto::{base64_url_decode, constant_time_eq, hmac_sha256};
 use crate::error::{AppError, AppResult};
 
-/// Durée de validité maximale acceptée pour un billet.
+/// Longest validity accepted for a ticket.
 ///
-/// Un billet est une capacité : il ouvre un document tant qu'il vit, y compris
-/// après que CloudServ a révoqué le partage. Deux heures bornent cette fenêtre
-/// sans obliger à réémettre au milieu d'une séance de travail.
+/// A ticket is a capability: it opens a document for as long as it lives, even
+/// after CloudServ has revoked the share. Two hours bound that window without
+/// forcing a re-issue in the middle of a work session.
 const MAX_TICKET_LIFETIME_SECS: i64 = 2 * 3600;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -76,17 +75,17 @@ pub struct Identity {
     pub user_id: String,
     pub display_name: String,
     pub scope: Scope,
-    /// Document auquel le billet est lié, s'il l'est. `None` pour un jeton
-    /// d'usage général (mode développement, ou partage géré par Writer).
+    /// The document the ticket is tied to, if any. `None` for a general-purpose token
+    /// (development mode, or a share managed by Writer itself).
     pub doc_binding: Option<Uuid>,
 }
 
 impl Identity {
-    /// Vérifie qu'un billet lié à un document est bien présenté sur celui-ci.
+    /// Checks that a ticket tied to a document is really being presented for that
+    /// document.
     ///
-    /// Un jeton non lié passe : c'est le cas du mode développement et des
-    /// partages que Writer gère lui-même, où la liste des participants tient
-    /// déjà ce rôle.
+    /// An untied token passes: that is the case of development mode and of the shares
+    /// Writer manages itself, where the participant list already plays this role.
     pub fn ensure_document(&self, doc_id: Uuid) -> AppResult<()> {
         match self.doc_binding {
             Some(lie) if lie != doc_id => {
@@ -109,17 +108,17 @@ pub enum AuthMode {
     Jwt,
 }
 
-/// Mode d'authentification et secret de vérification.
+/// Authentication mode and the secret used to verify tokens.
 #[derive(Debug, Clone)]
 pub struct AuthSettings {
     pub mode: AuthMode,
-    /// Secret partagé avec CloudServ. Obligatoire en mode JWT.
+    /// Secret shared with CloudServ. Mandatory in JWT mode.
     pub jwt_secret: Option<String>,
 }
 
 impl AuthSettings {
-    /// Le mode JWT sans secret n'accepte rien : autant le dire au démarrage
-    /// plutôt que de laisser découvrir des 401 inexplicables.
+    /// JWT mode without a secret accepts nothing: better to say so at startup than to
+    /// let people discover unexplained 401 errors.
     pub fn is_usable(&self) -> bool {
         match self.mode {
             AuthMode::Dev => true,
@@ -132,15 +131,15 @@ impl AuthSettings {
 }
 
 pub fn identity_from_headers(headers: &HeaderMap, auth: &AuthSettings) -> AppResult<Identity> {
-    // 1. En-tête HTTP standard (routes REST).
+    // 1. Standard HTTP header (REST routes).
     if let Some(value) = headers.get(axum::http::header::AUTHORIZATION) {
         let raw = value.to_str().map_err(|_| AppError::Unauthorized)?;
         let token = raw.strip_prefix("Bearer ").ok_or(AppError::Unauthorized)?;
         return verify(token.trim(), auth);
     }
 
-    // 2. Sous-protocole WebSocket : `bearer.<token>` — jamais en query string
-    //    (fuite via logs, Referer, historique navigateur).
+    // 2. WebSocket sub-protocol: `bearer.<token>`. Never in the query string (it
+    //    would leak through logs, the Referer header and browser history).
     if let Some(value) = headers.get(axum::http::header::SEC_WEBSOCKET_PROTOCOL) {
         let raw = value.to_str().map_err(|_| AppError::Unauthorized)?;
         for proto in raw.split(',') {
@@ -172,7 +171,7 @@ fn verify(token: &str, auth: &AuthSettings) -> AppResult<Identity> {
     }
 }
 
-/// Jeton de développement : `dev.<user_id>.<scope>`, ex. `dev.alice.write`.
+/// Development token: `dev.<user_id>.<scope>`, e.g. `dev.alice.write`.
 fn verify_dev(token: &str) -> AppResult<Identity> {
     let rest = token.strip_prefix("dev.").ok_or(AppError::Unauthorized)?;
     let (user, scope) = rest.split_once('.').ok_or(AppError::Unauthorized)?;
@@ -196,21 +195,20 @@ fn valid_user_id(user: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Vérifie un JWT HS256 et en tire l'identité.
+/// Verifies an HS256 JWT and extracts the identity from it.
 ///
-/// Quatre contrôles, et chacun ferme une faille connue :
+/// Four checks, each closing a known weakness:
 ///
-///  1. **`alg` doit valoir exactement `HS256`.** Accepter la valeur annoncée par
-///     le jeton, c'est accepter `"alg":"none"` — la vulnérabilité la plus
-///     répandue des implémentations JWT.
-///  2. **La signature est recalculée** sur `<header>.<payload>` et comparée à
-///     temps constant. C'est ce qui manquait à la version précédente, laquelle
-///     se contentait de décoder la charge utile : n'importe qui pouvait forger
-///     `{"sub":"alice","scope":"write"}`.
-///  3. **`exp` est obligatoire** et borné à `MAX_TICKET_LIFETIME_SECS`. Un billet
-///     sans expiration est un droit d'accès permanent que rien ne révoque.
-///  4. **`doc` lie le billet à un document**, vérifié par `ensure_document` sur
-///     chaque route qui en nomme un.
+///  1. **`alg` must be exactly `HS256`.** Accepting the value announced by the
+///     token means accepting `"alg":"none"`, the most common vulnerability of JWT
+///     implementations.
+///  2. **The signature is recomputed** over `<header>.<payload>` and compared in
+///     constant time. This is what the previous version lacked: it only decoded the
+///     payload, so anybody could forge `{"sub":"alice","scope":"write"}`.
+///  3. **`exp` is mandatory** and capped at `MAX_TICKET_LIFETIME_SECS`. A ticket
+///     without an expiry is a permanent access right that nothing revokes.
+///  4. **`doc` ties the ticket to one document**, checked by `ensure_document` on
+///     every route that names a document.
 fn verify_jwt(token: &str, secret: &[u8]) -> AppResult<Identity> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
@@ -218,7 +216,7 @@ fn verify_jwt(token: &str, secret: &[u8]) -> AppResult<Identity> {
     }
     let (header_b64, payload_b64, signature_b64) = (parts[0], parts[1], parts[2]);
 
-    // 1. En-tête : algorithme figé, jamais celui que le jeton réclame.
+    // 1. Header: the algorithm is fixed, never the one the token asks for.
     let header: serde_json::Value = base64_url_decode(header_b64)
         .ok()
         .and_then(|raw| serde_json::from_slice(&raw).ok())
@@ -242,7 +240,7 @@ fn verify_jwt(token: &str, secret: &[u8]) -> AppResult<Identity> {
         .and_then(|raw| serde_json::from_slice(&raw).ok())
         .ok_or(AppError::Unauthorized)?;
 
-    // 3. Expiration — exigée, et pas trop lointaine.
+    // 3. Expiry: required, and not too far away.
     let exp = claims.get("exp").and_then(|e| e.as_i64()).ok_or_else(|| {
         tracing::warn!("jeton refusé : sans expiration");
         AppError::Unauthorized
@@ -260,8 +258,8 @@ fn verify_jwt(token: &str, secret: &[u8]) -> AppResult<Identity> {
         .get("sub")
         .and_then(|s| s.as_str())
         .ok_or(AppError::Unauthorized)?;
-    // Le `sub` sert d'identifiant de participant et se compare à ceux d'une
-    // session : il subit la même validation qu'un identifiant de développement.
+    // `sub` is used as the participant id and is compared with the ids of a session,
+    // so it goes through the same validation as a development id.
     if !valid_user_id(sub) {
         return Err(AppError::Unauthorized);
     }
@@ -272,16 +270,15 @@ fn verify_jwt(token: &str, secret: &[u8]) -> AppResult<Identity> {
         .filter(|n| !n.is_empty() && n.len() <= 128)
         .unwrap_or(sub);
 
-    // Une portée illisible ne DOIT pas ouvrir plus que la lecture.
+    // An unreadable scope MUST NOT open more than read access.
     let scope = claims
         .get("scope")
         .and_then(|s| s.as_str())
         .and_then(Scope::parse)
         .unwrap_or(Scope::Read);
 
-    // 4. Lien au document. Une valeur présente mais illisible est un refus, pas
-    //    un jeton « non lié » : la tolérance transformerait une faute de frappe
-    //    en passe-partout.
+    // 4. Link to a document. A value that is present but unreadable is a refusal, not
+    //    an "untied" token: being lenient would turn a typo into a master key.
     let doc_binding = match claims.get("doc") {
         None | Some(serde_json::Value::Null) => None,
         Some(value) => Some(
@@ -300,15 +297,16 @@ fn verify_jwt(token: &str, secret: &[u8]) -> AppResult<Identity> {
     })
 }
 
-/// Vérification d'origine à l'ouverture du WebSocket (protection CSWSH).
+/// Origin check when a WebSocket is opened (protection against cross-site
+/// WebSocket hijacking).
 pub fn origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
     match headers.get(axum::http::header::ORIGIN) {
         Some(value) => value
             .to_str()
             .map(|origin| allowed.iter().any(|a| a == origin))
             .unwrap_or(false),
-        // Absence d'Origin = client non navigateur (tests, outils) : autorisé
-        // uniquement parce que le jeton reste exigé par ailleurs.
+        // No `Origin` header means a non-browser client (tests, tools). It is allowed only
+        // because a token is still required elsewhere.
         None => true,
     }
 }
@@ -335,7 +333,7 @@ mod tests {
         }
     }
 
-    /// Fabrique un jeton signé — c'est ce que fait CloudServ.
+    /// Builds a signed token, which is what CloudServ does.
     fn ticket(claims: serde_json::Value) -> String {
         signe_avec(claims, SECRET, r#"{"alg":"HS256","typ":"JWT"}"#)
     }
@@ -405,8 +403,8 @@ mod tests {
 
     #[test]
     fn une_signature_forgee_est_refusee() {
-        // C'est très exactement l'attaque que la version précédente laissait
-        // passer : décoder sans vérifier acceptait ce jeton.
+        // This is exactly the attack the previous version let through: decoding without
+        // verifying accepted this token.
         let token = signe_avec(
             serde_json::json!({ "sub": "alice", "scope": "write", "exp": dans_une_heure() }),
             b"pas-le-bon-secret",
@@ -491,8 +489,8 @@ mod tests {
 
     #[test]
     fn un_lien_de_document_illisible_est_un_refus() {
-        // Tolérer une valeur illisible ferait d'une faute de frappe un
-        // passe-partout : le billet deviendrait valable sur tous les documents.
+        // Being lenient with an unreadable value would turn a typo into a master key:
+        // the ticket would become valid on every document.
         let token = ticket(serde_json::json!({
             "sub": "alice", "scope": "write", "exp": dans_une_heure(), "doc": "pas-un-uuid",
         }));

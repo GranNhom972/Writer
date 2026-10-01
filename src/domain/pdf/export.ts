@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Moteur d'exportation PDF natif — Transposition de `vcl::PDFWriter`
- * (`aoo-4.1.16/main/vcl/source/gdi/pdfwriter_impl.cxx`) et `PDFExport`
- * (`aoo-4.1.16/main/filter/source/pdf/pdfexport.cxx`).
+ * Native PDF export engine. (OpenOffice: `vcl::PDFWriter`
+ * (`aoo-4.1.16/main/vcl/source/gdi/pdfwriter_impl.cxx`) and `PDFExport`
+ * (`aoo-4.1.16/main/filter/source/pdf/pdfexport.cxx`).)
  *
- * Produit un document binaire PDF 1.4 conforme et autonome, sans aucune
- * dépendance externe.
+ * Produces a standalone, compliant binary PDF 1.4 document, with no external dependency.
  */
 
 import { isParagraph, type WriterDocumentState } from '../document/types';
@@ -29,16 +28,15 @@ import {
 } from '../document/pageFurniture';
 
 /**
- * Ratios de conversion vers le point PDF (72 DPI).
+ * Conversion ratios to the PDF point (72 DPI).
  *
- * Dérivés du socle d'unités et non réécrits : l'export et l'écran doivent
- * partager exactement les mêmes définitions, faute de quoi une géométrie juste
- * à l'affichage peut dériver sur le papier.
+ * Derived from the units foundation and not rewritten: the export and the screen must share exactly the same
+ * definitions, otherwise a geometry that is right on screen can drift on paper.
  */
 const PX_TO_PT = PT_PER_INCH / PX_PER_INCH; // 0.75
 const MM_TO_PT = PT_PER_INCH / MM_PER_INCH; // ~2.83464567
 
-/** Table de correspondance des polices vers les 14 polices PDF de base (Base 14). */
+/** Mapping table from fonts to the 14 base PDF fonts (Base 14). */
 type PdfFontKey =
   | 'Helvetica'
   | 'Helvetica-Bold'
@@ -78,7 +76,7 @@ function resolveBase14Font(family: string | undefined, bold = false, italic = fa
     return 'Times-Roman';
   }
 
-  // Police sans-empattement par défaut (Helvetica / Arial / Liberation Sans)
+  // Default sans-serif font (Helvetica / Arial / Liberation Sans)
   if (bold && italic) return 'Helvetica-BoldOblique';
   if (bold) return 'Helvetica-Bold';
   if (italic) return 'Helvetica-Oblique';
@@ -86,16 +84,16 @@ function resolveBase14Font(family: string | undefined, bold = false, italic = fa
 }
 
 /**
- * Encodage WinAnsi pour les chaînes de texte PDF.
- * Échappe les caractères réservés `\`, `(`, `)` et convertit les caractères accentués
- * et spéciaux en séquences octales `\ooo` conformes à la table WinAnsiEncoding.
+ * WinAnsi encoding for PDF text strings.
+ * Escapes the reserved characters `\`, `(` and `)` and converts accented and special characters into octal
+ * sequences `\ooo` that follow the WinAnsiEncoding table.
  */
 function encodeWinAnsiText(str: string): string {
   let result = '';
   for (let i = 0; i < str.length; i++) {
     const code = str.charCodeAt(i);
 
-    // Caractères d'échappement PDF directs
+    // Direct PDF escape characters
     if (code === 0x5c) {
       // '\'
       result += '\\\\';
@@ -106,10 +104,10 @@ function encodeWinAnsiText(str: string): string {
       // ')'
       result += '\\)';
     } else if (code >= 32 && code <= 126) {
-      // ASCII imprimable standard
+      // Standard printable ASCII
       result += str[i];
     } else {
-      // Table de correspondance étendue WinAnsi
+      // Extended WinAnsi mapping table
       let ansiCode = code;
       if (code === 0x20ac) ansiCode = 0x80; // €
       else if (code === 0x201a) ansiCode = 0x82; // ‚
@@ -138,9 +136,9 @@ function encodeWinAnsiText(str: string): string {
       else if (code === 0x0153) ansiCode = 0x9c; // œ
       else if (code === 0x017e) ansiCode = 0x9e; // ž
       else if (code === 0x0178) ansiCode = 0x9f; // Ÿ
-      else if (code === 0x00a0) ansiCode = 0xa0; // espace insécable
+      else if (code === 0x00a0) ansiCode = 0xa0; // non-breaking space
       else if (code > 255) {
-        // Caractère hors table : repli vers un point d'interrogation
+        // Character outside the table: fall back to a question mark
         ansiCode = 0x3f;
       }
 
@@ -151,7 +149,7 @@ function encodeWinAnsiText(str: string): string {
   return `(${result})`;
 }
 
-/** Analyse une couleur CSS (#rrggbb, #rgb, rgb(r,g,b)) et renvoie [r, g, b] dans [0, 1]. */
+/** Parses a CSS color (#rrggbb, #rgb, rgb(r,g,b)) and returns [r, g, b] in [0, 1]. */
 function parseColorToRgb(colorStr: string | undefined): [number, number, number] {
   if (!colorStr) return [0, 0, 0];
   const s = colorStr.trim().toLowerCase();
@@ -184,23 +182,21 @@ function parseColorToRgb(colorStr: string | undefined): [number, number, number]
 }
 
 const latin1 = (text: string): Uint8Array => {
-  // Un PDF est une suite d'octets, pas de l'UTF-8 : tout ce que l'on écrit est
-  // déjà réduit à l'ASCII par `encodeWinAnsiText`, et les rares octets hauts
-  // (l'entête binaire) doivent passer **tels quels**. `TextEncoder` les
-  // recoderait sur deux octets et décalerait toute la table `xref`.
+  // A PDF is a sequence of bytes, not UTF-8: everything we write has already been reduced to ASCII by
+  // `encodeWinAnsiText`, and the few high bytes (the binary header) must go through **as they are**.
+  // `TextEncoder` would re-encode them on two bytes and shift the whole `xref` table.
   const bytes = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i += 1) bytes[i] = text.charCodeAt(i) & 0xff;
   return bytes;
 };
 
-/** Constructeur de document PDF bas niveau. */
+/** Low-level PDF document builder. */
 class PdfDocumentBuilder {
   /**
-   * Objets indirects, en **octets**.
+   * Indirect objects, as **bytes**.
    *
-   * Un flux d'image est binaire : le garder en chaîne obligerait à le recoder à
-   * l'assemblage, et la longueur annoncée dans `/Length` ne vaudrait plus celle
-   * du fichier — un PDF que les lecteurs refusent d'ouvrir.
+   * An image stream is binary: keeping it as a string would force re-encoding it at assembly time, and the length
+   * announced in `/Length` would no longer match the file: a PDF that readers refuse to open.
    */
   private objects: Uint8Array[] = [];
   private offsets: number[] = [];
@@ -209,22 +205,21 @@ class PdfDocumentBuilder {
 
   constructor() {}
 
-  /** Alloue un nouvel identifiant d'objet indirect. */
+  /** Allocates a new indirect object id. */
   newObject(): number {
     this.objects.push(new Uint8Array(0));
     return this.objects.length;
   }
 
-  /** Définit le contenu d'un objet indirect. */
+  /** Defines the content of an indirect object. */
   setObject(id: number, content: string): void {
     this.objects[id - 1] = latin1(content);
   }
 
   /**
-   * Définit un objet flux dont la charge utile est binaire.
+   * Defines a stream object whose payload is binary.
    *
-   * `/Length` est calculé ici, sur les octets réels : c'est la seule valeur
-   * qu'un lecteur utilise pour retrouver la fin du flux.
+   * `/Length` is computed here, on the real bytes: it is the only value a reader uses to find the end of the stream.
    */
   setStreamObject(id: number, dictionary: string, payload: Uint8Array): void {
     const head = latin1(`<< ${dictionary} /Length ${payload.length} >>\nstream\n`);
@@ -237,12 +232,11 @@ class PdfDocumentBuilder {
   }
 
   /**
-   * Enregistre une image JPEG comme XObject, ou rend celui déjà posé.
+   * Registers a JPEG image as an XObject, or returns the one already placed.
    *
-   * `/DCTDecode` transporte les octets JPEG **sans les retoucher** : c'est le
-   * même codec des deux côtés, il n'y a donc ni décodage ni perte à l'export.
-   * Une image répétée — un logo en tête de chaque section — n'est écrite qu'une
-   * fois, et référencée par toutes les pages qui la portent.
+   * `/DCTDecode` carries the JPEG bytes **without touching them**: it is the same codec on both sides, so there is
+   * no decoding and no loss at export. A repeated image (a logo at the top of every section) is written only once,
+   * and referenced by every page that carries it.
    */
   getImageObject(src: string, jpegBytes: Uint8Array, widthPx: number, heightPx: number): number {
     const existing = this.imageMap.get(src);
@@ -259,12 +253,12 @@ class PdfDocumentBuilder {
     return id;
   }
 
-  /** Les XObjects d'image déclarés, pour le dictionnaire `/Resources`. */
+  /** The declared image XObjects, for the `/Resources` dictionary. */
   getAllImages(): Map<string, number> {
     return this.imageMap;
   }
 
-  /** Enregistre ou récupère l'identifiant d'objet d'une police Base 14. */
+  /** Registers or retrieves the object id of a Base 14 font. */
   getFontObject(fontKey: PdfFontKey): number {
     const existing = this.fontMap.get(fontKey);
     if (existing !== undefined) return existing;
@@ -278,17 +272,16 @@ class PdfDocumentBuilder {
     return fontId;
   }
 
-  /** Renvoie la liste de toutes les polices enregistrées pour le dictionnaire `/Resources`. */
+  /** Returns the list of all the registered fonts, for the `/Resources` dictionary. */
   getAllFonts(): Map<PdfFontKey, number> {
     return this.fontMap;
   }
 
   /**
-   * Assemble l'ensemble des objets et génère le fichier PDF final.
+   * Assembles all the objects and produces the final PDF file.
    *
-   * Les décalages de la table `xref` sont comptés **en octets écrits**, jamais
-   * en caractères : les deux diffèrent dès qu'un octet dépasse 0x7F, et un
-   * `startxref` faux rend le fichier illisible aux lecteurs stricts.
+   * The offsets of the `xref` table are counted in **bytes written**, never in characters: the two differ as soon as a
+   * byte goes above 0x7F, and a wrong `startxref` makes the file unreadable for strict readers.
    */
   build(): Uint8Array {
     const parts: Uint8Array[] = [];
@@ -332,26 +325,24 @@ export interface PdfExportOptions {
   author?: string;
   creator?: string;
   /**
-   * Images du document, déjà décodées en JPEG et indexées par `imageSrc`.
+   * Images of the document, already decoded to JPEG and indexed by `imageSrc`.
    *
-   * Le décodage est laissé à l'appelant (`domain/image/raster.ts`) : c'est lui
-   * qui a le navigateur sous la main. Ce module reste pur — il place des octets,
-   * il n'en fabrique pas. Une image absente de la table laisse un cadre vide,
-   * l'export continue.
+   * Decoding is left to the caller (`domain/image/raster.ts`): it is the one that has the browser at hand. This module
+   * stays pure: it places bytes, it does not manufacture them. An image that is missing from the table leaves an empty
+   * frame, and the export carries on.
    */
   images?: ReadonlyMap<string, { jpegBytes: Uint8Array; widthPx: number; heightPx: number }>;
 }
 
 /**
- * Peint un cadre image dans le flux d'une page.
+ * Paints an image frame in a page's content stream.
  *
- * La matrice `cm` d'un XObject d'image mappe le carré unité sur le rectangle
- * voulu : `largeur 0 0 hauteur x y cm` suivi de `/Ixx Do`. L'ordonnée est celle
- * du **bas** du cadre, le repère PDF ayant son origine en bas de page.
+ * The `cm` matrix of an image XObject maps the unit square onto the wanted rectangle: `width 0 0 height x y cm`
+ * followed by `/Ixx Do`. The y coordinate is that of the **bottom** of the frame, the PDF coordinate system having its
+ * origin at the bottom of the page.
  *
- * Le cadre est posé sur la ligne de base et monte de toute sa hauteur — la même
- * règle qu'à l'écran (`SwFlyCntFrm`), donc le PDF et l'éditeur montrent la même
- * page.
+ * The frame sits on the baseline and rises by its whole height, the same rule as on screen (`SwFlyCntFrm`), so the PDF
+ * and the editor show the same page.
  */
 function paintImage(
   pdf: PdfDocumentBuilder,
@@ -359,7 +350,7 @@ function paintImage(
   seg: Pick<LayoutSegment, 'formatting'>,
   xPt: number,
   baselineYPt: number,
-  /** Taille imposée, pour un cadre flottant dont la boîte comprend la légende. */
+  /** Imposed size, for a floating frame whose box includes the caption. */
   taille?: { widthPt: number; heightPt: number },
 ): string {
   const src = seg.formatting.imageSrc;
@@ -371,9 +362,8 @@ function paintImage(
   if (widthPt <= 0 || heightPt <= 0) return '';
 
   if (!raster) {
-    // Image indisponible : un cadre gris clair, à la place exacte qu'occupait
-    // l'image. Ne rien tracer déplacerait le reste de la page, ce qui serait
-    // plus trompeur qu'un trou visible.
+    // Image unavailable: a light grey frame, in the exact place the image occupied. Drawing nothing would move the rest of
+    // the page, which would be more misleading than a visible hole.
     let out = 'q\n0.85 0.85 0.85 RG 0.5 w\n';
     out += `${xPt.toFixed(2)} ${baselineYPt.toFixed(2)} ${widthPt.toFixed(2)} ${heightPt.toFixed(2)} re S\nQ\n`;
     return out;
@@ -385,18 +375,17 @@ function paintImage(
   let out = 'q\n';
 
   if (hasCrop(crop)) {
-    // Rognage : le PDF n'a pas de notion de découpe d'image, mais il a un
-    // **chemin de rognage**. On restreint le tracé au cadre (`re W n`), puis on
-    // place l'image entière, agrandie et décalée de sorte que la part conservée
-    // tombe exactement dans ce cadre. Ce qui dépasse est écarté par le chemin.
+    // Cropping: PDF has no notion of cutting an image, but it has a **clipping path**. We restrict the drawing to the frame
+    // (`re W n`), then place the whole image, enlarged and shifted so that the part we keep falls exactly inside that frame.
+    // What overflows is discarded by the path.
     const visible = visibleFraction(crop);
     const pleineLargeurPt = widthPt / visible.width;
     const pleineHauteurPt = heightPt / visible.height;
 
     out += `${xPt.toFixed(2)} ${baselineYPt.toFixed(2)} ${widthPt.toFixed(2)} ${heightPt.toFixed(2)} re W n\n`;
 
-    // L'origine du repère PDF est en **bas** à gauche : c'est donc le retrait
-    // du **bas** qui décale l'image vers le bas, et non celui du haut.
+    // The origin of the PDF coordinate system is at the **bottom** left: so it is the **bottom** inset that shifts the image
+    // downwards, not the top one.
     const decalageX = xPt - crop.leftPct * pleineLargeurPt;
     const decalageY = baselineYPt - crop.bottomPct * pleineHauteurPt;
     out += `${pleineLargeurPt.toFixed(2)} 0 0 ${pleineHauteurPt.toFixed(2)} ${decalageX.toFixed(2)} ${decalageY.toFixed(2)} cm\n`;
@@ -409,16 +398,14 @@ function paintImage(
 }
 
 /**
- * Peint un cadre flottant à sa place sur la feuille.
+ * Paints a floating frame in its place on the sheet.
  *
- * `paginate` a déjà résolu la géométrie — alignement, ancre, marges — et
- * `LaidOutFly` la porte en pixels depuis le coin haut-gauche de la **zone de
- * contenu**. Il ne reste qu'à passer au repère du PDF, dont l'origine est en
- * bas à gauche de la feuille : d'où le renversement de l'ordonnée.
+ * `paginate` has already resolved the geometry (alignment, anchor, margins) and `LaidOutFly` carries it in pixels from the
+ * top-left corner of the **content area**. All that remains is to move to the PDF coordinate system, whose origin is at the
+ * bottom left of the sheet: hence the flip of the y coordinate.
  *
- * La **légende** n'est pas peinte. Sa hauteur est comprise dans celle du cadre,
- * et c'est elle qu'on retranche ici pour retrouver la boîte de l'image seule :
- * la dessiner sans retrancher étirerait l'image sur la place de son texte.
+ * The **caption** is not painted. Its height is included in that of the frame, and it is what we subtract here to get back
+ * the box of the image alone: drawing without subtracting would stretch the image over the place of its text.
  */
 function paintFly(
   pdf: PdfDocumentBuilder,
@@ -434,7 +421,7 @@ function paintFly(
 
   const leftPt = contentLeftPt + laid.leftPx * PX_TO_PT;
   const topPt = contentTopPt + laid.topPx * PX_TO_PT;
-  // Une légende posée **au-dessus** décale l'image d'autant vers le bas.
+  // A caption placed **above** shifts the image down by as much.
   const decalagePt =
     laid.fly.run.imageCaptionPosition === 'above'
       ? (laid.fly.captionHeightPx ?? 0) * PX_TO_PT
@@ -448,9 +435,9 @@ function paintFly(
 }
 
 /**
- * Exporte un document Writer et son `DocumentLayout` au format PDF binaire.
+ * Exports a Writer document and its `DocumentLayout` to binary PDF format.
  *
- * Implémente l'équivalent de `PDFExport::Export` d'Apache OpenOffice.
+ * Counterpart of Apache OpenOffice's `PDFExport::Export`.
  */
 export function exportToPdfBytes(
   doc: WriterDocumentState,
@@ -459,11 +446,11 @@ export function exportToPdfBytes(
 ): Uint8Array {
   const pdf = new PdfDocumentBuilder();
 
-  // 1. Objet 1 : Catalogue racine
+  // 1. Object 1: root Catalog
   const rootId = pdf.newObject(); // 1
-  // 2. Objet 2 : Métadonnées Info
+  // 2. Object 2: Info metadata
   const infoId = pdf.newObject(); // 2
-  // 3. Objet 3 : Arbre des pages (/Pages)
+  // 3. Object 3: page tree (/Pages)
   const pagesTreeId = pdf.newObject(); // 3
 
   const pageObjectIds: number[] = [];
@@ -476,14 +463,14 @@ export function exportToPdfBytes(
   const contentLeftPt = geometry.contentLeftPx * PX_TO_PT;
   const contentTopPt = geometry.contentTopPx * PX_TO_PT;
 
-  // Création des objets de police nécessaires
+  // Creating the font objects that are needed
   const defaultFontKey = resolveBase14Font(doc.defaults.fontFamily, false, false);
   pdf.getFontObject(defaultFontKey);
 
-  // Mobilier (en-tête & pied de page)
+  // Furniture (header & footer)
   const furniture = doc.furniture;
 
-  // 4. Construction de chaque page
+  // 4. Building each page
   for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
     const page = layout.pages[pageIdx]!;
     const pageNum = pageIdx + 1;
@@ -493,7 +480,7 @@ export function exportToPdfBytes(
 
     let stream = '';
 
-    // A. Rendu du mobilier (En-tête et Pied de page)
+    // A. Rendering the furniture (Header and Footer)
     if (furniture && showsOn(furniture, pageNum)) {
       const pageGeom = resolveGeometry(furniture, pageNum);
       const contexte = {
@@ -507,7 +494,7 @@ export function exportToPdfBytes(
       const fontObjId = pdf.getFontObject(fontKey);
       const [fr, fg, fb] = parseColorToRgb('#444444');
 
-      // --- En-tête ---
+      // --- Header ---
       const headerZones = getThreeZones(furniture, 'header', pageNum);
       const headerBlocks = blocksOf(furniture, 'header', pageNum);
 
@@ -515,7 +502,7 @@ export function exportToPdfBytes(
         const headerTopPt = (furniture.headerMm ?? 12) * MM_TO_PT;
         const headerY = pageHeightPt - headerTopPt - fontSizePt;
 
-        // Fond de l'en-tête
+        // Header background
         if (furniture.headerBackground) {
           const [bgr, bgg, bgb] = parseColorToRgb(furniture.headerBackground);
           const bandHeightPt = Math.max(pageGeom.headerContentMm, 10) * MM_TO_PT;
@@ -524,7 +511,7 @@ export function exportToPdfBytes(
           stream += `0 ${bandBottomPt.toFixed(2)} ${pageWidthPt.toFixed(2)} ${bandHeightPt.toFixed(2)} re f\nQ\n`;
         }
 
-        // Zone gauche
+        // Left zone
         if (headerZones.left) {
           const text = renderFurniture(headerZones.left, contexte);
           stream += `q\n${fr.toFixed(3)} ${fg.toFixed(3)} ${fb.toFixed(3)} rg\nBT\n/F${fontObjId} ${fontSizePt} Tf\n`;
@@ -532,10 +519,10 @@ export function exportToPdfBytes(
           stream += `${encodeWinAnsiText(text)} Tj\nET\nQ\n`;
         }
 
-        // Zone centre
+        // Center zone
         if (headerZones.center) {
           const text = renderFurniture(headerZones.center, contexte);
-          // Estimation de centrage
+          // Centering estimate
           const textWidthPt = text.length * fontSizePt * 0.5;
           const centerX = Math.max(contentLeftPt, (pageWidthPt - textWidthPt) / 2);
           stream += `q\n${fr.toFixed(3)} ${fg.toFixed(3)} ${fb.toFixed(3)} rg\nBT\n/F${fontObjId} ${fontSizePt} Tf\n`;
@@ -543,7 +530,7 @@ export function exportToPdfBytes(
           stream += `${encodeWinAnsiText(text)} Tj\nET\nQ\n`;
         }
 
-        // Zone droite
+        // Right zone
         if (headerZones.right) {
           const text = renderFurniture(headerZones.right, contexte);
           const textWidthPt = text.length * fontSizePt * 0.52;
@@ -553,7 +540,7 @@ export function exportToPdfBytes(
           stream += `${encodeWinAnsiText(text)} Tj\nET\nQ\n`;
         }
 
-        // Blocs libres de l'en-tête (texte)
+        // Free blocks of the header (text)
         for (const bloc of headerBlocks) {
           if (bloc.kind === 'text' && bloc.text) {
             const bText = renderFurniture(bloc.text, contexte);
@@ -568,7 +555,7 @@ export function exportToPdfBytes(
           }
         }
 
-        // Filet séparateur sous l'en-tête
+        // Separator line under the header
         if (furniture.headerSeparator) {
           const sepWidthPt = furniture.headerSeparatorWidthPt ?? 0.75;
           const [sr, sg, sb] = parseColorToRgb(furniture.headerSeparatorColor ?? '#d0d5dd');
@@ -579,7 +566,7 @@ export function exportToPdfBytes(
         }
       }
 
-      // --- Pied de page ---
+      // --- Footer ---
       const footerZones = getThreeZones(furniture, 'footer', pageNum);
       const footerBlocks = blocksOf(furniture, 'footer', pageNum);
 
@@ -587,7 +574,7 @@ export function exportToPdfBytes(
         const footerBottomPt = (furniture.footerMm ?? 12) * MM_TO_PT;
         const footerY = footerBottomPt;
 
-        // Fond du pied de page
+        // Footer background
         if (furniture.footerBackground) {
           const [bgr, bgg, bgb] = parseColorToRgb(furniture.footerBackground);
           const bandHeightPt = Math.max(pageGeom.footerContentMm, 10) * MM_TO_PT;
@@ -595,7 +582,7 @@ export function exportToPdfBytes(
           stream += `0 0 ${pageWidthPt.toFixed(2)} ${bandHeightPt.toFixed(2)} re f\nQ\n`;
         }
 
-        // Zone gauche
+        // Left zone
         if (footerZones.left) {
           const text = renderFurniture(footerZones.left, contexte);
           stream += `q\n${fr.toFixed(3)} ${fg.toFixed(3)} ${fb.toFixed(3)} rg\nBT\n/F${fontObjId} ${fontSizePt} Tf\n`;
@@ -603,7 +590,7 @@ export function exportToPdfBytes(
           stream += `${encodeWinAnsiText(text)} Tj\nET\nQ\n`;
         }
 
-        // Zone centre
+        // Center zone
         if (footerZones.center) {
           const text = renderFurniture(footerZones.center, contexte);
           const textWidthPt = text.length * fontSizePt * 0.5;
@@ -613,7 +600,7 @@ export function exportToPdfBytes(
           stream += `${encodeWinAnsiText(text)} Tj\nET\nQ\n`;
         }
 
-        // Zone droite
+        // Right zone
         if (footerZones.right) {
           const text = renderFurniture(footerZones.right, contexte);
           const textWidthPt = text.length * fontSizePt * 0.52;
@@ -623,7 +610,7 @@ export function exportToPdfBytes(
           stream += `${encodeWinAnsiText(text)} Tj\nET\nQ\n`;
         }
 
-        // Blocs libres du pied (texte)
+        // Free blocks of the footer (text)
         for (const bloc of footerBlocks) {
           if (bloc.kind === 'text' && bloc.text) {
             const bText = renderFurniture(bloc.text, contexte);
@@ -638,7 +625,7 @@ export function exportToPdfBytes(
           }
         }
 
-        // Filet séparateur au-dessus du pied de page
+        // Separator line above the footer
         if (furniture.footerSeparator) {
           const sepWidthPt = furniture.footerSeparatorWidthPt ?? 0.75;
           const [sr, sg, sb] = parseColorToRgb(furniture.footerSeparatorColor ?? '#d0d5dd');
@@ -651,20 +638,18 @@ export function exportToPdfBytes(
     }
 
     /*
-     * B0. Cadres flottants du calque `hell` (`SwFlyFreeFrm`).
+     * B0. Floating frames of the `hell` layer (`SwFlyFreeFrm`).
      *
-     * Peints **avant** le texte, comme à l'écran : c'est l'ordre de
-     * `SwRootFrm::Paint`, et c'est lui qui fait qu'une image « derrière le
-     * texte » l'est aussi sur le papier. Les omettre, comme on le faisait,
-     * revenait à ce qu'une image habillée disparaisse à l'export : le PDF ne
-     * montrait plus que le trou qu'elle avait creusé dans le texte.
+     * Painted **before** the text, as on screen: it is the order of `SwRootFrm::Paint`, and it is what makes an image "behind the
+     * text" so on paper too. Leaving them out, as was done, meant that a wrapped image vanished from the export: the PDF only showed
+     * the hole it had dug in the text.
      */
     for (const laid of page.flies ?? []) {
       if (laid.fly.run.imageInFront) continue;
       stream += paintFly(pdf, options?.images, laid, contentLeftPt, contentTopPt, pageHeightPt);
     }
 
-    // B. Rendu des blocs placés sur la page
+    // B. Rendering the blocks placed on the page
     for (const block of page.blocks) {
       if (block.kind === 'paragraph') {
         const placed = block as PlacedParagraph;
@@ -675,11 +660,11 @@ export function exportToPdfBytes(
           const line = lines[lIdx];
           if (!line) continue;
 
-          // Position Y de la ligne de base dans le repère PDF
+          // Y position of the baseline in the PDF coordinate system
           const lineTopPt = (contentTopPt + (placed.topPx + line.topPx) * PX_TO_PT);
           const baselineYPt = pageHeightPt - lineTopPt - (line.ascentPx * PX_TO_PT);
 
-          // Puce / Numéro de liste éventuel
+          // Bullet / list number, if any
           if (lIdx === 0 && layout.marker) {
             const marker = layout.marker;
             const markerFontKey = resolveBase14Font(marker.font.fontFamily, marker.font.bold, marker.font.italic);
@@ -698,7 +683,7 @@ export function exportToPdfBytes(
             stream += `Q\n`;
           }
 
-          // Segments de texte de la ligne
+          // Text segments of the line
           for (const seg of line.segments) {
             if (seg.isTab || !seg.text) continue;
 
@@ -728,14 +713,14 @@ export function exportToPdfBytes(
             stream += `${encodeWinAnsiText(seg.text)} Tj\n`;
             stream += `ET\n`;
 
-            // Souligné
+            // Underline
             if (seg.formatting.underline) {
               const uY = baselineYPt - 1.5;
               stream += `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} RG 0.75 w\n`;
               stream += `${segXPt.toFixed(2)} ${uY.toFixed(2)} m ${(segXPt + segWidthPt).toFixed(2)} ${uY.toFixed(2)} l S\n`;
             }
 
-            // Barré
+            // Strikethrough
             if (seg.formatting.strikeThrough) {
               const sY = baselineYPt + fontSizePt * 0.3;
               stream += `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} RG 0.75 w\n`;
@@ -751,31 +736,30 @@ export function exportToPdfBytes(
         const borderWidthPt = tableBlock.table.borderWidthPt ?? 0.75;
         const [br, bg, bb] = parseColorToRgb(borderColor);
 
-        // Tracé des cellules du tableau
+        // Drawing the table cells
         for (const [rowPos, row] of tableBlock.rows.entries()) {
           for (const cell of row.cells) {
             if (cell.covered || cell.widthPx <= 0) continue;
             const cellLeftPt = contentLeftPt + cell.leftPx * PX_TO_PT;
             const cellTopPt = contentTopPt + (tableBlock.topPx + row.topPx) * PX_TO_PT;
             const cellWidthPt = cell.widthPx * PX_TO_PT;
-            // Même fonction que l'écran : une fusion verticale doit produire le
-            // même cadre sur le papier et à l'affichage.
+            // Same function as the screen: a vertical merge must produce the same frame on paper and on display.
             const cellHeightPt = cellFrameHeightPx(tableBlock.rows, rowPos, cell) * PX_TO_PT;
             const cellBottomPt = pageHeightPt - cellTopPt - cellHeightPt;
 
-            // Fond de cellule (si ligne d'en-tête ou couleur spécifique)
+            // Cell background (if header row or specific color)
             if (row.isHeader) {
               stream += `q\n0.93 0.93 0.93 rg\n`;
               stream += `${cellLeftPt.toFixed(2)} ${cellBottomPt.toFixed(2)} ${cellWidthPt.toFixed(2)} ${cellHeightPt.toFixed(2)} re f\nQ\n`;
             }
 
-            // Bordure de cellule
+            // Cell border
             stream += `q\n`;
             stream += `${br.toFixed(3)} ${bg.toFixed(3)} ${bb.toFixed(3)} RG ${borderWidthPt.toFixed(2)} w\n`;
             stream += `${cellLeftPt.toFixed(2)} ${cellBottomPt.toFixed(2)} ${cellWidthPt.toFixed(2)} ${cellHeightPt.toFixed(2)} re S\n`;
             stream += `Q\n`;
 
-            // Contenu textuel des paragraphes de la cellule
+            // Text content of the cell's paragraphs
             for (let pIdx = 0; pIdx < cell.layouts.length; pIdx++) {
               const cellLayout = cell.layouts[pIdx];
               if (!cellLayout) continue;
@@ -821,26 +805,24 @@ export function exportToPdfBytes(
     }
 
     /*
-     * D. Calque `heaven` : les cadres « devant le texte » (`RES_OPAQUE`).
+     * D. The `heaven` layer: the "in front of the text" frames (`RES_OPAQUE`).
      *
-     * Peints en dernier, donc par-dessus tout. C'est la seule chose qui les
-     * distingue du calque `hell` — même habillage `through`, même géométrie,
-     * deux moments de peinture.
+     * Painted last, so on top of everything. It is the only thing that tells them apart from the `hell` layer: same `through`
+     * wrapping, same geometry, two painting moments.
      */
     for (const laid of page.flies ?? []) {
       if (!laid.fly.run.imageInFront) continue;
       stream += paintFly(pdf, options?.images, laid, contentLeftPt, contentTopPt, pageHeightPt);
     }
 
-    // Définition de l'objet contenu de la page
+    // Definition of the page's content object
     pdf.setStreamObject(contentObjId, '', latin1(stream));
     pageStreams.push({ pageObjId, contentObjId });
   }
 
-  // Les dictionnaires de ressources sont écrits **après** toutes les pages :
-  // une police ou une image découverte à la page 12 doit figurer aussi dans les
-  // ressources de la page 1 si elle y apparaît. Les déclarer toutes partout est
-  // permis par la spécification et évite un second parcours du document.
+  // The resource dictionaries are written **after** all the pages: a font or an image discovered on page 12 must also appear in
+  // the resources of page 1 if it appears there. Declaring them all everywhere is allowed by the specification and avoids a second
+  // walk over the document.
   let fontResources = '';
   for (const [, id] of pdf.getAllFonts().entries()) {
     fontResources += `      /F${id} ${id} 0 R\n`;
@@ -866,17 +848,17 @@ export function exportToPdfBytes(
     );
   }
 
-  // 5. Finalisation de l'arbre des pages (/Pages)
+  // 5. Finalizing the page tree (/Pages)
   const kidsStr = pageObjectIds.map((id) => `${id} 0 R`).join(' ');
   pdf.setObject(
     pagesTreeId,
     `<< /Type /Pages\n   /Kids [${kidsStr}]\n   /Count ${pageObjectIds.length}\n>>`,
   );
 
-  // 6. Finalisation du Catalogue (/Catalog)
+  // 6. Finalizing the Catalog (/Catalog)
   pdf.setObject(rootId, `<< /Type /Catalog\n   /Pages ${pagesTreeId} 0 R\n>>`);
 
-  // 7. Finalisation des métadonnées Info
+  // 7. Finalizing the Info metadata
   const now = new Date();
   const dateStr = `D:${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(
     now.getUTCDate(),
@@ -900,7 +882,7 @@ export function exportToPdfBytes(
   return pdf.build();
 }
 
-/** Exporte le document au format Blob PDF. */
+/** Exports the document as a PDF Blob. */
 export function exportToPdfBlob(
   doc: WriterDocumentState,
   layout: DocumentLayout,
@@ -911,9 +893,9 @@ export function exportToPdfBlob(
 }
 
 /**
- * Toutes les adresses d'image du document, sans doublon.
+ * All the image addresses of the document, without duplicates.
  *
- * Sert à l'appelant pour ne décoder qu'une fois chaque image avant l'export.
+ * Used by the caller to decode each image only once before the export.
  */
 export function collectImageSources(doc: WriterDocumentState): string[] {
   const sources = new Set<string>();
@@ -935,7 +917,7 @@ export function collectImageSources(doc: WriterDocumentState): string[] {
   return [...sources];
 }
 
-/** Déclenche le téléchargement du document sous forme de fichier `.pdf`. */
+/** Triggers the download of the document as a `.pdf` file. */
 export function downloadPdf(
   doc: WriterDocumentState,
   layout: DocumentLayout,

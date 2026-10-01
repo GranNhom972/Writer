@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Aller-retour fusion → scission, et survie des largeurs de colonne.
+ * Merge → split round trip, and survival of the column widths.
  *
- * Scinder une cellule fusionnée redessinait tout le tableau. La fusion donne à
- * la maîtresse la **somme** des colonnes absorbées ; la scission lui retirait
- * son `colSpan` sans lui reprendre cette largeur. Redevenue simple aux yeux de
- * `tableColumnWidths`, elle imposait ce total à sa seule colonne, et la
- * normalisation écrasait les autres : une grille régulière 33/33/33 ressortait
- * en 60/20/20 après un simple aller-retour.
+ * Splitting a merged cell used to redraw the whole table. The merge gives the master the **sum** of the absorbed columns; the split took away its `colSpan` without taking that width back. Having become plain again in the
+ * eyes of `tableColumnWidths`, it imposed this total on its single column, and the normalization crushed the others: a regular 33/33/33 grid came out as 60/20/20 after a simple round trip.
  *
- * La largeur d'une colonne traverse une fusion par les cellules **recouvertes**,
- * qui conservent la leur. C'est cet invariant que ces tests protègent.
+ * The width of a column crosses a merge through the **covered** cells, which keep theirs. It is this invariant that these tests protect.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -42,7 +37,7 @@ function tableOf(doc: { blocks: DocumentBlock[] }): TableNode {
 const widths = (doc: { blocks: DocumentBlock[] }) =>
   tableColumnWidths(tableOf(doc)).map((w) => Math.round(w * 10) / 10);
 
-/** Empreinte de structure : recouvrement et étendues, ligne par ligne. */
+/** Structure fingerprint: coverage and spans, row by row. */
 const shape = (doc: { blocks: DocumentBlock[] }) =>
   tableOf(doc)
     .rows.map((row) =>
@@ -93,8 +88,7 @@ describe('Fusion puis scission', () => {
     const before = setTableColumnWidths(docOf([table]), table.id, [10, 20, 30, 40]);
     const merged = mergeTableCells(before, table.id, { fromRow: 1, toRow: 1, fromCol: 1, toCol: 2 });
 
-    // Les colonnes absorbées ne disparaissent pas de la grille : leur largeur
-    // survit sur les cellules recouvertes.
+    // The absorbed columns do not disappear from the grid: their width survives on the covered cells.
     expect(widths(merged)).toEqual([10, 20, 30, 40]);
   });
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import type { ReactNode } from 'react';
 
-/** Squelette respectant la géométrie finale — pas de spinner centré (directive UX §4). */
+/** Skeleton that respects the final geometry: no centered spinner (UX directive §4). */
 export function DocumentSkeleton() {
   return (
     <div className="skeleton-page" aria-busy="true" aria-live="polite" aria-label="Chargement du document">
@@ -21,7 +21,7 @@ interface EmptyStateProps {
   action?: ReactNode;
 }
 
-/** État vide : explication + une seule action primaire. Jamais une zone muette. */
+/** Empty state: an explanation plus a single primary action. Never a silent area. */
 export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
     <div className="state-panel">
@@ -38,7 +38,7 @@ interface ErrorStateProps {
   onRetry?: () => void;
 }
 
-/** État d'erreur : cause en langage clair + action de réparation. */
+/** Error state: the cause in plain language plus a repair action. */
 export function ErrorState({ title, detail, onRetry }: ErrorStateProps) {
   return (
     <div className="state-panel state-panel--error" role="alert">

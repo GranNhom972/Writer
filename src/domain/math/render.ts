@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Rendu des formules mathématiques (couche 1).
+ * Rendering of math formulas (layer 1).
  *
- * Le moteur (KaTeX) est chargé **à la demande** : la plupart des documents ne
- * contiennent pas de mathématiques, et l'embarquer dans le bundle initial ferait
- * sauter le budget de performance (00_DIRECTIVE_ARCHITECTURE.md §7).
+ * The engine (KaTeX) is loaded **on demand**: most documents contain no math, and bundling it in the initial bundle
+ * would blow the performance budget (00_DIRECTIVE_ARCHITECTURE.md §7).
  *
- * Sécurité : `trust: false` — les macros `\href`, `\url` et `\includegraphics`
- * sont refusées. Une formule ne doit pas pouvoir injecter de lien ni de ressource externe.
+ * Security: `trust: false`: the `\href`, `\url` and `\includegraphics` macros are refused. A formula must not be able to
+ * inject a link or an external resource.
  */
 
 import katex from 'katex';
@@ -38,27 +37,25 @@ export interface MathRenderSuccess {
 
 export interface MathRenderFailure {
   ok: false;
-  /** Message en langage clair, affichable tel quel à l'usager. */
+  /** Plain-language message, which can be shown to the user as it is. */
   message: string;
 }
 
 export type MathRenderResult = MathRenderSuccess | MathRenderFailure;
 
-/** Formule vide : cas courant (champ en cours de saisie), pas une erreur. */
+/** Empty formula: a common case (a field being typed into), not an error. */
 export const EMPTY_MATH_MESSAGE = 'Saisissez une formule pour en voir l’aperçu.';
 
 /**
- * Commandes refusées avant même d'appeler le moteur.
+ * Commands refused before the engine is even called.
  *
- * `trust: false` les neutralise déjà (KaTeX les rend sans produire de lien), mais
- * il le fait **silencieusement** : l'usager croirait avoir inséré un lien qui
- * n'existe pas. On le lui dit, et la défense reste double.
+ * `trust: false` already neutralizes them (KaTeX renders them without producing a link), but it does so **silently**:
+ * the user would believe they had inserted a link that does not exist. We tell them, and the defense stays double.
  */
 const FORBIDDEN_COMMANDS = /\\(href|url|includegraphics|htmlClass|htmlId|htmlStyle|htmlData)\b/;
 
 /**
- * Rendu synchrone pour la projection DOM de la feuille.
- * Ne lève jamais d'exception et fournit un fallback sûr en cas d'erreur.
+ * Synchronous rendering for the DOM projection of the sheet. Never throws and provides a safe fallback on error.
  */
 export function renderMathHtml(latex: string, display: boolean): string {
   const source = latex.trim();
@@ -90,8 +87,8 @@ let mathMeasureContainer: HTMLDivElement | null = null;
 const mathMeasurementCache = new Map<string, { widthPx: number; heightPx: number; ascentPx: number }>();
 
 /**
- * Mesure au pixel exact le rendu KaTeX dans le navigateur pour garantir
- * que le moteur de mise en page et le curseur s'alignent parfaitement avec le DOM.
+ * Measures the KaTeX rendering to the exact pixel in the browser, to guarantee that the layout engine and the cursor
+ * line up perfectly with the DOM.
  */
 export function measureMathExact(
   latex: string,
@@ -156,7 +153,7 @@ export async function renderMath(latex: string, display: boolean): Promise<MathR
       throwOnError: true,
       trust: false,
       strict: 'ignore',
-      // MathML inclus pour l'accessibilité
+      // MathML included for accessibility
       output: 'htmlAndMathml',
     });
     return { ok: true, html };
@@ -166,7 +163,8 @@ export async function renderMath(latex: string, display: boolean): Promise<MathR
 }
 
 /**
- * Traduit l'erreur du moteur en français, sans jargon d'analyseur.
+ * Translates the engine's error into plain language for the user (in French, like the rest of the interface), without
+ * parser jargon.
  */
 export function describeMathError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);

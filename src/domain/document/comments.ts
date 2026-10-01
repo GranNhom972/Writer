@@ -1,94 +1,91 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Commentaires marginaux. Transposition de `SwPostItField`
- * (`sw/source/core/fields/postit.cxx`) et de `SwPostItMgr`
- * (`sw/source/ui/docvw/PostItMgr.cxx`).
+ * Margin comments (OpenOffice: `SwPostItField`, `sw/source/core/fields/postit.cxx`,
+ * and `SwPostItMgr`, `sw/source/ui/docvw/PostItMgr.cxx`).
  *
- * Writer range un commentaire en deux morceaux, et c'est ce partage qu'on
- * reprend ici :
+ * Writer stores a comment in two pieces, and that split is what we reuse here:
  *
- *   – l'**ancre** est un attribut de texte posé sur la plage commentée
- *     (`SwFmtFld` sur un `SwPostItField`) ; elle vit donc dans le paragraphe et
- *     suit le texte quand celui-ci se déplace, sans qu'aucun code de curseur
- *     n'ait à la connaître ;
- *   – le **contenu** (auteur, date, texte, réponses) vit dans une table du
- *     document, indexée par identifiant.
+ *   - the **anchor** is a text attribute set on the commented range (`SwFmtFld` on
+ *     a `SwPostItField`); it lives in the paragraph and follows the text when the
+ *     text moves, without any cursor code having to know about it;
+ *   - the **content** (author, date, text, replies) lives in a table of the
+ *     document, indexed by id.
  *
- * Ce découpage a une conséquence directe qu'on veut : supprimer le texte
- * commenté supprime l'ancre — donc le commentaire disparaît de la gouttière —
- * mais son contenu reste récupérable tant que le document n'a pas été nettoyé.
- * `SwPostItMgr` fonctionne exactement ainsi.
+ * This split has a direct consequence that we want: deleting the commented text
+ * deletes the anchor, so the comment disappears from the gutter, but its content can
+ * still be recovered until the document is cleaned up. `SwPostItMgr` works exactly
+ * that way.
  *
- * Les fils de discussion sont plats, comme dans Writer : une réponse porte le
- * `threadId` du commentaire racine. Un fil de fil n'existe pas.
+ * Discussion threads are flat, as in Writer: a reply carries the `threadId` of the
+ * root comment. A thread of threads does not exist.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
 import { newId, paragraphIndex, replaceParagraph, touch } from './document';
 import { makeRun, mapRunsInRange, normalizeRuns, runFormatting } from './runs';
 import type { TextRun, WriterDocumentState } from './types';
 
-/** Un commentaire ou une réponse. Transposition de `SwPostItField`. */
+/** A comment or a reply (OpenOffice: `SwPostItField`). */
 export interface DocumentComment {
   id: string;
   /**
-   * Identifiant du fil. Pour un commentaire racine, `threadId === id` ; pour
-   * une réponse, c'est l'identifiant du commentaire racine.
+   * Id of the thread. For a root comment `threadId === id`; for a reply it is the id
+   * of the root comment.
    */
   threadId: string;
-  /** `SwPostItField::GetPar1()` — l'auteur. */
+  /** The author (`SwPostItField::GetPar1()`). */
   author: string;
-  /** Initiales affichées dans la pastille (`SwPostItField::GetInitials`). */
+  /** Initials shown in the badge (`SwPostItField::GetInitials`). */
   initials?: string;
-  /** ISO 8601. `SwPostItField::GetDateTime()`. */
+  /** ISO 8601 date (`SwPostItField::GetDateTime()`). */
   createdAt: string;
-  /** `SwPostItField::GetPar2()` — le corps du commentaire. */
+  /** The body of the comment (`SwPostItField::GetPar2()`). */
   text: string;
-  /** Fil clos : conservé, mais grisé et sorti du flux de relecture. */
+  /** Closed thread: kept, but greyed out and removed from the review flow. */
   resolved?: boolean;
 }
 
-/** Un fil : le commentaire racine et ses réponses, dans l'ordre de dépôt. */
+/** A thread: the root comment and its replies, in the order they were posted. */
 export interface CommentThread {
   id: string;
   root: DocumentComment;
   replies: DocumentComment[];
   resolved: boolean;
-  /** Extrait du texte ancré, pour situer le fil sans ouvrir la page. */
+  /** Excerpt of the anchored text, to place the thread without opening the page. */
   quotedText: string;
-  /** Paragraphe portant l'ancre, ou `null` si l'ancre a été supprimée. */
+  /** Paragraph holding the anchor, or `null` if the anchor has been deleted. */
   anchorBlockId: string | null;
 }
 
-/* ------------------------------------------------------- ancres sur les runs */
+/* ------------------------------------------------------- anchors on the runs */
 
 /**
- * Décompose la clé scalaire `commentIds` en liste.
+ * Splits the scalar `commentIds` key into a list.
  *
- * Le stockage est une chaîne triée jointe par des virgules, et non un tableau :
- * `sameFormatting` compare les attributs de run par `!==`, et deux tableaux de
- * même contenu n'y seraient jamais égaux — deux runs voisins cesseraient de
- * fusionner et l'invariant `SwpHints::MergePortions` tomberait. Cf. types.ts.
+ * The storage is a sorted string joined by commas, and not an array:
+ * `sameFormatting` compares run attributes with `!==`, and two arrays with the same
+ * content would never be equal there, so neighboring runs would stop merging and
+ * the `SwpHints::MergePortions` invariant would fall. See types.ts.
  */
 export function commentIdsOf(run: Pick<TextRun, 'commentIds'>): string[] {
   if (!run.commentIds) return [];
   return run.commentIds.split(',').filter((id) => id.length > 0);
 }
 
-/** Recompose la clé scalaire à partir d'une liste, triée et dédupliquée. */
+/** Builds the scalar key back from a list, sorted and without duplicates. */
 export function joinCommentIds(ids: readonly string[]): string | undefined {
   const unique = Array.from(new Set(ids.filter((id) => id.length > 0))).sort();
   return unique.length > 0 ? unique.join(',') : undefined;
 }
 
-/** Ajoute un identifiant de fil au jeu d'ancres d'un run. */
+/** Adds a thread id to the set of anchors of a run. */
 function withCommentId(run: TextRun, threadId: string): TextRun {
   const next = joinCommentIds([...commentIdsOf(run), threadId]);
   const out = makeRun(run.text, runFormatting(run));
@@ -97,7 +94,7 @@ function withCommentId(run: TextRun, threadId: string): TextRun {
   return out;
 }
 
-/** Retire un identifiant de fil du jeu d'ancres d'un run. */
+/** Removes a thread id from the set of anchors of a run. */
 function withoutCommentId(run: TextRun, threadId: string): TextRun {
   const next = joinCommentIds(commentIdsOf(run).filter((id) => id !== threadId));
   const out = makeRun(run.text, runFormatting(run));
@@ -106,9 +103,9 @@ function withoutCommentId(run: TextRun, threadId: string): TextRun {
   return out;
 }
 
-/* ----------------------------------------------------------------- lecture */
+/* ----------------------------------------------------------------- reading */
 
-/** Tous les fils du document, dans l'ordre d'apparition de leur ancre. */
+/** All the threads of the document, in the order their anchors appear. */
 export function commentThreads(doc: WriterDocumentState): CommentThread[] {
   const comments = doc.comments ?? [];
   if (comments.length === 0) return [];
@@ -125,9 +122,9 @@ export function commentThreads(doc: WriterDocumentState): CommentThread[] {
     }
   }
 
-  // L'ordre de la gouttière est celui du texte, pas celui de la table : c'est
-  // ce que fait `SwPostItMgr::Sort`, et c'est le seul ordre qui permette de
-  // suivre une relecture de haut en bas.
+  // The gutter order is the order of the text, not the order of the table: this is
+  // what `SwPostItMgr::Sort` does, and it is the only order that lets someone follow
+  // a review from top to bottom.
   const anchors = commentAnchors(doc);
   const ordered: CommentThread[] = [];
   const seen = new Set<string>();
@@ -146,7 +143,7 @@ export function commentThreads(doc: WriterDocumentState): CommentThread[] {
     });
   }
 
-  // Fils dont l'ancre a disparu : ils restent listés, sans position.
+  // Threads whose anchor has disappeared: they stay listed, without a position.
   for (const root of roots.values()) {
     if (seen.has(root.id)) continue;
     ordered.push({
@@ -165,18 +162,18 @@ export function commentThreads(doc: WriterDocumentState): CommentThread[] {
 export interface CommentAnchor {
   threadId: string;
   blockId: string;
-  /** Offset de début dans la chaîne brute du paragraphe. */
+  /** Start offset in the paragraph's raw string. */
   startOffset: number;
   endOffset: number;
   text: string;
 }
 
 /**
- * Position de chaque ancre dans le flux.
+ * Position of each anchor in the flow.
  *
- * Un même fil peut avoir plusieurs plages non contiguës (le texte commenté a
- * été coupé par une édition) : on renvoie chaque plage, et c'est la première
- * qui donne la position du fil dans la gouttière.
+ * One thread can have several non-contiguous ranges (the commented text was split
+ * by an edit): we return every range, and the first one gives the thread's position
+ * in the gutter.
  */
 export function commentAnchors(doc: WriterDocumentState): CommentAnchor[] {
   const out: CommentAnchor[] = [];
@@ -186,7 +183,8 @@ export function commentAnchors(doc: WriterDocumentState): CommentAnchor[] {
     const paragraph = byId.get(blockId)?.paragraph;
     if (!paragraph) continue;
 
-    // Plage courante par fil : un fil interrompu puis repris donne deux plages.
+    // Current range per thread: a thread that is interrupted then resumed gives two
+    // ranges.
     const open = new Map<string, { start: number; text: string }>();
     let offset = 0;
 
@@ -213,7 +211,7 @@ export function commentAnchors(doc: WriterDocumentState): CommentAnchor[] {
   return out;
 }
 
-/* ---------------------------------------------------------------- écriture */
+/* ---------------------------------------------------------------- writing */
 
 export interface CommentRange {
   blockId: string;
@@ -222,11 +220,11 @@ export interface CommentRange {
 }
 
 /**
- * Pose un commentaire sur une plage de texte.
+ * Puts a comment on a range of text.
  *
- * Transposition de `SwEditShell::InsertPostIt`. La plage est découpée aux deux
- * bornes puis chaque run intérieur reçoit l'identifiant du fil ; le contenu est
- * poussé dans la table du document.
+ * Counterpart of `SwEditShell::InsertPostIt`. The range is split at both ends, then
+ * each run inside gets the thread id; the content is pushed into the document's
+ * table.
  */
 export function addComment(
   doc: WriterDocumentState,
@@ -241,8 +239,8 @@ export function addComment(
 
   const start = Math.max(0, Math.min(range.startOffset, range.endOffset));
   const end = Math.max(range.startOffset, range.endOffset);
-  // Une plage vide n'a rien à ancrer : Writer refuse aussi le commentaire sans
-  // sélection sur un paragraphe vide.
+  // An empty range has nothing to anchor: Writer also refuses a comment with no
+  // selection on an empty paragraph.
   if (end <= start) return { doc, threadId: '' };
 
   const threadId = newId('cmt');
@@ -267,7 +265,7 @@ export function addComment(
   };
 }
 
-/** Ajoute une réponse à un fil existant (`SwPostItMgr::Reply`). */
+/** Adds a reply to an existing thread (`SwPostItMgr::Reply`). */
 export function replyToComment(
   doc: WriterDocumentState,
   threadId: string,
@@ -291,7 +289,7 @@ export function replyToComment(
   return touch({ ...doc, comments: [...comments, reply] });
 }
 
-/** Marque un fil comme résolu, ou le rouvre. */
+/** Marks a thread as resolved, or reopens it. */
 export function resolveCommentThread(
   doc: WriterDocumentState,
   threadId: string,
@@ -305,7 +303,7 @@ export function resolveCommentThread(
   });
 }
 
-/** Modifie le corps d'un commentaire ou d'une réponse. */
+/** Edits the body of a comment or a reply. */
 export function editComment(
   doc: WriterDocumentState,
   commentId: string,
@@ -321,12 +319,12 @@ export function editComment(
 }
 
 /**
- * Supprime un fil : son contenu **et** ses ancres.
+ * Deletes a thread: its content **and** its anchors.
  *
- * Retirer l'ancre sans le contenu laisserait un fil fantôme dans la table ;
- * retirer le contenu sans l'ancre laisserait un attribut de run pointant dans
- * le vide, qui empêcherait deux runs voisins de fusionner. Les deux vont donc
- * ensemble — c'est ce que fait `SwDoc::DelFullPara` sur un champ de note.
+ * Removing the anchor without the content would leave a ghost thread in the table;
+ * removing the content without the anchor would leave a run attribute pointing at
+ * nothing, which would stop two neighboring runs from merging. So the two go
+ * together, which is what `SwDoc::DelFullPara` does for a note field.
  */
 export function deleteCommentThread(
   doc: WriterDocumentState,
@@ -347,7 +345,7 @@ export function deleteCommentThread(
   return touch({ ...next, comments });
 }
 
-/** Supprime une seule réponse d'un fil (jamais la racine — cf. `deleteCommentThread`). */
+/** Deletes a single reply of a thread (never the root, see `deleteCommentThread`). */
 export function deleteCommentReply(
   doc: WriterDocumentState,
   commentId: string,
@@ -359,10 +357,10 @@ export function deleteCommentReply(
 }
 
 /**
- * Retire les fils dont plus aucune ancre ne subsiste (`SwPostItMgr::Delete`).
+ * Removes the threads that no longer have any anchor (`SwPostItMgr::Delete`).
  *
- * À appeler après une suppression de texte : sans cela, la table enfle de fils
- * invisibles que l'export ODF réémettrait sans plage correspondante.
+ * Call it after deleting text: otherwise the table fills up with invisible threads
+ * that the ODF export would write out again with no matching range.
  */
 export function pruneOrphanComments(doc: WriterDocumentState): WriterDocumentState {
   const comments = doc.comments ?? [];

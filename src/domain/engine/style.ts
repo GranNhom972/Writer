@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Résolution du style effectif. Transposition de `SwFmt` / `SwAttrSet`.
+ * Resolving the effective style. (OpenOffice: `SwFmt` / `SwAttrSet`.)
  *
- * Writer résout un attribut en remontant la chaîne des styles jusqu'au style
- * par défaut (`SwFmt::GetItemState` avec `bSrchInParent`). La chaîne est ici
- * courte et explicite : **run → paragraphe → défauts du document**.
+ * Writer resolves an attribute by climbing the chain of styles up to the default style
+ * (`SwFmt::GetItemState` with `bSrchInParent`). The chain here is short and explicit:
+ * **run → paragraph → document defaults**.
  */
 
 import { ptToPx } from '../document/units';
@@ -23,11 +23,11 @@ import type {
 import type { FontSpec } from './measure';
 
 /**
- * Échelle des titres, en fraction du corps de base.
+ * Scale of the headings, as a fraction of the base font size.
  *
- * Reprise des styles « Heading 1..6 » d'OpenOffice, qui sont définis en
- * pourcentage du style parent et non en points absolus : changer le corps du
- * document fait suivre les titres.
+ * Taken from OpenOffice's "Heading 1..6" styles, which are defined as a percentage of the
+ * parent style and not in absolute points: changing the document's font size makes the
+ * headings follow.
  */
 const HEADING_SCALE: Readonly<Record<HeadingLevel, number>> = {
   1: 1.3,
@@ -38,7 +38,7 @@ const HEADING_SCALE: Readonly<Record<HeadingLevel, number>> = {
   6: 0.75,
 };
 
-/** Les titres sont gras ; le niveau 4 est en plus italique, comme dans Writer. */
+/** Headings are bold; level 4 is also italic, as in Writer. */
 function headingEmphasis(level: HeadingLevel): { bold: boolean; italic: boolean } {
   return { bold: true, italic: level === 4 };
 }
@@ -47,7 +47,7 @@ export interface StyleContext {
   defaults: DocumentDefaults;
 }
 
-/** Fonte effective d'un run, une fois la chaîne d'héritage résolue. */
+/** Effective font of a run, once the inheritance chain is resolved. */
 export function resolveFont(
   formatting: RunFormatting,
   paragraph: Pick<ParagraphNode, 'type' | 'headingLevel'>,
@@ -67,22 +67,22 @@ export function resolveFont(
   };
 }
 
-/** Couleur effective d'un run. */
+/** Effective color of a run. */
 export function resolveColor(formatting: RunFormatting, ctx: StyleContext): string {
   return formatting.color ?? ctx.defaults.color;
 }
 
-/** Facteur d'interligne effectif (`SvxLineSpacingItem`). */
+/** Effective line spacing factor (`SvxLineSpacingItem`). */
 export function resolveLineSpacing(paragraph: ParagraphNode, ctx: StyleContext): number {
   return paragraph.lineSpacing ?? ctx.defaults.lineSpacing;
 }
 
 /**
- * Espacement vertical par défaut d'un titre, en points.
+ * Default vertical spacing of a heading, in points.
  *
- * Un titre collé au paragraphe précédent se lit mal ; Writer donne donc aux
- * styles de titre un `SvxULSpaceItem` non nul, que l'on reproduit ici quand le
- * nœud ne le fixe pas lui-même.
+ * A heading stuck to the previous paragraph is hard to read; Writer therefore gives heading
+ * styles a non-zero `SvxULSpaceItem`, which we reproduce here when the node does not set one
+ * itself.
  */
 export function resolveBlockSpacing(
   paragraph: ParagraphNode,

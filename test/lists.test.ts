@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Numérotation des listes — `SwNumRule` / `SwNodeNum`.
+ * List numbering: `SwNumRule` / `SwNodeNum`.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -29,7 +29,7 @@ import {
 } from '../src/domain/engine/edit';
 import { makeSelection } from '../src/domain/engine/cursor';
 
-/** Élément de liste prêt à l'emploi. */
+/** A ready-to-use list item. */
 function item(
   text: string,
   kind: ListKind,
@@ -44,7 +44,7 @@ function documentOf(blocks: WriterDocumentState['blocks']): WriterDocumentState 
   return { ...createEmptyDocument('Essai'), blocks };
 }
 
-/** Marqueurs du document, dans l'ordre de lecture. */
+/** Markers of the document, in reading order. */
 function markersOf(doc: WriterDocumentState): string[] {
   const markers = computeListMarkers(doc);
   return paragraphIndex(doc)
@@ -66,7 +66,7 @@ describe('numérotation', () => {
     expect(formatOrdered(0, 3)).toBe('3.');
     expect(formatOrdered(1, 3)).toBe('c)');
     expect(formatOrdered(2, 4)).toBe('iv.');
-    // Le cycle reprend au quatrième niveau.
+    // The cycle starts again at the fourth level.
     expect(formatOrdered(3, 2)).toBe('2.');
   });
 
@@ -78,7 +78,7 @@ describe('numérotation', () => {
       item('deux', 'ordered', 'L1', 0),
       item('deux.a', 'ordered', 'L1', 1),
     ]);
-    // « deux.a » repart à « a) » : ressortir d'un niveau ferme son compteur.
+    // "deux.a" starts again at "a)": coming back out of a level closes its counter.
     expect(markersOf(doc)).toEqual(['1.', 'a)', 'b)', '2.', 'a)']);
   });
 
@@ -122,7 +122,7 @@ describe('numérotation', () => {
     const table = createTable(1, 2);
     table.rows[0]!.cells[0]!.blocks = [item('a', 'ordered', 'L1'), item('b', 'ordered', 'L1')];
     table.rows[0]!.cells[1]!.blocks = [item('c', 'ordered', 'L1')];
-    // La seconde cellule repart à 1 : deux cellules ne partagent pas de liste.
+    // The second cell starts again at 1: two cells do not share a list.
     expect(markersOf(documentOf([table]))).toEqual(['1.', '2.', '1.']);
   });
 });
@@ -166,7 +166,7 @@ describe('commandes', () => {
     const premier = nodeAt(state, 0);
     const second = nodeAt(state, 1);
     expect(premier.listKind).toBe('bullet');
-    // Même identifiant : c'est une liste, pas deux éléments isolés.
+    // Same id: it is one list, not two isolated items.
     expect(second.listId).toBe(premier.listId);
   });
 
@@ -209,8 +209,7 @@ describe('commandes', () => {
   });
 
   it('ne touche pas au niveau hors liste', () => {
-    // La commande renvoie l'état **inchangé**, à l'identité près : rien à
-    // recalculer, donc rien à re-rendre.
+    // The command returns the state **unchanged**, down to identity: nothing to recompute, so nothing to re-render.
     const state = selectAllParagraphs(stateOf([createParagraph('texte')]));
     expect(changeListLevel(state, 1)).toBe(state);
   });
@@ -262,7 +261,7 @@ describe('Entrée dans une liste', () => {
   it('remonte d’un niveau sur un élément vide imbriqué', () => {
     const node = item('', 'bullet', 'L1', 2);
     const state = splitParagraph(stateAt(node, 0));
-    // Aucun nœud créé : c'est le niveau qui change.
+    // No node created: it is the level that changes.
     expect(paragraphIndex(state.doc).order).toHaveLength(1);
     expect(paragraphIndex(state.doc).byId.get(node.id)!.paragraph.listLevel).toBe(1);
   });

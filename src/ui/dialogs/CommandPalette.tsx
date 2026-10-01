@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useState, useEffect, useRef, type JSX } from 'react';
 import { Modal } from '../../design/components/Modal';

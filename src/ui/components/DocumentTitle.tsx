@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -10,17 +10,16 @@ interface DocumentTitleProps {
 }
 
 /**
- * Titre du document, éditable en place.
+ * Document title, editable in place.
  *
- * Le champ reste un `<input>` (pas un `contenteditable`) : il est annoncé comme
- * une zone de saisie nommée, `Échap` annule, `Entrée` valide, et le focus revient
- * naturellement au document.
+ * The field stays an `<input>` (not a `contenteditable`): it is announced as a named input area, `Escape` cancels, `Enter` confirms, and the
+ * focus naturally returns to the document.
  */
 export function DocumentTitle({ title, disabled, onCommit }: DocumentTitleProps) {
   const [draft, setDraft] = useState(title);
   const committed = useRef(title);
 
-  // Un renommage distant met à jour le champ, sauf pendant une saisie locale.
+  // A remote rename updates the field, except during a local edit.
   useEffect(() => {
     if (document.activeElement !== inputRef.current) {
       setDraft(title);

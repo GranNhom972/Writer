@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Rendu d'un paragraphe posé sur une page.
+ * Rendering of a paragraph placed on a page.
  *
- * Le composant ne décide de rien : il **peint** ce que le moteur a calculé.
- * Chaque ligne est un élément positionné à l'abscisse et à l'ordonnée que lui
- * a données `layoutParagraph`, et les segments s'y enchaînent dans le flux.
- * Cette séparation garantit que le DOM n'est qu'une projection réactive de l'état :
- * aucune mesure ne remonte du DOM vers le modèle.
+ * The component decides nothing: it **paints** what the engine has computed. Each line is an element positioned at the x and y coordinates given to it by `layoutParagraph`, and the segments follow one another
+ * inside it in the flow. This separation guarantees that the DOM is only a reactive projection of the state: no measurement goes back up from the DOM to the model.
  */
 
 import { memo, type CSSProperties, type JSX } from 'react';
@@ -31,7 +28,7 @@ import {
 import { ImageFrame } from './ImageFrame';
 import { safeLinkHref } from '../../domain/document/url';
 
-/** Style CSS d'un segment, dérivé de la fonte que le moteur a résolue. */
+/** CSS style of a segment, derived from the font the engine resolved. */
 function segmentStyle(segment: LayoutSegment): CSSProperties {
   const style: CSSProperties = {
     fontFamily: segment.font.fontFamily,
@@ -44,19 +41,16 @@ function segmentStyle(segment: LayoutSegment): CSSProperties {
     style.backgroundColor = segment.formatting.backgroundColor;
   }
 
-  // Souligné et barré se cumulent : `text-decoration-line` accepte les deux,
-  // là où deux règles séparées s'écraseraient l'une l'autre.
+  // Underline and strikethrough add up: `text-decoration-line` accepts both, whereas two separate rules would overwrite each other.
   const decorations: string[] = [];
   if (segment.formatting.underline) decorations.push('underline');
   if (segment.formatting.strikeThrough) decorations.push('line-through');
 
-  /* -- Révisions (`SwRedline`) --------------------------------------------
+  /*
+   * -- Revisions (`SwRedline`) -------------------------------------------
    *
-   * Writer peint une insertion **soulignée** et une suppression **barrée**, les
-   * deux dans la couleur de l'auteur (`SwRedlineTbl`). Ce sont les mêmes
-   * décorations que le souligné et le barré ordinaires : elles s'ajoutent donc
-   * à la liste plutôt que de la remplacer, faute de quoi barrer une suppression
-   * effacerait le souligné que l'auteur avait posé.
+   * Writer paints an insertion **underlined** and a deletion **struck through**, both in the author's color (`SwRedlineTbl`). They are the same decorations as ordinary underline and strikethrough: they are
+   * therefore added to the list rather than replacing it, otherwise striking out a deletion would erase the underline the author had set.
    */
   const redlineType = segment.formatting.redlineType;
   if (redlineType === 'insert') {
@@ -72,18 +66,17 @@ function segmentStyle(segment: LayoutSegment): CSSProperties {
 
   if (decorations.length > 0) style.textDecorationLine = decorations.join(' ');
 
-  /* -- Ancre de commentaire (`SwPostItMgr`) --------------------------------
+  /*
+   * -- Comment anchor (`SwPostItMgr`) ------------------------------------
    *
-   * Un fond jaune pâle plutôt qu'un surlignage franc : le texte commenté reste
-   * du texte à lire, et Writer le traite de la même façon. Le fond posé par
-   * l'usager, s'il existe, garde la priorité — c'est un choix explicite.
+   * A pale yellow background rather than a strong highlight: the commented text stays text to read, and Writer treats it the same way. The background set by the user, if there is one, keeps priority: it is an
+   * explicit choice.
    */
   if (segment.formatting.commentIds && !style.backgroundColor) {
     style.backgroundColor = 'var(--comment-highlight, rgba(255, 214, 102, 0.35))';
   }
 
-  // Un signet ne se peint pas : il n'a pas d'existence visuelle dans Writer non
-  // plus. Il est seulement repérable par le panneau de navigation.
+  // A bookmark is not painted: it has no visual existence in Writer either. It can only be found through the navigation panel.
 
   return style;
 }
@@ -102,8 +95,7 @@ function SegmentView({
   images?: ImageContext | undefined;
 }): JSX.Element {
   if (segment.isTab) {
-    // La largeur d'une tabulation dépend du taquet atteint : elle est donnée en
-    // pixels, jamais laissée au navigateur qui n'en connaît pas la position.
+    // The width of a tab depends on the stop that is reached: it is given in pixels, never left to the browser, which does not know its position.
     return (
       <span
         className="writer-tab"
@@ -115,13 +107,10 @@ function SegmentView({
 
   if (segment.formatting.imageSrc) {
     /*
-     * Une image **flottante** n'est pas peinte ici.
+     * A **floating** image is not painted here.
      *
-     * Sa géométrie vient de `flyLayout`, qui la pose à sa position d'ancrage et
-     * creuse le texte autour ; la couche des cadres flottants s'en charge. La
-     * peindre aussi dans la ligne la dessinait **deux fois** — une fois à sa
-     * place, une fois dans le fil, côte à côte. Le run reste dans la ligne,
-     * sans largeur : c'est ce que dit le modèle (`imageAnchor` ≠ `as-char`).
+     * Its geometry comes from `flyLayout`, which places it at its anchor position and carves the text around it; the floating-frame layer takes care of it. Painting it in the line too drew it **twice**: once in its
+     * place, once in the flow, side by side. The run stays in the line, with no width: that is what the model says (`imageAnchor` ≠ `as-char`).
      */
     if (segment.formatting.imageAnchor && segment.formatting.imageAnchor !== 'as-char') {
       return <span aria-hidden="true" />;
@@ -130,12 +119,11 @@ function SegmentView({
     const widthPx = ptToPx(segment.formatting.imageWidthPt ?? 0);
     const imageHeightPx = ptToPx(segment.formatting.imageHeightPt ?? 0);
 
-    // Hauteur de la légende telle que le **moteur** l'a réservée dans la ligne.
-    // La recalculer ici ferait dépendre l'affichage d'une seconde dérivation.
+    // Height of the caption as the **engine** reserved it in the line. Recomputing it here would make the display depend on a second derivation.
     const captionPx = segment.captionHeightPx ?? 0;
 
     if (!images) {
-      // Sans contexte d'image — impression, export — le cadre se peint nu.
+      // With no image context (printing, export), the frame is painted bare.
       const crop = imageCrop(segment.formatting);
       const decoupe = hasCrop(crop) ? cropGeometry(crop, widthPx, imageHeightPx) : null;
       return (
@@ -235,21 +223,14 @@ function SegmentView({
 
   const style = segmentStyle(segment);
   /*
-   * Le caractère de substitution d'objet ne se peint jamais.
+   * The object replacement character is never painted.
    *
-   * U+FFFC (`CH_TXTATR_BREAKWORD`) est un **point d'ancrage**, pas un glyphe :
-   * il donne à l'objet une position dans la chaîne du paragraphe, et Writer
-   * n'en dessine rien. Le moteur le mesure d'ailleurs à zéro — `measureText`
-   * lui rend une avance nulle — alors que le laisser dans le texte du DOM fait
-   * peindre au navigateur une case de repli de 16 px, absente de toutes les
-   * mesures.
+   * U+FFFC (`CH_TXTATR_BREAKWORD`) is an **anchor point**, not a glyph: it gives the object a position in the paragraph's string, and Writer draws nothing for it. The engine measures it at zero as well
+   * (`measureText` returns a zero advance for it), whereas leaving it in the DOM text makes the browser paint a 16 px fallback box that is absent from all the measurements.
    *
-   * Tout ce qui suit sur la ligne s'en trouvait décalé : le rectangle de
-   * sélection s'arrêtait 16 px avant la fin, le curseur se posait à côté du
-   * clic, et la case elle-même restait blanche sous un `Ctrl+A`. Un segment
-   * n'arrive ici qu'une fois les objets traités plus haut (image, formule) : le
-   * caractère qui y subsiste a perdu son attribut — un aller-retour ODF par un
-   * autre logiciel en laisse — et n'ancre donc plus rien du tout.
+   * Everything that followed on the line was shifted by it: the selection rectangle stopped 16 px before the end, the cursor landed beside the click, and the box itself stayed white under `Ctrl+A`. A segment only
+   * gets here once the objects have been handled above (image, formula): the character that remains in it has lost its attribute (an ODF round trip through other software leaves some) and therefore no longer
+   * anchors anything at all.
    */
   const content = segment.text.includes(IMAGE_PLACEHOLDER)
     ? segment.text.split(IMAGE_PLACEHOLDER).join('')
@@ -276,10 +257,8 @@ function SegmentView({
   }
 
   if (segment.formatting.linkHref) {
-    // Le document arrive du disque, d'un import ODF ou d'un autre participant
-    // par le CRDT : on revalide au rendu, seul endroit que toutes ces sources
-    // traversent. Une adresse refusée retombe en texte simple plutôt que de
-    // disparaître — l'usager doit voir qu'il y avait quelque chose là.
+    // The document comes from disk, from an ODF import, or from another participant through the CRDT: we revalidate at render time, the only place all those sources go through. A refused address falls back to
+    // plain text rather than disappear: the user must see that there was something there.
     const href = safeLinkHref(segment.formatting.linkHref);
     if (href) {
       return (
@@ -298,11 +277,9 @@ function SegmentView({
 }
 
 /**
- * Puce, numéro ou case à cocher d'un élément de liste.
+ * Bullet, number or checkbox of a list item.
  *
- * La case d'une liste à cocher est un vrai `<input>` : elle se coche au clavier
- * et s'annonce comme une case aux technologies d'assistance, ce qu'un glyphe ☐
- * ne ferait pas.
+ * The checkbox of a checklist is a real `<input>`: it can be ticked with the keyboard and is announced as a checkbox to assistive technologies, which a ☐ glyph would not be.
  */
 function MarkerView({
   marker,
@@ -334,8 +311,7 @@ function MarkerView({
           checked={marker.checked}
           aria-label="Élément fait"
           onChange={() => onToggle?.()}
-          // Le pointeur doit atteindre la case, alors que le reste du marqueur
-          // laisse passer le clic vers le document pour y poser le curseur.
+          // The pointer must reach the checkbox, whereas the rest of the marker lets the click through to the document to place the cursor there.
           style={{ pointerEvents: 'auto' }}
         />
       </span>
@@ -350,14 +326,12 @@ function MarkerView({
 }
 
 /**
- * Tout ce dont un cadre image a besoin, en un objet.
+ * Everything an image frame needs, in a single object.
  *
- * Regroupé plutôt qu'éclaté en dix propriétés : la chaîne de transmission
- * traverse trois composants, et dix arguments à chaque étage rendraient
- * illisible ce qui n'est qu'un passage de contexte.
+ * Grouped rather than split into ten properties: the chain of transmission crosses three components, and ten arguments at each level would make unreadable what is only a pass-through of context.
  */
 export interface ImageContext {
-  /** Numéros de figure du document, par `blockId:offset`. */
+  /** Figure numbers of the document, by `blockId:offset`. */
   figureNumbers: ReadonlyMap<string, number>;
   bodyFontSizePt: number;
   selected: { blockId: string; offset: number } | null;
@@ -366,32 +340,31 @@ export interface ImageContext {
   onSelect: (blockId: string, offset: number) => void;
   onOpenDialog: (blockId: string, offset: number) => void;
   onResize: (blockId: string, offset: number, widthPt: number, heightPt: number) => void;
-  /** Change l'intégration au texte du cadre (`SwFmtSurround`). */
+  /** Changes how the frame fits into the text (`SwFmtSurround`). */
   onWrapChange: (blockId: string, offset: number, mode: ImageWrapMode) => void;
-  /** Déplace un cadre flottant, en points, dans le repère de son ancre. */
+  /** Moves a floating frame, in points, in the frame of reference of its anchor. */
   onMove: (blockId: string, offset: number, xPt: number, yPt: number) => void;
-  /** Fin d'un glissement d'image, aux coordonnées de la fenêtre. */
+  /** End of an image drag, at window coordinates. */
   onDrop: (blockId: string, offset: number, clientX: number, clientY: number) => void;
 }
 
 export interface ParagraphViewProps {
   placed: PlacedParagraph;
   layout: ParagraphLayout;
-  /** Bascule la case d'un élément de liste à cocher. */
+  /** Toggles the checkbox of a checklist item. */
   onToggleTask?: (blockId: string) => void;
-  /** Ouvre l'éditeur de formule pour modifier une formule existante. */
+  /** Opens the formula editor to modify an existing formula. */
   onEditMath?: ((blockId: string, latex: string, display: boolean) => void) | undefined;
-  /** Ouvre l'atelier d'image sur le cadre situé à cet offset. */
+  /** Opens the image workshop on the frame located at this offset. */
   onEditImage?: ((blockId: string, offset: number) => void) | undefined;
   images?: ImageContext | undefined;
 }
 
 /**
- * Les lignes d'un morceau de paragraphe posé sur une page.
+ * The lines of a piece of paragraph placed on a page.
  *
- * `memo` sur l'identité du placement : tant que le moteur n'a pas recalculé ce
- * paragraphe, React n'a rien à refaire — ce qui garde la frappe fluide dans un
- * document long, où seul le paragraphe touché change d'identité.
+ * `memo` on the identity of the placement: as long as the engine has not recomputed this paragraph, React has nothing to redo, which keeps typing smooth in a long document, where only the touched paragraph
+ * changes identity.
  */
 export const ParagraphView = memo(function ParagraphView({
   placed,
@@ -405,8 +378,7 @@ export const ParagraphView = memo(function ParagraphView({
   const rows: JSX.Element[] = [];
   let y = top;
 
-  // Le marqueur n'accompagne que la **première** ligne : une liste reportée sur
-  // la page suivante ne réaffiche pas sa puce, elle poursuit son élément.
+  // The marker only goes with the **first** line: a list carried over to the next page does not show its bullet again, it continues its item.
   if (layout.marker && placed.fromLine === 0) {
     const first = layout.lines[0];
     if (first) {
@@ -434,8 +406,7 @@ export const ParagraphView = memo(function ParagraphView({
           left: `${line.leftPx}px`,
           top: `${y}px`,
           height: `${line.heightPx}px`,
-          // La ligne de base est celle qu'a calculée le moteur : `line-height`
-          // égale à la hauteur pose le texte au bon endroit dans la bande.
+          // The baseline is the one the engine computed: a `line-height` equal to the height puts the text in the right place in the band.
           lineHeight: `${line.heightPx}px`,
           wordSpacing: line.wordSpacingPx > 0 ? `${line.wordSpacingPx}px` : undefined,
         }}

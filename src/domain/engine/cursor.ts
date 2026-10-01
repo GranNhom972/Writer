@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Curseur, sélection et navigation. Transposition de `SwPaM` / `SwCursor`
- * (`sw/source/core/crsr/pam.cxx`, `swcrsr.cxx`).
+ * Cursor, selection and navigation. (OpenOffice: `SwPaM` / `SwCursor`,
+ * `sw/source/core/crsr/pam.cxx`, `swcrsr.cxx`.)
  *
- * `SwPaM` tient deux positions : le **Mark** (l'ancre, posée au début du geste)
- * et le **Point** (la tête, celle que déplacent les flèches). Une sélection
- * peut donc être « à l'envers », Point avant Mark ; les opérations d'édition
- * travaillent sur la forme normalisée (`SwPaM::Normalize`), l'affichage sur la
- * forme brute — c'est ce qui fait que raccourcir une sélection vers le haut
- * puis vers le bas retrouve exactement le même état.
+ * `SwPaM` holds two positions: the **Mark** (the anchor, set at the start of the
+ * gesture) and the **Point** (the head, the one the arrow keys move). A selection can
+ * therefore be "backwards", with the Point before the Mark; editing operations work on
+ * the normalized form (`SwPaM::Normalize`) and the display on the raw form. That is what
+ * makes shrinking a selection upwards and then downwards come back to exactly the same
+ * state.
  */
 
 import { paragraphIndex, paragraphText } from '../document/document';
@@ -54,10 +54,10 @@ export function samePosition(a: DocumentPosition, b: DocumentPosition): boolean 
 }
 
 /**
- * Ordre documentaire de deux positions (`SwPosition::operator<`).
+ * Document order of two positions (`SwPosition::operator<`).
  *
- * Writer compare d'abord l'index de nœud puis l'index de contenu ; le rang du
- * paragraphe dans l'index plat joue ici le rôle de l'index de nœud.
+ * Writer compares the node index first and then the content index; the rank of the
+ * paragraph in the flat index plays the role of the node index here.
  */
 export function comparePositions(
   doc: WriterDocumentState,
@@ -72,7 +72,7 @@ export function comparePositions(
   return rankA - rankB;
 }
 
-/** Sélection remise à l'endroit : début avant fin (`SwPaM::Normalize`). */
+/** Selection put the right way round: start before end (`SwPaM::Normalize`). */
 export function normalizeSelection(
   doc: WriterDocumentState,
   selection: DocumentSelection,
@@ -82,7 +82,7 @@ export function normalizeSelection(
     : { start: selection.focus, end: selection.anchor };
 }
 
-/** Borne une position dans les limites réelles de son paragraphe. */
+/** Clamps a position within the real limits of its paragraph. */
 export function clampPosition(
   doc: WriterDocumentState,
   position: DocumentPosition,
@@ -98,18 +98,17 @@ export function clampPosition(
   return { blockId: position.blockId, offset: clamp(position.offset, 0, length) };
 }
 
-/* ------------------------------------------------------ navigation textuelle */
+/* ------------------------------------------------------ text navigation */
 
 export type HorizontalGranularity = 'character' | 'word';
 export type Direction = -1 | 1;
 
 /**
- * Déplace d'une **grappe de graphèmes**, pas d'une unité de code.
+ * Moves by one **grapheme cluster**, not by one code unit.
  *
- * `SwIndex` avance d'un `sal_Unicode`, ce qui suffisait à l'UCS-2 de l'époque.
- * En UTF-16 moderne, avancer d'une unité couperait un emoji en deux et le
- * rendrait invalide : on avance donc par grappe, comme le fait le
- * `XBreakIterator` de `SwCursor::GoNextCell`.
+ * `SwIndex` advances by one `sal_Unicode`, which was enough for the UCS-2 of the time. In
+ * modern UTF-16, advancing by one unit would cut an emoji in two and make it invalid, so
+ * we advance by cluster, as the `XBreakIterator` of `SwCursor::GoNextCell` does.
  */
 export function stepGrapheme(text: string, offset: number, direction: Direction): number {
   const bounds = graphemeBoundaries(text);
@@ -126,7 +125,7 @@ export function stepGrapheme(text: string, offset: number, direction: Direction)
   return 0;
 }
 
-/** Une position tombe-t-elle sur une frontière de grappe ? */
+/** Does a position fall on a cluster boundary? */
 export function isGraphemeBoundary(text: string, offset: number): boolean {
   return graphemeBoundaries(text).includes(clamp(offset, 0, text.length));
 }
@@ -136,12 +135,12 @@ function isWordChar(char: string): boolean {
 }
 
 /**
- * Début du mot suivant / précédent (`SwCursor::GoNextWord`, `GoPrevWord`).
+ * Start of the next / previous word (`SwCursor::GoNextWord`, `GoPrevWord`).
  *
- * Vers la droite : franchir le mot courant puis les blancs, pour se poser au
- * **début** du mot suivant. Vers la gauche : franchir les blancs puis le mot,
- * pour se poser au début du mot courant. C'est asymétrique à dessein — c'est
- * le comportement attendu de `Ctrl+→` / `Ctrl+←`.
+ * Going right: cross the current word and then the blanks, to land at the **start** of the
+ * next word. Going left: cross the blanks and then the word, to land at the start of the
+ * current word. It is asymmetric on purpose: it is the behavior expected from `Ctrl+→` /
+ * `Ctrl+←`.
  */
 export function stepWord(text: string, offset: number, direction: Direction): number {
   let position = clamp(offset, 0, text.length);
@@ -165,13 +164,13 @@ export function stepWord(text: string, offset: number, direction: Direction): nu
   return position;
 }
 
-/** Bornes du mot sous le curseur — pour le double-clic. */
+/** Bounds of the word under the cursor, for a double click. */
 export function wordRangeAt(text: string, offset: number): { start: number; end: number } {
   const at = clamp(offset, 0, text.length);
   if (text.length === 0) return { start: 0, end: 0 };
 
-  // Sur un blanc, sélectionner la plage de blancs : c'est ce que fait Writer,
-  // et cela évite qu'un double-clic entre deux mots n'attrape rien.
+  // On a blank, select the run of blanks: this is what Writer does, and it keeps a double
+  // click between two words from grabbing nothing.
   const probe = text[at] ?? text[at - 1] ?? '';
   const inWord = isWordChar(probe);
 
@@ -187,12 +186,11 @@ export function wordRangeAt(text: string, offset: number): { start: number; end:
 }
 
 /**
- * Déplacement horizontal, franchissement de paragraphe compris.
+ * Horizontal move, crossing paragraph boundaries included.
  *
- * Le passage d'un paragraphe à l'autre coûte **un** pas : la frontière entre
- * deux nœuds de texte est une position à part entière, exactement comme dans
- * `SwNodes` où `nContent == 0` du nœud suivant est distinct de `nContent ==
- * Len()` du précédent.
+ * Going from one paragraph to the next costs **one** step: the boundary between two text
+ * nodes is a position in its own right, exactly as in `SwNodes` where `nContent == 0` of
+ * the next node is distinct from `nContent == Len()` of the previous one.
  */
 export function moveHorizontal(
   doc: WriterDocumentState,
@@ -220,7 +218,7 @@ export function moveHorizontal(
     return { blockId: previousId, offset: paragraphText(previous.paragraph).length };
   }
 
-  // Franchissement atomique des formules mathématiques (SwpHints / objets insécables)
+  // Atomic crossing of math formulas (SwpHints / non-breakable objects)
   let runStart = 0;
   for (const run of found.paragraph.runs) {
     const runEnd = runStart + run.text.length;
@@ -245,9 +243,9 @@ export function moveHorizontal(
   return { blockId: position.blockId, offset: next };
 }
 
-/* --------------------------------------------------------- géométrie visuelle */
+/* --------------------------------------------------------- visual geometry */
 
-/** Ligne d'un paragraphe contenant l'offset donné. */
+/** The line of a paragraph that contains the given offset. */
 export function lineIndexAt(layout: ParagraphLayout, offset: number): number {
   const lines = layout.lines;
   if (lines.length === 0) return 0;
@@ -258,24 +256,23 @@ export function lineIndexAt(layout: ParagraphLayout, offset: number): number {
 }
 
 /**
- * Largeur **réellement peinte** de la ligne, justification comprise.
+ * Width that is **actually painted** for the line, justification included.
  *
- * `widthPx` est la largeur des segments tels qu'ils ont été mesurés, donc
- * celle de la ligne *avant* justification. Une ligne justifiée est ensuite
- * étirée : `wordSpacingPx` s'ajoute à chacun de ses blancs, et le rendu le
- * confie à `word-spacing` (cf. `ParagraphView`). Sa fin se trouve donc plus à
- * droite que `widthPx` ne l'annonce — de tout l'étirement, soit jusqu'à la
- * largeur de la colonne.
+ * `widthPx` is the width of the segments as they were measured, so that of the line
+ * *before* justification. A justified line is then stretched: `wordSpacingPx` is added to
+ * each of its blanks, and the rendering hands that to `word-spacing` (see `ParagraphView`).
+ * Its end is therefore further right than `widthPx` says, by the whole stretch, up to the
+ * width of the column.
  *
- * Confondre les deux laissait la **queue de chaque ligne justifiée** hors du
- * rectangle : à `Ctrl+A`, le dernier mot de la ligne restait blanc au milieu
- * d'un paragraphe surligné. Le même écart posait le curseur de `Fin` avant ce
- * mot, et faisait sauter à la fin de ligne un clic qui tombait dessus.
+ * Mixing the two left the **tail of every justified line** outside the rectangle: on
+ * `Ctrl+A`, the last word of the line stayed white in the middle of a highlighted
+ * paragraph. The same gap put the `End` cursor before that word, and made a click that
+ * landed on it jump to the end of the line.
  *
- * Le reste de ce module compte déjà les blancs de la même façon pour placer un
- * offset dans une ligne justifiée (`caretXOnLine`, `offsetFromX`) : cette
- * fonction applique la même règle au bord droit, plutôt que d'ajouter au
- * modèle une seconde largeur qui finirait par diverger de la première.
+ * The rest of this module already counts the blanks the same way to place an offset in a
+ * justified line (`caretXOnLine`, `offsetFromX`): this function applies the same rule to
+ * the right edge, rather than adding to the model a second width that would end up
+ * diverging from the first.
  */
 function paintedLineWidth(line: LayoutLine): number {
   if (line.wordSpacingPx <= 0) return line.widthPx;
@@ -286,14 +283,14 @@ function paintedLineWidth(line: LayoutLine): number {
   return line.widthPx + blanks * line.wordSpacingPx;
 }
 
-/** Abscisse du curseur sur sa ligne, relative au bord gauche du contenu. */
+/** X coordinate of the cursor on its line, relative to the left edge of the content. */
 export function caretXOnLine(
   line: LayoutLine,
   offset: number,
   measurer: TextMeasurer,
 ): number {
-  // Au-delà du contenu peint (espaces finales avalées), le curseur se pose au
-  // bord droit : ces espaces débordent dans la marge et n'avancent plus.
+  // Beyond the painted content (trailing spaces swallowed), the cursor sits at the right
+  // edge: those spaces overflow into the margin and no longer advance.
   if (offset >= line.endOffset) return line.leftPx + paintedLineWidth(line);
   if (offset <= line.startOffset) return line.leftPx;
 
@@ -322,7 +319,7 @@ function countBlanksIn(text: string, from: number, to: number): number {
 
 export interface CaretGeometry {
   pageIndex: number;
-  /** Coordonnées relatives à la zone de contenu de la page. */
+  /** Coordinates relative to the content area of the page. */
   xPx: number;
   topPx: number;
   heightPx: number;
@@ -330,11 +327,11 @@ export interface CaretGeometry {
 }
 
 /**
- * Où peindre le curseur.
+ * Where to paint the cursor.
  *
- * Renvoie `null` quand la position ne correspond à rien de posé — cas d'une
- * mise en page périmée d'une image de rendu à l'autre ; l'appelant s'abstient
- * alors de peindre plutôt que d'afficher un curseur au mauvais endroit.
+ * Returns `null` when the position matches nothing that has been laid out. That is the case
+ * of a stale layout from one render to the next; the caller then refrains from painting
+ * rather than show a cursor in the wrong place.
  */
 export function caretGeometry(
   layout: DocumentLayout,
@@ -356,8 +353,8 @@ export function caretGeometry(
   let caretHeight = line.heightPx;
   let caretTopOffset = 0;
 
-  // Si la ligne contient une formule mais que le curseur est dans du texte ordinaire,
-  // adapter la hauteur du curseur à la fonte du texte et l'aligner sur la ligne de base.
+  // If the line contains a formula but the cursor is in ordinary text, fit the cursor height
+  // to the text font and align it on the baseline.
   let activeSegment = line.segments.find(
     (s) => position.offset >= s.startOffset && position.offset <= s.endOffset,
   );
@@ -386,7 +383,7 @@ function paragraphTop(placed: PlacedParagraph): number {
   return placed.topPx + (placed.isContinuation ? 0 : placed.layout.marginTopPx);
 }
 
-/** Ordonnée d'une ligne dans le morceau de paragraphe posé sur cette page. */
+/** Y coordinate of a line within the piece of paragraph placed on this page. */
 function lineTopWithin(
   layout: ParagraphLayout,
   placed: PlacedParagraph,
@@ -398,11 +395,11 @@ function lineTopWithin(
 }
 
 /**
- * Position documentaire correspondant à un point de la page — le clic souris.
+ * Document position matching a point on the page: the mouse click.
  *
- * Cherche la ligne dont la bande verticale contient `y`, à défaut la plus
- * proche : cliquer dans la marge basse d'une page doit poser le curseur en fin
- * de texte, pas échouer.
+ * Looks for the line whose vertical band contains `y`, or failing that the closest one:
+ * clicking in the bottom margin of a page must put the cursor at the end of the text, not
+ * fail.
  */
 export function positionFromPoint(
   layout: DocumentLayout,
@@ -411,14 +408,13 @@ export function positionFromPoint(
   yPx: number,
   measurer: TextMeasurer,
 ): DocumentPosition | null {
-  // Une cellule est une **boîte**, pas un voisinage de texte.
+  // A cell is a **box**, not a neighborhood of text.
   //
-  // La recherche ci-dessous prend la ligne la plus proche, toutes cellules
-  // confondues. Or le texte d'une cellule est court et cadré à gauche : cliquer
-  // dans la moitié droite d'une cellule large mettait le curseur plus près de la
-  // ligne de la cellule **suivante** que de la sienne, et le curseur sautait
-  // d'une case. Quand le point tombe dans une cellule, on ne considère donc que
-  // les paragraphes de cette cellule — sa boîte fait autorité.
+  // The search below takes the closest line, all cells together. But the text of a cell is
+  // short and left-aligned: clicking in the right half of a wide cell put the cursor closer
+  // to the line of the **next** cell than to its own, and the cursor jumped to another box.
+  // So when the point falls in a cell, we only consider the paragraphs of that cell: its box
+  // is the authority.
   const cellIds = paragraphsOfCellAt(layout, pageIndex, xPx, yPx);
 
   let best: { distance: number; position: DocumentPosition } | null = null;
@@ -435,10 +431,10 @@ export function positionFromPoint(
         const line = paragraphLayout.lines[i];
         if (!line) continue;
         const bottom = top + line.heightPx;
-        // Distance verticale au ruban de la ligne : nulle si le point y tombe.
+        // Vertical distance to the line's strip: zero if the point falls inside it.
         const vertical = yPx < top ? top - yPx : yPx > bottom ? yPx - bottom : 0;
-        // À égalité verticale, on départage horizontalement — sinon, sur une
-        // page à deux cellules côte à côte, le clic irait toujours à la première.
+        // On a vertical tie we decide horizontally; otherwise, on a page with two cells side by
+        // side, the click would always go to the first one.
         const localX = xPx - placed.leftPx;
         const lineRight = line.leftPx + paintedLineWidth(line);
         const horizontal =
@@ -467,11 +463,10 @@ export function positionFromPoint(
 }
 
 /**
- * Identifiants des paragraphes de la cellule qui contient le point, ou `null`.
+ * Ids of the paragraphs of the cell that contains the point, or `null`.
  *
- * `null` — le point n'est dans aucune cellule — laisse la recherche balayer
- * toute la page, ce qui reste le bon comportement pour le fil du texte et pour
- * un clic dans la marge.
+ * `null` (the point is in no cell) lets the search sweep the whole page, which is still the
+ * right behavior for the text flow and for a click in the margin.
  */
 function paragraphsOfCellAt(
   layout: DocumentLayout,
@@ -491,14 +486,14 @@ function paragraphsOfCellAt(
       if (yPx < top || yPx > top + row.heightPx) continue;
 
       for (const cell of row.cells) {
-        // Une cellule recouverte n'a ni surface ni curseur : c'est sa maîtresse
-        // qui couvre le point, et elle est déjà passée dans cette boucle.
+        // A covered cell has neither area nor cursor: it is its master that covers the point, and
+        // it has already gone through this loop.
         if (cell.covered || cell.widthPx <= 0) continue;
         if (xPx < cell.leftPx || xPx > cell.leftPx + cell.widthPx) continue;
 
         const ids = new Set(cell.paragraphs.map((paragraph) => paragraph.id));
-        // Une cellule sans paragraphe ne peut rien accueillir : mieux vaut
-        // rendre la main à la recherche générale que de bloquer le clic.
+        // A cell with no paragraph can take nothing: better to hand back to the general search than
+        // to block the click.
         return ids.size > 0 ? ids : null;
       }
     }
@@ -507,16 +502,16 @@ function paragraphsOfCellAt(
   return null;
 }
 
-/** Offset le plus proche de l'abscisse `xPx` sur une ligne donnée. */
+/** Offset closest to the x coordinate `xPx` on a given line. */
 export function offsetFromX(
   line: LayoutLine,
   xPx: number,
   measurer: TextMeasurer,
 ): number {
   if (xPx <= line.leftPx) return line.startOffset;
-  // Le bord droit peint, sinon un clic sur le dernier mot d'une ligne
-  // justifiée — qui tombe au-delà de la largeur mesurée — sauterait en fin de
-  // ligne au lieu de se poser dans le mot.
+  // The painted right edge; otherwise a click on the last word of a justified line, which
+  // falls beyond the measured width, would jump to the end of the line instead of landing in
+  // the word.
   if (xPx >= line.leftPx + paintedLineWidth(line)) return line.endOffset;
 
   for (const segment of line.segments) {
@@ -524,7 +519,7 @@ export function offsetFromX(
     if (xPx > right) continue;
 
     if (segment.isTab || segment.formatting.mathLatex) {
-      // Une tabulation ou une formule est indivisible : on se range du côté le plus proche.
+      // A tab or a formula is indivisible: we go to the nearest side.
       return xPx - segment.leftPx < segment.widthPx / 2
         ? segment.startOffset
         : segment.endOffset;
@@ -536,8 +531,8 @@ export function offsetFromX(
     let bestDistance = Number.POSITIVE_INFINITY;
     let consumed = 0;
 
-    // On teste les deux bords de chaque grappe et on retient le plus proche :
-    // le curseur se pose ainsi toujours **entre** deux graphèmes, jamais dedans.
+    // We test both edges of each cluster and keep the nearest one: the cursor therefore always
+    // lands **between** two graphemes, never inside one.
     for (const grapheme of graphemes(segment.text)) {
       for (const candidate of [consumed, consumed + grapheme.length]) {
         const width = (prefix[candidate] ?? 0) +
@@ -557,9 +552,9 @@ export function offsetFromX(
 }
 
 /**
- * Déplacement vertical d'une ligne. `desiredX` mémorise l'abscisse d'origine
- * pour que plusieurs `↓` successifs ne dérivent pas vers la gauche en
- * traversant des lignes courtes (`SwCrsrShell` conserve la même abscisse).
+ * Vertical move by one line. `desiredX` remembers the original x coordinate so that several
+ * successive `↓` presses do not drift to the left while crossing short lines
+ * (`SwCrsrShell` keeps the same x coordinate).
  */
 export function moveVertical(
   layout: DocumentLayout,
@@ -579,14 +574,13 @@ export function moveVertical(
   if (!here) return null;
 
   /*
-   * `targetX` est une abscisse **de page**, pas de paragraphe.
+   * `targetX` is a **page** x coordinate, not a paragraph one.
    *
-   * Le repère du paragraphe suffisait tant que le voisin se déduisait de
-   * l'ordre du document. Il ne suffit plus dès qu'on cherche le voisin par la
-   * géométrie : deux cellules d'une même ligne ont la même abscisse relative et
-   * ne se distinguent que par l'origine de leur boîte. Mesurer en coordonnées
-   * de page corrige du même coup la dérive du curseur entre deux paragraphes de
-   * retraits différents.
+   * The paragraph's frame of reference was enough as long as the neighbor was deduced from
+   * the document order. It is no longer enough once the neighbor is found by geometry: two
+   * cells of the same row have the same relative x coordinate and only differ by the origin
+   * of their box. Measuring in page coordinates also fixes, in the same stroke, the cursor
+   * drifting between two paragraphs with different indents.
    */
   const targetX = desiredX ?? here.leftPx + caretXOnLine(currentLine, position.offset, measurer);
   const targetLineIndex = lineIndex + direction;
@@ -602,13 +596,12 @@ export function moveVertical(
     };
   }
 
-  // Sortie du paragraphe : on cherche la ligne voisine **par la géométrie**.
+  // Leaving the paragraph: we look for the neighboring line **by geometry**.
   //
-  // L'ordre du document ne convient pas. `paragraphIndex` aplatit les cellules
-  // dans l'ordre de lecture, si bien que le paragraphe « suivant » d'une cellule
-  // est celui de la cellule **à sa droite** : `Bas` déplaçait le curseur
-  // latéralement dans un tableau, et `Haut` le ramenait vers la gauche. C'est
-  // la géométrie, et elle seule, qui dit ce qui se trouve sous le curseur.
+  // The document order does not work. `paragraphIndex` flattens the cells in reading order,
+  // so the "next" paragraph of a cell is the one in the cell **to its right**: `Down` moved
+  // the cursor sideways in a table, and `Up` brought it back to the left. It is geometry, and
+  // only geometry, that tells what lies under the cursor.
   const found = nearestLineVertically(layout, here, direction, targetX, position.blockId);
   if (!found) return null;
 
@@ -618,7 +611,7 @@ export function moveVertical(
   };
 }
 
-/** Où se trouve une ligne sur sa page : bande verticale et origine horizontale. */
+/** Where a line sits on its page: vertical strip and horizontal origin. */
 function lineBox(
   layout: DocumentLayout,
   blockId: string,
@@ -639,17 +632,15 @@ function lineBox(
 }
 
 /**
- * Ligne la plus proche verticalement, dans la direction demandée.
+ * Closest line vertically, in the requested direction.
  *
- * On retient d'abord la **bande** la plus proche — le plus petit `top` situé
- * sous la ligne courante, ou le plus grand `bottom` situé au-dessus — puis, à
- * l'intérieur de cette bande, la ligne la plus proche horizontalement. C'est ce
- * second départage qui fait tomber le curseur dans la bonne colonne d'un
- * tableau : les cellules d'une même ligne partagent la même bande, et seule
- * l'abscisse les distingue.
+ * We first keep the closest **strip** (the smallest `top` below the current line, or the
+ * largest `bottom` above it) and then, inside that strip, the line closest horizontally.
+ * It is this second tie-break that makes the cursor fall in the right column of a table:
+ * the cells of one row share the same strip, and only the x coordinate tells them apart.
  *
- * La recherche déborde sur la page voisine quand la page courante n'offre rien,
- * pour que `Bas` en fin de page passe à la suivante.
+ * The search spills over to the neighboring page when the current page offers nothing, so
+ * that `Down` at the end of a page moves on to the next one.
  */
 function nearestLineVertically(
   layout: DocumentLayout,
@@ -658,8 +649,8 @@ function nearestLineVertically(
   targetX: number,
   fromBlockId: string,
 ): { blockId: string; line: LayoutLine; leftPx: number } | null {
-  // Tolérance d'un demi-pixel : deux cellules voisines calculent leur ordonnée
-  // par des sommes différentes et peuvent différer d'un arrondi.
+  // A half-pixel tolerance: two neighboring cells compute their y coordinate with different
+  // sums and can differ by a rounding.
   const EPSILON = 0.5;
 
   const scan = (
@@ -687,7 +678,7 @@ function nearestLineVertically(
           const lineTop = top;
           top = bottom;
 
-          // La ligne d'où l'on part ne peut pas être sa propre voisine.
+          // The line we start from cannot be its own neighbor.
           if (blockId === fromBlockId && lineTop >= from.top - EPSILON && bottom <= from.bottom + EPSILON) {
             continue;
           }
@@ -698,7 +689,7 @@ function nearestLineVertically(
             continue;
           }
 
-          // Bande : on préfère toujours la plus proche, quelle que soit l'abscisse.
+          // Strip: we always prefer the closest one, whatever the x coordinate.
           const band = direction > 0 ? lineTop : -bottom;
           const left = placed.leftPx + line.leftPx;
           const right = left + paintedLineWidth(line);
@@ -719,11 +710,11 @@ function nearestLineVertically(
   const onPage = scan(from.pageIndex, direction > 0 ? from.bottom : from.top);
   if (onPage) return onPage;
 
-  // Rien sur cette page : on passe à la suivante, sans contrainte de bande.
+  // Nothing on this page: move to the next one, with no strip constraint.
   return scan(from.pageIndex + direction, null);
 }
 
-/** Début / fin de la ligne visuelle — les touches `Origine` et `Fin`. */
+/** Start / end of the visual line: the `Home` and `End` keys. */
 export function lineBounds(
   layout: DocumentLayout,
   position: DocumentPosition,
@@ -735,7 +726,7 @@ export function lineBounds(
   return { start: line.startOffset, end: line.endOffset };
 }
 
-/** Rectangles à peindre pour une sélection, page par page. */
+/** Rectangles to paint for a selection, page by page. */
 export interface SelectionRect {
   pageIndex: number;
   leftPx: number;
@@ -755,7 +746,7 @@ export function selectionRects(
   return rangeRects(layout, start, end, measurer);
 }
 
-/** Les blocs de `[from, to)` de l'ordre de pose sont-ils tous engendrés ? */
+/** Are all the blocks of `[from, to)` of the layout order generated ones? */
 function seulementEngendre(layout: DocumentLayout, from: number, to: number): boolean {
   for (let rank = from; rank < to; rank += 1) {
     if (!layout.generatedBlockIds.has(layout.readingOrder[rank]!)) return false;
@@ -763,7 +754,7 @@ function seulementEngendre(layout: DocumentLayout, from: number, to: number): bo
   return true;
 }
 
-/** La position est-elle à la fin du contenu de son bloc ? */
+/** Is the position at the end of its block's content? */
 function auBoutDuBloc(layout: DocumentLayout, position: DocumentPosition): boolean {
   const paragraphLayout = layout.paragraphLayouts.get(position.blockId);
   const last = paragraphLayout?.lines[paragraphLayout.lines.length - 1];
@@ -771,18 +762,17 @@ function auBoutDuBloc(layout: DocumentLayout, position: DocumentPosition): boole
 }
 
 /**
- * Rectangles couvrant une plage quelconque du document.
+ * Rectangles covering any range of the document.
  *
- * Sélection et surlignage de recherche partagent cette géométrie : ce sont deux
- * plages à peindre, seule leur couleur diffère. Les calculer deux fois de deux
- * façons finirait par produire deux résultats.
+ * Selection and search highlighting share this geometry: they are two ranges to paint, only
+ * their color differs. Computing them twice in two ways would end up producing two results.
  *
- * Le parcours suit l'**ordre de pose** (`layout.readingOrder`) et non l'index
- * du document. L'index écarte les sommaires — un curseur ne doit pas pouvoir
- * s'y poser — et s'en servir ici revenait à ne jamais peindre leurs lignes :
- * `Ctrl+A` laissait le sommaire en blanc au milieu d'un document surligné, et
- * une page qui n'en portait que des lignes restait entièrement vierge. La
- * protection d'un `SwTOXBase` porte sur l'écriture, pas sur la sélection.
+ * The walk follows the **layout order** (`layout.readingOrder`) and not the document index.
+ * The index leaves out tables of contents (a cursor must not be able to land in them), and
+ * using it here amounted to never painting their lines: `Ctrl+A` left the table of contents
+ * white in the middle of a highlighted document, and a page that held nothing but its lines
+ * stayed entirely blank. The protection of a `SwTOXBase` is about writing, not about
+ * selecting.
  */
 export function rangeRects(
   layout: DocumentLayout,
@@ -796,19 +786,17 @@ export function rangeRects(
   if (startRank === -1 || endRank === -1) return [];
 
   /*
-   * Sommaire en tête ou en queue de document.
+   * A table of contents at the start or the end of the document.
    *
-   * Encadrer les lignes engendrées par deux rangs suffit tant qu'un
-   * paragraphe posable existe de chaque côté. Un sommaire qui **ouvre** le
-   * document n'en a aucun avant lui : la première position posable tombe
-   * après ses lignes, `Ctrl+A` partait donc du rang suivant et laissait toute
-   * la table en blanc — le défaut corrigé plus haut, réapparu au bord. Idem
-   * d'un sommaire qui clôt le document.
+   * Framing the generated lines by two ranks is enough as long as a placeable paragraph exists
+   * on each side. A table of contents that **opens** the document has none before it: the first
+   * placeable position falls after its lines, so `Ctrl+A` started at the next rank and left the
+   * whole table white: the defect fixed above, reappearing at the edge. The same goes for a table
+   * of contents that closes the document.
    *
-   * L'extension exige que la plage atteigne réellement le bord : rien
-   * d'éditable avant (ou après) *et* départ au premier caractère (ou arrivée
-   * au dernier). Une sélection qui s'arrête au paragraphe précédant un
-   * sommaire du milieu ne s'étend ainsi pas jusqu'à lui.
+   * The extension requires that the range truly reaches the edge: nothing editable before (or
+   * after) *and* starting at the first character (or ending at the last). A selection that stops
+   * at the paragraph before a table of contents in the middle therefore does not extend up to it.
    */
   if (start.offset <= 0 && seulementEngendre(layout, 0, startRank)) startRank = 0;
   if (auBoutDuBloc(layout, end) && seulementEngendre(layout, endRank + 1, order.length)) {
@@ -837,9 +825,8 @@ export function rangeRects(
         if (lineFrom <= lineTo && !(lineTo < line.startOffset || lineFrom > line.endOffset)) {
           const left = caretXOnLine(line, lineFrom, measurer);
           const right = caretXOnLine(line, lineTo, measurer);
-          // Une ligne entièrement sélectionnée mais vide doit rester visible :
-          // on lui donne la largeur d'un demi-cadratin, comme le fait Writer
-          // pour marquer le saut de paragraphe sélectionné.
+          // A line that is fully selected but empty must stay visible: it is given the width of a half
+          // em, as Writer does to show the selected paragraph break.
           const emptyMark = rank < endRank && line.isLast ? line.heightPx * 0.25 : 0;
           rects.push({
             pageIndex,

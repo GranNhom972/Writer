@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Popover } from './Popover';
@@ -11,7 +11,7 @@ import { parseHex, readableOutline, toHex } from '../color/color';
 const STORAGE_KEY = 'write:custom-colors';
 const MAX_CUSTOM = 10;
 
-/** Couleurs personnalisées : conservées entre les sessions, les plus récentes d'abord. */
+/** Custom colors: kept between sessions, the most recent first. */
 function readCustomColors(): string[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -19,8 +19,7 @@ function readCustomColors(): string[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((entry): entry is string => typeof entry === 'string' && parseHex(entry) !== null);
   } catch {
-    // Stockage indisponible (navigation privée, quota) : ce n'est pas une panne,
-    // la palette reste utilisable sans mémoire.
+    // Storage unavailable (private browsing, quota): this is not a failure, the palette stays usable without memory.
     return [];
   }
 }
@@ -29,18 +28,18 @@ function writeCustomColors(colors: string[]): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(colors));
   } catch {
-    /* mémoire indisponible : sans effet sur la fonction */
+    /* memory unavailable: no effect on the function */
   }
 }
 
 interface ColorPickerProps {
   label: string;
-  /** Couleur active, affichée sous le glyphe du bouton. */
+  /** Active color, shown under the button's glyph. */
   value: string | null;
   palette: readonly Swatch[][];
-  /** Libellé de l'option « aucune couleur ». */
+  /** Label of the "no color" option. */
   resetLabel: string;
-  /** Fond de référence pour le calcul de contraste du sélecteur personnalisé. */
+  /** Reference background for the contrast calculation of the custom picker. */
   contrastBackground?: string;
   onSelect: (color: string | null) => void;
   disabled?: boolean;

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Tests du sous-système de notes de bas de page (SwFtnFrm / SwFtnContFrm).
+ * Tests of the footnote subsystem (SwFtnFrm / SwFtnContFrm).
  *
  * @vitest-environment jsdom
  */

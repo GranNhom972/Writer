@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Ce que `Ctrl+A` doit peindre.
+ * What `Ctrl+A` must paint.
  *
- * Le piège est une asymétrie légitime entre deux notions voisines : un sommaire
- * est **protégé en écriture** — le curseur ne peut pas s'y poser, comme dans un
- * `SwTOXBase` — mais il n'est pas protégé en **sélection**. Les deux repères
- * étaient confondus : la peinture des rectangles suivait l'index d'édition, qui
- * écarte les sommaires, et une sélection totale les laissait donc en blanc.
+ * The trap is a legitimate asymmetry between two neighboring notions: a table of contents is **write-protected** (the cursor cannot land in it, as in a `SwTOXBase`) but it is not **selection**-protected. The two were
+ * confused: painting the rectangles followed the editing index, which leaves out tables of contents, so a select-all left them white.
  *
  * @vitest-environment jsdom
  */
@@ -59,8 +56,7 @@ describe('Sélection totale', () => {
     const layout = paginateDocument(doc, { measurer });
     const rects = selectionRects(doc, layout, toutSelectionner(doc).selection, measurer);
 
-    // Le document d'exemple porte un sommaire assez long pour occuper une page
-    // entière : c'est elle qui restait vierge, faute d'un seul rectangle.
+    // The sample document carries a table of contents long enough to fill a whole page: it is that page that stayed blank, for lack of a single rectangle.
     expect(layout.generatedBlockIds.size).toBeGreaterThan(0);
 
     const pagesAvecTexte = layout.pages
@@ -82,8 +78,7 @@ describe('Sélection totale', () => {
     for (const blockId of layout.readingOrder) {
       const poses = layout.placements.get(blockId);
       if (!poses) continue;
-      // Un rectangle commence après la marge haute du paragraphe : le test
-      // porte donc sur un chevauchement avec sa boîte, pas sur son sommet.
+      // A rectangle starts after the paragraph's top margin: the test therefore checks for an overlap with its box, not its top.
       const peint = poses.some(({ pageIndex, placed }) =>
         rects.some(
           (rect) =>
@@ -99,7 +94,7 @@ describe('Sélection totale', () => {
   });
 
   it('laisse le sommaire hors de portée du curseur', () => {
-    // La contrepartie : peindre le sommaire ne doit pas le rendre éditable.
+    // The flip side: painting the table of contents must not make it editable.
     const layout = paginateDocument(doc, { measurer: new MetricTextMeasurer() });
     const { order } = paragraphIndex(doc);
     for (const engendre of layout.generatedBlockIds) {
@@ -111,21 +106,17 @@ describe('Sélection totale', () => {
     const layout = paginateDocument(doc, { measurer: new MetricTextMeasurer() });
     const { order } = paragraphIndex(doc);
 
-    // L'ordre de pose contient tout l'ordre d'édition, dans le même ordre —
-    // les lignes engendrées viennent s'y intercaler, jamais s'y substituer.
+    // The layout order contains the whole editing order, in the same order: the generated lines slot into it, never replace anything in it.
     const filtre = layout.readingOrder.filter((id) => !layout.generatedBlockIds.has(id));
     expect(filtre).toEqual(order);
   });
 });
 
 /**
- * Le même sommaire, mais au **bord** du document.
+ * The same table of contents, but at the **edge** of the document.
  *
- * Les lignes engendrées ne portent aucune position posable. Un sommaire qui
- * ouvre le document n'a donc rien d'éditable avant lui : la première position
- * du document tombe après ses lignes, et les encadrer par deux rangs de
- * l'ordre de pose ne suffit plus — c'est le même symptôme que plus haut, revenu
- * là où l'encadrement n'a pas de borne à offrir.
+ * The generated lines carry no placeable position. A table of contents that opens the document therefore has nothing editable before it: the first position of the document falls after its lines, and framing them with two
+ * ranks of the layout order is no longer enough: it is the same symptom as above, back where the framing has no boundary to offer.
  */
 describe('Sélection totale, sommaire au bord du document', () => {
   const titre = (texte: string, niveau: HeadingLevel) =>
@@ -135,7 +126,7 @@ describe('Sélection totale, sommaire au bord du document', () => {
     return { ...createEmptyDocument(), blocks };
   }
 
-  /** Les lignes engendrées effectivement recouvertes par un rectangle. */
+  /** The generated lines actually covered by a rectangle. */
   function sommairePeint(document_: WriterDocumentState, selection = toutSelectionner(document_).selection) {
     const measurer = new MetricTextMeasurer();
     const layout = paginateDocument(document_, { measurer });
@@ -177,9 +168,7 @@ describe('Sélection totale, sommaire au bord du document', () => {
   });
 
   it('laisse hors sélection un sommaire que la plage n\'atteint pas', () => {
-    // La contrepartie de l'extension : elle ne vaut que pour une plage qui
-    // touche le bord du document. Ici la sélection s'arrête à la fin du
-    // paragraphe qui précède le sommaire, lequel doit rester blanc.
+    // The flip side of the extension: it only applies to a range that touches the edge of the document. Here the selection stops at the end of the paragraph that precedes the table of contents, which must stay white.
     const avant = createParagraph('Avant le sommaire.');
     const document_ = docDe([avant, createToc(), ...corps]);
     const selection = {
@@ -194,8 +183,7 @@ describe('Sélection totale, sommaire au bord du document', () => {
   });
 
   it('ne peint rien hors de la plage quand le sommaire ouvre et que la plage commence plus loin', () => {
-    // Une plage qui part du deuxième paragraphe du corps : le sommaire qui
-    // ouvre le document est avant elle, il n'a pas à être peint.
+    // A range that starts from the second paragraph of the body: the table of contents that opens the document is before it, it must not be painted.
     const document_ = docDe([createToc(), ...corps]);
     const selection = {
       anchor: { blockId: dernier.id, offset: 0 },
@@ -209,14 +197,10 @@ describe('Sélection totale, sommaire au bord du document', () => {
 });
 
 /**
- * Une ligne **justifiée** n'a pas la largeur qu'on lui a mesurée.
+ * A **justified** line does not have the width that was measured for it.
  *
- * La justification répartit l'espace restant sur les blancs de la ligne
- * (`wordSpacingPx`), et le rendu le confie à `word-spacing` : la ligne peinte
- * va donc jusqu'au bord de la colonne, bien au-delà de la largeur des segments.
- * Peindre la sélection d'après cette dernière laissait le **dernier mot de
- * chaque ligne justifiée** en blanc — un damier de queues non surlignées au
- * milieu d'un `Ctrl+A`.
+ * Justification spreads the remaining space over the blanks of the line (`wordSpacingPx`), and the rendering hands that to `word-spacing`: the painted line therefore goes right up to the edge of the column, well beyond the
+ * width of the segments. Painting the selection from the latter left the **last word of every justified line** white: a checkerboard of unhighlighted tails in the middle of a `Ctrl+A`.
  */
 describe('Sélection d\'un paragraphe justifié', () => {
   const texte =
@@ -249,8 +233,7 @@ describe('Sélection d\'un paragraphe justifié', () => {
         const rect = rects.find((r) => Math.abs(r.topPx - top) < 1);
         expect(rect).toBeDefined();
 
-        // La largeur peinte : celle des segments, plus l'étirement porté par
-        // chaque blanc de la ligne.
+        // The painted width: that of the segments, plus the stretch carried by each blank of the line.
         const blancs = line.segments.reduce(
           (total, segment) => total + [...segment.text].filter((c) => c === ' ').length,
           0,
@@ -265,8 +248,7 @@ describe('Sélection d\'un paragraphe justifié', () => {
   });
 
   it('laisse la dernière ligne à sa largeur mesurée', () => {
-    // Contrepartie : la dernière ligne d'un paragraphe n'est pas justifiée, son
-    // rectangle ne doit donc pas s'étendre jusqu'au bord de la colonne.
+    // The flip side: the last line of a paragraph is not justified, so its rectangle must not extend to the edge of the column.
     const { paragraphLayout, placed, rects } = lignesJustifiees();
     const derniere = paragraphLayout.lines[paragraphLayout.lines.length - 1]!;
     expect(derniere.wordSpacingPx).toBe(0);

@@ -1,21 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Partage d'un document.
+ * Sharing a document.
  *
- * Deux états, jamais mélangés :
+ * Two states, never mixed:
  *
- *  - **document non partagé** — on compose la liste des personnes et leurs
- *    permissions, puis on partage. Le jeton de session est proposé, modifiable,
- *    et sa part aléatoire n'est pas retirable ;
- *  - **document déjà partagé** — on voit la liste, on copie les liens, on invite
- *    quelqu'un de plus.
+ *  - **document not shared**: we compose the list of people and their permissions, then share. The session token is suggested, can be edited, and its random part cannot be removed;
+ *  - **document already shared**: we see the list, copy the links, invite one more person.
  *
- * Le lien de chaque personne lui est **propre** : il porte son adresse, et c'est
- * elle qui décide de sa permission. Un lien unique partagé à tous ferait de la
- * permission une propriété du lien, donc transférable — exactement ce que le
- * serveur refuse.
+ * Each person's link is **their own**: it carries their address, and it is that which decides their permission. A single link shared with everyone would make the permission a property of the link,
+ * so transferable, which is exactly what the server refuses.
  */
 
 import { useCallback, useMemo, useState, type JSX } from 'react';
@@ -42,11 +37,11 @@ export interface Invitation {
 
 export interface ShareDialogProps {
   documentTitle: string;
-  /** Partage existant, quand le document l'est déjà. */
+  /** Existing share, when the document is already shared. */
   session: SessionSummary | null;
-  /** Adresse de la personne qui partage ; elle est automatiquement en écriture. */
+  /** Address of the person sharing; it is automatically given write access. */
   ownerEmail: string;
-  /** Vrai quand cette personne peut inviter (permission d'écriture). */
+  /** True when this person can invite (write permission). */
   canInvite: boolean;
   onShare: (tokenSession: string, invitations: Invitation[]) => Promise<void>;
   onInvite: (invitation: Invitation) => Promise<void>;
@@ -121,9 +116,7 @@ export function ShareDialog({
     setErreur(null);
     setEnCours(true);
     try {
-      // La personne qui partage est **toujours** ajoutée en écriture : sans
-      // elle sur la liste, elle perdrait l'accès à son propre document dès le
-      // partage effectué.
+      // The person who shares is **always** added with write access: without them on the list, they would lose access to their own document as soon as the share was made.
       await onShare(tokenSession, [
         { email: ownerEmail, permission: 'write' },
         ...invitations,
@@ -191,7 +184,7 @@ export function ShareDialog({
           </label>
         )}
 
-        {/* Ajout d'une personne */}
+        {/* Adding a person */}
         {(canInvite || !session) && (
           <div className="share-dialog__ajout">
             <label className="field share-dialog__email">
@@ -240,7 +233,7 @@ export function ShareDialog({
           {PERMISSIONS.find((p) => p.value === permission)?.aide}
         </p>
 
-        {/* Liste des personnes */}
+        {/* List of people */}
         <ul className="share-dialog__liste">
           <li className="share-dialog__personne">
             <span className="share-dialog__adresse">

@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Édition de tableau depuis l'interface — largeurs, curseur et navigation.
+ * Table editing from the interface: widths, cursor and navigation.
  *
- * Ces tests couvrent les gestes que l'utilisateur fait à la souris et au
- * clavier, et non les primitives de structure (voir `cellMerge.test.ts`). Ils
- * protègent des régressions dont chacune s'était produite :
+ * These tests cover the gestures the user makes with the mouse and the keyboard, not the structure primitives (see `cellMerge.test.ts`). They protect against regressions, each of which had actually occurred:
  *
- *  - ajouter une colonne remettait toutes les largeurs à égalité, effaçant
- *    celles du document importé ;
- *  - supprimer une ligne renvoyait le curseur au tout début du document ;
- *  - une cellule fusionnée gardait la largeur d'une seule colonne.
+ *  - adding a column reset all the widths to equal, wiping those of the imported document;
+ *  - deleting a row sent the cursor back to the very start of the document;
+ *  - a merged cell kept the width of a single column.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -55,7 +52,7 @@ function tableOf(doc: { blocks: DocumentBlock[] }): TableNode {
   return block;
 }
 
-/** État dont le curseur est posé dans une cellule donnée. */
+/** State with the cursor placed in a given cell. */
 function stateInCell(blocks: DocumentBlock[], rowIndex: number, cellIndex: number) {
   const doc = docOf(blocks);
   const table = tableOf(doc);
@@ -64,7 +61,7 @@ function stateInCell(blocks: DocumentBlock[], rowIndex: number, cellIndex: numbe
   return { ...state, selection: collapsedSelection({ blockId: target, offset: 0 }) };
 }
 
-/** Largeurs telles que les lit le moteur, arrondies pour la comparaison. */
+/** Widths as the engine reads them, rounded for comparison. */
 function widths(doc: { blocks: DocumentBlock[] }): number[] {
   return tableColumnWidths(tableOf(doc)).map((w) => Math.round(w * 100) / 100);
 }
@@ -79,8 +76,7 @@ describe('Largeurs de colonne', () => {
 
     const after = insertTableColumn(docOf([table]), table.id, 1, 'right');
 
-    // La nouvelle colonne prend un tiers ; les deux autres gardent leur rapport
-    // de 3 pour 1 sur les deux tiers restants.
+    // The new column takes a third; the other two keep their 3 to 1 ratio over the remaining two thirds.
     expect(widths(after)).toEqual([50, 16.67, 33.33]);
   });
 
@@ -92,7 +88,7 @@ describe('Largeurs de colonne', () => {
 
     const after = deleteTableColumn(docOf([table]), table.id, 1);
 
-    // 50 et 20 se partagent 100 en gardant leur rapport de 5 pour 2.
+    // 50 and 20 share 100, keeping their 5 to 2 ratio.
     expect(widths(after)).toEqual([71.43, 28.57]);
   });
 
@@ -105,8 +101,7 @@ describe('Largeurs de colonne', () => {
       toCol: 1,
     });
 
-    // La ligne 0 porte désormais une maîtresse de deux colonnes et une
-    // recouverte : recopier ses largeurs telles quelles décalerait la grille.
+    // Row 0 now carries a master of two columns and a covered cell: copying its widths as they are would shift the grid.
     const after = insertTableRow(merged, table.id, 0, 'below');
     const inserted = tableOf(after).rows[1]!;
 
@@ -126,7 +121,7 @@ describe('Largeurs de colonne', () => {
     const table = createTable(1, 2);
     const state = stateInCell([table], 0, 0);
 
-    // Un geste large ne doit pas rendre la seconde colonne inatteignable.
+    // A large gesture must not make the second column unreachable.
     const after = resizeTableColumnBoundary(state, table.id, 0, 500);
 
     const result = widths(after.doc);
@@ -155,8 +150,7 @@ describe('Largeurs de colonne', () => {
     });
 
     const master = tableOf(after).rows[0]!.cells[0]!;
-    // Sans cela le moteur peignait la maîtresse sur une seule colonne, et les
-    // deux tiers libérés restaient vides à sa droite.
+    // Without this the engine painted the master on a single column, and the two freed thirds stayed empty to its right.
     expect(master.widthPercent).toBeCloseTo(100, 5);
     expect(master.colSpan).toBe(3);
   });
@@ -170,8 +164,7 @@ describe('Curseur après une modification de structure', () => {
     const after = deleteCurrentTableRow(state);
     const location = paragraphIndex(after.doc).byId.get(after.selection.focus.blockId);
 
-    // Le curseur retombait sur `order[0]` : supprimer une ligne en page 12
-    // ramenait l'utilisateur en page 1, sans explication.
+    // The cursor used to fall back on `order[0]`: deleting a row on page 12 sent the user back to page 1 with no explanation.
     expect(location?.cell).toBeDefined();
     expect(location?.cell?.rowIndex).toBe(1);
     expect(after.selection.focus.blockId).not.toBe(paragraphIndex(after.doc).order[0]);
@@ -214,8 +207,7 @@ describe('Curseur après une modification de structure', () => {
     const table = createTable(2, 2);
     const after = deleteTable(docOf([table]), table.id);
 
-    // `SwDoc` conserve toujours au moins un nœud de texte : sans lui, aucun
-    // curseur ne pourrait se poser dans le document.
+    // `SwDoc` always keeps at least one text node: without it, no cursor could land in the document.
     expect(after.blocks).toHaveLength(1);
     expect(isTable(after.blocks[0]!)).toBe(false);
   });
@@ -269,7 +261,7 @@ describe('Navigation de cellule en cellule (Tab)', () => {
       selection: collapsedSelection({ blockId: first, offset: 0 }),
     };
 
-    // La colonne 1 est recouverte : `Tab` doit atteindre la colonne 2.
+    // Column 1 is covered: `Tab` must reach column 2.
     expect(tableContext(moveToAdjacentCell(state, true))).toMatchObject({
       rowIndex: 0,
       cellIndex: 2,

@@ -1,47 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Cadres flottants et habillage du texte. Transposition de `SwFlyFreeFrm`
- * (`sw/source/core/layout/fly.cxx`, `flylay.cxx`), de `SwFmtSurround`
- * (`sw/inc/fmtsrndenum.hxx`) et du calcul de bande utile de `SwTxtFly`
- * (`sw/source/core/text/txtfly.cxx`).
+ * Floating frames and text wrapping. (OpenOffice: `SwFlyFreeFrm`,
+ * `sw/source/core/layout/fly.cxx`, `flylay.cxx`; `SwFmtSurround`, `sw/inc/fmtsrndenum.hxx`;
+ * and the usable-band computation of `SwTxtFly`, `sw/source/core/text/txtfly.cxx`.)
  *
- * ## Le problème que résout `SwTxtFly`
+ * ## The problem `SwTxtFly` solves
  *
- * Une image ancrée « comme caractère » est simple : elle occupe une largeur
- * dans la ligne, et le formateur n'a rien de plus à savoir. Un cadre **flottant**
- * est d'une autre nature — il sort du flux, se pose à une coordonnée, et c'est
- * au texte de s'écarter. Chaque ligne traversée voit donc sa largeur utile
- * amputée, et de façon différente selon sa hauteur dans le cadre.
+ * An image anchored "as a character" is simple: it takes a width in the line, and the formatter
+ * has nothing more to know. A **floating** frame is of another nature: it leaves the flow, sits
+ * at a coordinate, and it is up to the text to move aside. Every line it crosses therefore has
+ * its usable width cut down, and differently depending on its height inside the frame.
  *
- * `SwTxtFly::GetFrm` répond à exactement une question, et ce module aussi :
- * *pour une ligne allant de `top` à `bottom`, quel intervalle horizontal reste
- * disponible ?* Le reste — remplir la ligne, la justifier — ne change pas.
+ * `SwTxtFly::GetFrm` answers exactly one question, and so does this module: *for a line going
+ * from `top` to `bottom`, what horizontal interval is still available?* The rest (filling the
+ * line, justifying it) does not change.
  *
- * ## Formulation retenue : soustraction d'intervalles
+ * ## The chosen formulation: subtracting intervals
  *
- * Plutôt que de traiter séparément « du texte à gauche » et « du texte à
- * droite », chaque cadre déclare l'intervalle horizontal qu'il **interdit**,
- * dérivé de son mode d'habillage :
+ * Rather than treating "text on the left" and "text on the right" separately, each frame
+ * declares the horizontal interval it **forbids**, derived from its wrapping mode:
  *
- *   through  → rien (le texte passe dessous)
- *   parallel → la largeur du cadre, marges comprises
- *   left     → du bord gauche du cadre jusqu'au bout de la colonne
- *   right    → du début de la colonne jusqu'au bord droit du cadre
- *   none     → toute la colonne
- *   ideal    → l'un des quatre précédents, choisi d'après la place restante
+ *   through  → nothing (the text passes underneath)
+ *   parallel → the width of the frame, margins included
+ *   left     → from the left edge of the frame to the end of the column
+ *   right    → from the start of the column to the right edge of the frame
+ *   none     → the whole column
+ *   ideal    → one of the previous four, chosen from the room that remains
  *
- * La bande utile est alors le plus large intervalle survivant à toutes les
- * soustractions. Cette formulation a un avantage concret sur une analyse au cas
- * par cas : **deux cadres qui se chevauchent ne demandent aucun code de plus**,
- * là où un traitement séparé gauche/droite devrait arbitrer entre eux.
+ * The usable band is then the widest interval that survives all the subtractions. This
+ * formulation has a concrete advantage over a case-by-case analysis: **two frames that overlap
+ * need no extra code**, whereas separate left/right handling would have to arbitrate between
+ * them.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
 import { ptToPx } from '../document/units';
@@ -57,86 +54,82 @@ import type {
   WriterDocumentState,
 } from '../document/types';
 
-// Réexport de commodité : la marge d'habillage est un défaut du modèle, mais
-// c'est ici qu'on la lit, et c'est ici que les appelants la cherchent.
+// Convenience re-export: the wrapping margin is a default of the model, but this is where it is
+// read, and this is where callers look for it.
 export { DEFAULT_WRAP_MARGIN_PT };
 
 /**
- * Largeur minimale d'une bande pour qu'on daigne y écrire.
+ * Minimum width of a band for it to be worth writing in.
  *
- * `SwTxtFly` retient un seuil comparable : sous quelques caractères, une
- * colonne résiduelle produit une bouillie verticale d'une lettre par ligne,
- * moins lisible que de pousser le texte sous le cadre.
+ * `SwTxtFly` keeps a comparable threshold: below a few characters, a leftover column produces a
+ * vertical mush of one letter per line, less readable than pushing the text below the frame.
  */
 export const MIN_BAND_WIDTH_PX = 24;
 
-/** Un cadre flottant résolu à sa géométrie en pixels. */
+/** A floating frame resolved to its geometry in pixels. */
 export interface FlyFrame {
-  /** Part de la hauteur revenant à la légende. Zéro s'il n'y en a pas. */
+  /** Share of the height that belongs to the caption. Zero if there is none. */
   captionHeightPx?: number;
-  /** Paragraphe portant le caractère d'ancrage. */
+  /** Paragraph holding the anchor character. */
   anchorBlockId: string;
-  /** Offset du caractère d'ancrage dans ce paragraphe. */
+  /** Offset of the anchor character in that paragraph. */
   anchorOffset: number;
   surround: FlySurround;
-  /** Ancrage au paragraphe ou à la page — jamais `as-char` ici. */
+  /** Anchoring to the paragraph or to the page, never `as-char` here. */
   anchor: 'to-para' | 'to-page';
   leftPx: number;
   topPx: number;
   widthPx: number;
   heightPx: number;
-  /** Marge d'habillage, déjà en pixels. */
+  /** Wrapping margin, already in pixels. */
   marginPx: number;
   run: TextRun;
 }
 
-/** Un intervalle horizontal interdit, sur une tranche verticale. */
+/** A forbidden horizontal interval, over a vertical slice. */
 export interface FlyExclusion {
   topPx: number;
   bottomPx: number;
-  /** Bornes de l'intervalle **interdit**, marges comprises. */
+  /** Bounds of the **forbidden** interval, margins included. */
   leftPx: number;
   rightPx: number;
 }
 
-/* ------------------------------------------------- habillage « optimal » */
+/* ------------------------------------------------- "ideal" wrapping */
 
 /**
- * Largeur minimale d'une colonne de texte pour qu'elle mérite d'exister, en
- * points. `TEXT_MIN` de `txtfly.cxx:2337` — 1134 twips, soit 2 cm.
+ * Minimum width of a text column for it to deserve to exist, in points. `TEXT_MIN` in
+ * `txtfly.cxx:2337`: 1134 twips, i.e. 2 cm.
  */
 export const IDEAL_TEXT_MIN_PT = 1134 / 20;
 
 /**
- * Largeur au-delà de laquelle un cadre ne se laisse plus habiller des deux
- * côtés. `FRAME_MAX` de `txtfly.cxx:2339` — 850 twips, soit 1,5 cm.
+ * Width beyond which a frame can no longer be wrapped on both sides. `FRAME_MAX` in
+ * `txtfly.cxx:2339`: 850 twips, i.e. 1.5 cm.
  */
 export const IDEAL_FRAME_MAX_PT = 850 / 20;
 
 /**
- * Résout `SURROUND_IDEAL` en un mode concret.
+ * Resolves `SURROUND_IDEAL` into a concrete mode.
  *
- * Port direct de `SwTxtFly::GetSurroundForTextWrap` (`txtfly.cxx:2372-2402`).
- * L'habillage « optimal » n'est pas une géométrie mais un **arbitrage** : on
- * mesure ce qui reste de colonne de chaque côté du cadre, on écarte les bandes
- * trop étroites pour qu'on y écrive (`TEXT_MIN`), et le mode se déduit de ce
- * qui survit — les deux côtés donnent `parallel`, un seul donne `left` ou
- * `right`, aucun donne `none`.
+ * A direct port of `SwTxtFly::GetSurroundForTextWrap` (`txtfly.cxx:2372-2402`). "Ideal"
+ * wrapping is not a geometry but an **arbitration**: we measure what is left of the column on
+ * each side of the frame, discard the bands that are too narrow to write in (`TEXT_MIN`), and the
+ * mode is deduced from what survives: both sides give `parallel`, a single one gives `left` or
+ * `right`, none gives `none`.
  *
- * La règle de `FRAME_MAX` mérite un mot : passé 1,5 cm de large, un cadre ne
- * garde **que son côté le plus large**, même si l'autre dépasse le minimum.
- * Deux colonnes étroites de part et d'autre d'une image sont lisibles en
- * théorie et illisibles en pratique ; Writer tranche pour une seule.
+ * The `FRAME_MAX` rule deserves a word: past 1.5 cm wide, a frame keeps **only its wider side**,
+ * even if the other one exceeds the minimum. Two narrow columns on either side of an image are
+ * readable in theory and unreadable in practice; Writer decides in favor of one.
  */
 export function resolveIdealSurround(
-  /** Bord gauche du cadre, marges comprises, dans le repère de la colonne. */
+  /** Left edge of the frame, margins included, in the column's frame of reference. */
   leftPx: number,
-  /** Bord droit du cadre, marges comprises. */
+  /** Right edge of the frame, margins included. */
   rightPx: number,
   contentWidthPx: number,
 ): 'none' | 'parallel' | 'left' | 'right' {
-  // Cadre entièrement hors de la colonne : il ne la coupe pas, le texte
-  // l'ignore de part et d'autre.
+  // Frame entirely outside the column: it does not cut it, and the text ignores it on both sides.
   if (rightPx < 0 || leftPx > contentWidthPx) return 'parallel';
 
   let left = leftPx;
@@ -155,21 +148,20 @@ export function resolveIdealSurround(
   return right > 0 ? 'right' : 'none';
 }
 
-/* --------------------------------------------------- position horizontale */
+/* --------------------------------------------------- horizontal position */
 
 /**
- * Abscisse d'un cadre, dans le repère de la colonne de texte.
+ * X coordinate of a frame, in the frame of reference of the text column.
  *
- * Transposition de `SwAnchoredObjectPosition::CalcRelPosX`
- * (`sw/source/core/layout/anchoreddrawobject.cxx`, `objectpositioning/`) :
- * l'alignement et son repère se combinent en une abscisse, une fois la page
- * connue. `from-left` — `HoriOrientation::NONE` — est le seul mode qui lise le
- * décalage tel quel ; les autres le recalculent, et c'est précisément ce qu'on
- * attend d'eux quand la marge de page change.
+ * Counterpart of `SwAnchoredObjectPosition::CalcRelPosX`
+ * (`sw/source/core/layout/anchoreddrawobject.cxx`, `objectpositioning/`): the alignment and its
+ * reference combine into an x coordinate, once the page is known. `from-left`
+ * (`HoriOrientation::NONE`) is the only mode that reads the offset as it is; the others
+ * recompute it, which is precisely what is expected of them when the page margin changes.
  *
- * Le résultat est toujours ramené au repère de la **colonne** : c'est celui où
- * `lineBreak` retranche les bandes, et mélanger deux origines déplacerait le
- * texte sans déplacer l'image.
+ * The result is always brought back to the **column's** frame of reference: it is the one in
+ * which `lineBreak` subtracts the bands, and mixing two origins would move the text without
+ * moving the image.
  */
 export function resolveFlyLeft(
   orient: FlyHoriOrient,
@@ -178,9 +170,9 @@ export function resolveFlyLeft(
   widthPx: number,
   geometry: Pick<PageGeometry, 'pageWidthPx' | 'contentLeftPx' | 'contentWidthPx'>,
 ): number {
-  // Bornes du repère demandé, exprimées dans celui de la colonne. La feuille
-  // commence donc à une abscisse **négative** : c'est la marge de gauche, que
-  // la colonne ne couvre pas et où un cadre a le droit de déborder.
+  // Bounds of the requested reference, expressed in that of the column. The sheet therefore
+  // starts at a **negative** x coordinate: that is the left margin, which the column does not
+  // cover and where a frame is allowed to overflow.
   const { leftPx, widthPx: frameWidthPx } =
     relation === 'page'
       ? { leftPx: -geometry.contentLeftPx, widthPx: geometry.pageWidthPx }
@@ -199,7 +191,7 @@ export function resolveFlyLeft(
   }
 }
 
-/** Un cadre est-il flottant, par opposition à « comme caractère » ? */
+/** Is a frame floating, as opposed to "as a character"? */
 export function isFloatingFly(run: TextRun): boolean {
   return (
     run.imageSrc !== undefined &&
@@ -209,33 +201,31 @@ export function isFloatingFly(run: TextRun): boolean {
 }
 
 /**
- * Collecte les cadres flottants du document.
+ * Collects the floating frames of the document.
  *
- * Un cadre sans dimensions n'est pas retenu : sans largeur ni hauteur, il
- * n'exclut rien, et le laisser passer obligerait chaque appelant à revérifier.
+ * A frame with no dimensions is not kept: with no width or height it excludes nothing, and
+ * letting it through would force every caller to check again.
  */
 export function collectFlyFrames(
   doc: WriterDocumentState,
   /**
-   * Géométrie de la page, nécessaire à la résolution des alignements.
+   * Page geometry, needed to resolve the alignments.
    *
-   * `SwFlyFrm::MakeAll` fait de même : l'orientation devient une coordonnée
-   * **une fois**, avant que `SwTxtFly` n'en retranche quoi que ce soit. Résoudre
-   * plus tard obligerait chaque ligne à refaire le calcul, et les deux repères
-   * — celui du cadre et celui du texte — finiraient par diverger.
+   * `SwFlyFrm::MakeAll` does the same: the orientation becomes a coordinate **once**, before
+   * `SwTxtFly` subtracts anything from it. Resolving later would force every line to redo the
+   * calculation, and the two frames of reference (the frame's and the text's) would end up
+   * diverging.
    */
   geometry: Pick<PageGeometry, 'pageWidthPx' | 'contentLeftPx' | 'contentWidthPx'>,
   /**
-   * Hauteur de la légende d'un cadre, fournie par l'appelant.
+   * Height of a frame's caption, supplied by the caller.
    *
-   * Elle entre dans la hauteur du cadre, donc dans la bande que le texte doit
-   * contourner : sans elle, les lignes se refermaient sur la légende et
-   * passaient par-dessus.
+   * It is part of the frame's height, so of the band the text has to go around: without it the
+   * lines closed back in on the caption and ran over it.
    *
-   * C'est un **rappel** et non un calcul direct : mesurer une légende demande
-   * `lineBreak`, qui dépend déjà de ce module. Le paramètre renverse la
-   * dépendance au lieu de la boucler, et les appelants qui ne peignent pas —
-   * géométrie pure — n'ont rien à fournir.
+   * It is a **callback** and not a direct computation: measuring a caption requires `lineBreak`,
+   * which already depends on this module. The parameter reverses the dependency instead of making
+   * it circular, and callers that do not paint (pure geometry) have nothing to supply.
    */
   captionHeightOf?: (run: TextRun, blockId: string, offset: number, widthPx: number) => number,
 ): FlyFrame[] {
@@ -256,7 +246,7 @@ export function collectFlyFrames(
       const widthPx = ptToPx(run.imageWidthPt ?? 0);
       const imageHeightPx = ptToPx(run.imageHeightPt ?? 0);
 
-      // La légende s'ajoute au cadre, et le texte la contourne comme l'image.
+      // The caption adds to the frame, and the text goes around it like the image.
       const captionPx = captionHeightOf ? captionHeightOf(run, blockId, offset, widthPx) : 0;
       const heightPx = imageHeightPx + captionPx;
 
@@ -268,9 +258,9 @@ export function collectFlyFrames(
           surround: run.imageSurround ?? 'parallel',
           anchor: run.imageAnchor === 'to-page' ? 'to-page' : 'to-para',
           leftPx: resolveFlyLeft(
-            // Sans alignement déclaré, l'abscisse est celle du modèle : c'est
-            // `HoriOrientation::NONE`, et c'est aussi ce que valaient les cadres
-            // écrits avant que l'alignement n'existe.
+            // With no declared alignment, the x coordinate is the model's: that is
+            // `HoriOrientation::NONE`, and it is also what frames written before alignment existed were
+            // worth.
             run.imageHoriOrient ?? 'from-left',
             run.imageHoriRelation ?? 'text',
             ptToPx(run.imageXPt ?? 0),
@@ -292,10 +282,10 @@ export function collectFlyFrames(
 }
 
 /**
- * Traduit un cadre en intervalle interdit, dans le repère d'une colonne de
- * largeur `contentWidthPx`.
+ * Translates a frame into a forbidden interval, in the frame of reference of a column of width
+ * `contentWidthPx`.
  *
- * Renvoie `null` pour un cadre qui n'interdit rien (`through`).
+ * Returns `null` for a frame that forbids nothing (`through`).
  */
 export function exclusionOf(fly: FlyFrame, contentWidthPx: number): FlyExclusion | null {
   if (fly.surround === 'through') return null;
@@ -305,9 +295,9 @@ export function exclusionOf(fly: FlyFrame, contentWidthPx: number): FlyExclusion
   const left = fly.leftPx - fly.marginPx;
   const right = fly.leftPx + fly.widthPx + fly.marginPx;
 
-  // `ideal` n'a pas de géométrie propre : il désigne celui des quatre autres
-  // modes que la place restante rend praticable. On le résout ici, une fois
-  // les bords connus, marges comprises — ce sont eux que mesure `TEXT_MIN`.
+  // `ideal` has no geometry of its own: it designates whichever of the other four modes the
+  // remaining room makes workable. It is resolved here, once the edges are known, margins included:
+  // those are what `TEXT_MIN` measures.
   const surround =
     fly.surround === 'ideal'
       ? resolveIdealSurround(left, right, contentWidthPx)
@@ -317,8 +307,8 @@ export function exclusionOf(fly: FlyFrame, contentWidthPx: number): FlyExclusion
     case 'none':
       return { topPx: top, bottomPx: bottom, leftPx: 0, rightPx: contentWidthPx };
     case 'left':
-      // Texte à gauche seulement : tout ce qui est à droite du bord gauche du
-      // cadre est interdit, cadre compris.
+      // Text on the left only: everything to the right of the frame's left edge is forbidden, frame
+      // included.
       return { topPx: top, bottomPx: bottom, leftPx: left, rightPx: contentWidthPx };
     case 'right':
       return { topPx: top, bottomPx: bottom, leftPx: 0, rightPx: right };
@@ -328,7 +318,7 @@ export function exclusionOf(fly: FlyFrame, contentWidthPx: number): FlyExclusion
   }
 }
 
-/** Bande horizontale utilisable par une ligne. */
+/** Horizontal band usable by a line. */
 export interface UsableBand {
   leftPx: number;
   rightPx: number;
@@ -336,10 +326,10 @@ export interface UsableBand {
 }
 
 /**
- * Intervalle libre le plus large pour une ligne occupant `[topPx, bottomPx)`.
+ * Widest free interval for a line occupying `[topPx, bottomPx)`.
  *
- * Renvoie `null` quand aucun intervalle exploitable ne subsiste : l'appelant
- * doit alors descendre la ligne sous le cadre bloquant (`nextClearY`).
+ * Returns `null` when no usable interval remains: the caller must then move the line down below
+ * the blocking frame (`nextClearY`).
  */
 export function usableBand(
   exclusions: readonly FlyExclusion[],
@@ -350,18 +340,18 @@ export function usableBand(
 ): { leftPx: number; rightPx: number } | null {
   if (exclusions.length === 0) return { leftPx: 0, rightPx: contentWidthPx };
 
-  // Intervalles libres, initialement toute la colonne. Chaque cadre qui croise
-  // verticalement la ligne en retire sa part.
+  // Free intervals, initially the whole column. Each frame that crosses the line vertically takes
+  // its share out of them.
   let free: { left: number; right: number }[] = [{ left: 0, right: contentWidthPx }];
 
   for (const exclusion of exclusions) {
-    // Chevauchement vertical strict : un cadre qui s'arrête exactement au haut
-    // de la ligne ne la gêne pas.
+    // Strict vertical overlap: a frame that stops exactly at the top of the line does not get in its
+    // way.
     if (exclusion.bottomPx <= topPx || exclusion.topPx >= bottomPx) continue;
 
     const next: { left: number; right: number }[] = [];
     for (const span of free) {
-      // Aucune intersection horizontale : l'intervalle survit tel quel.
+      // No horizontal intersection: the interval survives as it is.
       if (exclusion.rightPx <= span.left || exclusion.leftPx >= span.right) {
         next.push(span);
         continue;
@@ -384,10 +374,10 @@ export function usableBand(
 }
 
 /**
- * Première ordonnée, à partir de `topPx`, où la ligne cesse d'être bloquée.
+ * First y coordinate, from `topPx`, where the line stops being blocked.
  *
- * C'est le bas du cadre le plus haut parmi ceux qui bloquent — descendre plus
- * bas d'un coup sauterait inutilement de l'espace blanc.
+ * It is the bottom of the highest frame among those that block: going lower in one go would
+ * needlessly skip white space.
  */
 export function nextClearY(
   exclusions: readonly FlyExclusion[],
@@ -399,17 +389,17 @@ export function nextClearY(
     if (exclusion.bottomPx <= topPx || exclusion.topPx >= bottomPx) continue;
     if (candidate === null || exclusion.bottomPx < candidate) candidate = exclusion.bottomPx;
   }
-  // Toujours progresser : un cadre de hauteur nulle renverrait sinon la même
-  // ordonnée et ferait tourner la boucle du formateur indéfiniment.
+  // Always make progress: a frame of zero height would otherwise return the same y coordinate and
+  // make the formatter's loop spin forever.
   return candidate === null ? null : Math.max(candidate, topPx + 1);
 }
 
 /**
- * Exclusions applicables à un paragraphe, dans son repère local.
+ * Exclusions that apply to a paragraph, in its local frame of reference.
  *
- * Seuls les cadres **ancrés à ce paragraphe** sont résolus ici : un cadre ancré
- * à la page ne connaît sa position relative qu'une fois le paragraphe posé,
- * c'est donc la pagination qui les injecte (cf. `projectedExclusions`).
+ * Only the frames **anchored to this paragraph** are resolved here: a frame anchored to the page
+ * only knows its relative position once the paragraph has been placed, so it is pagination that
+ * injects them (see `projectedExclusions`).
  */
 export function paragraphExclusions(
   flies: readonly FlyFrame[],
@@ -425,37 +415,35 @@ export function paragraphExclusions(
   return out;
 }
 
-/** Où un cadre s'est réellement posé, une fois la page connue. */
+/** Where a frame has actually been placed, once the page is known. */
 export interface FlyPlacement {
-  /** Page 0-indexée portant le cadre. */
+  /** 0-indexed page that holds the frame. */
   pageIndex: number;
-  /** Ordonnée du cadre depuis le haut de la zone de contenu de cette page. */
+  /** Y coordinate of the frame from the top of this page's content area. */
   topPx: number;
 }
 
 /**
- * Exclusions dues aux cadres posés **ailleurs** que dans ce paragraphe,
- * ramenées à son repère.
+ * Exclusions due to frames placed **elsewhere** than in this paragraph, brought back to its frame
+ * of reference.
  *
- * ## Pourquoi il en faut deux sortes
+ * ## Why two kinds are needed
  *
- * `paragraphExclusions` ne connaît qu'une chose : les cadres ancrés au
- * paragraphe qu'on est en train de composer. C'est suffisant tant qu'un cadre
- * ne dépasse pas de son ancre — et faux dès qu'il la dépasse, ce qui est le cas
- * courant : une image de huit centimètres ancrée à un paragraphe de deux lignes
- * déborde forcément sur ce qui suit, et le texte suivant lui passait au travers.
+ * `paragraphExclusions` only knows one thing: the frames anchored to the paragraph being
+ * composed. That is enough as long as a frame does not extend past its anchor, and wrong as soon as
+ * it does, which is the usual case: an eight-centimeter image anchored to a two-line paragraph
+ * necessarily overflows onto what follows, and the following text used to run straight through it.
  *
- * `SwTxtFly` n'a pas ce problème parce qu'il interroge la liste des cadres de
- * la **page**, non celle de l'ancre. C'est ce que fait cette fonction : elle
- * projette tout cadre dont la page coïncide, quel que soit son ancrage.
+ * `SwTxtFly` does not have this problem because it queries the list of frames of the **page**, not
+ * that of the anchor. That is what this function does: it projects every frame whose page matches,
+ * whatever its anchoring.
  *
- * ## Ce qu'elle demande en échange
+ * ## What it asks for in return
  *
- * Une position **absolue**, que seul un placement déjà fait peut donner : la
- * page d'un cadre ancré au paragraphe dépend de l'endroit où ce paragraphe est
- * tombé. D'où le paramètre `placements`, que la pagination remplit à partir de
- * sa passe précédente — le même mécanisme, et la même raison, que pour la table
- * des matières.
+ * An **absolute** position, which only a placement that has already been made can give: the page
+ * of a frame anchored to a paragraph depends on where that paragraph landed. Hence the `placements`
+ * parameter, which pagination fills from its previous pass: the same mechanism, and the same
+ * reason, as for the table of contents.
  */
 export function projectedExclusions(
   flies: readonly FlyFrame[],
@@ -464,9 +452,9 @@ export function projectedExclusions(
   paragraphTopPx: number,
   contentWidthPx: number,
   /**
-   * Paragraphe en cours de composition. Ses propres cadres sont écartés :
-   * `paragraphExclusions` les a déjà donnés, et les compter deux fois n'aurait
-   * pas d'effet visible mais ferait grossir la liste à chaque ligne.
+   * Paragraph being composed. Its own frames are left out: `paragraphExclusions` has already given
+   * them, and counting them twice would have no visible effect but would make the list grow on every
+   * line.
    */
   currentBlockId?: string,
 ): FlyExclusion[] {
@@ -480,9 +468,9 @@ export function projectedExclusions(
     const exclusion = exclusionOf(fly, contentWidthPx);
     if (!exclusion) continue;
 
-    // Un cadre de page est fixe sur la feuille ; un cadre de paragraphe suit
-    // son ancre. Dans les deux cas on aboutit à une ordonnée comptée depuis le
-    // haut de la zone de contenu, puis ramenée au repère du paragraphe.
+    // A page frame is fixed on the sheet; a paragraph frame follows its anchor. Either way we end up
+    // with a y coordinate counted from the top of the content area, then brought back to the
+    // paragraph's frame of reference.
     const originePx = fly.anchor === 'to-page' ? 0 : place.topPx;
     const decalagePx = originePx - paragraphTopPx;
 

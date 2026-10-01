@@ -1,24 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Conteneur ODF : l'archive ZIP d'un fichier `.odt`.
+ * ODF container: the ZIP archive of an `.odt` file.
  *
- * Un document OpenDocument est un ZIP contenant `mimetype`, `content.xml`,
- * `styles.xml`, `meta.xml` et `META-INF/manifest.xml`. La compression passe par
- * `CompressionStream('deflate-raw')`, présent dans les navigateurs modernes
- * comme dans Node : zéro dépendance binaire externe.
+ * An OpenDocument document is a ZIP containing `mimetype`, `content.xml`, `styles.xml`, `meta.xml` and
+ * `META-INF/manifest.xml`. Compression goes through `CompressionStream('deflate-raw')`, available in
+ * modern browsers as well as in Node: zero external binary dependency.
  *
- * Deux contraintes du format, qui ne sont pas des détails :
- *   – `mimetype` doit être la **première** entrée et être stockée **sans
- *     compression**, pour qu'un lecteur reconnaisse le type en lisant les
- *     premiers octets du fichier ;
- *   – les tailles et le CRC figurent dans l'en-tête local, donc chaque entrée
- *     est compressée avant d'être écrite.
+ * Two constraints of the format, which are not details:
+ *   - `mimetype` must be the **first** entry and be stored **uncompressed**, so that a reader recognizes
+ *     the type by reading the first bytes of the file;
+ *   - the sizes and the CRC are in the local header, so every entry is compressed before being written.
  */
 
 import { buildOdfPackage, ODT_MIMETYPE, type OdfPackage } from './export';
@@ -33,7 +30,7 @@ const SIGNATURE_END = 0x06054b50;
 const METHOD_STORE = 0;
 const METHOD_DEFLATE = 8;
 
-/** Garde anti « bombe zip » : un document texte n'atteint jamais cette taille. */
+/** Zip-bomb guard: a text document never reaches this size. */
 const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 
 const CRC_TABLE = (() => {
@@ -60,21 +57,19 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 /**
- * Fait passer un bloc d'octets dans un flux de (dé)compression.
+ * Runs a block of bytes through a (de)compression stream.
  *
- * On alimente le flux directement, sans passer par `Blob` ni `Response` : ces
- * deux-là ne sont pas garantis hors navigateur, alors que `CompressionStream`
- * l'est aussi bien dans Node que dans le DOM. Le conteneur ODF doit pouvoir
- * s'écrire des deux côtés — côté client comme dans un test.
+ * We feed the stream directly, without going through `Blob` or `Response`: those two are not guaranteed
+ * outside a browser, whereas `CompressionStream` is as much in Node as in the DOM. The ODF container must be
+ * writable on both sides, in the client as well as in a test.
  */
 async function through(
   bytes: Uint8Array,
   stream: TransformStream<BufferSource, Uint8Array>,
 ): Promise<Uint8Array> {
   const writer = stream.writable.getWriter();
-  // Recopie dans un `ArrayBuffer` propre : une vue peut porter sur un
-  // `SharedArrayBuffer`, que les flux refusent. Le coût est celui d'une copie
-  // d'un fichier texte, négligeable devant la compression qui suit.
+  // Copy into a clean `ArrayBuffer`: a view can be backed by a `SharedArrayBuffer`, which streams refuse. The
+  // cost is that of copying a text file, negligible next to the compression that follows.
   const written = writer.write(new Uint8Array(bytes)).then(() => writer.close());
 
   const chunks: Uint8Array[] = [];
@@ -104,21 +99,20 @@ interface StagedEntry {
   uncompressedSize: number;
 }
 
-/** Écrit une archive `.odt` complète, images comprises. */
+/** Writes a complete `.odt` archive, images included. */
 export async function writeOdt(pack: OdfPackage): Promise<Uint8Array> {
   const staged: StagedEntry[] = [];
   const { files, pictures } = pack;
 
-  // `mimetype` d'abord, non compressé : c'est ce qui rend le type détectable
-  // sans dézipper.
+  // `mimetype` first, uncompressed: this is what makes the type detectable without unzipping.
   staged.push(await stage('mimetype', encoder.encode(files.mimetype), METHOD_STORE));
   for (const [name, content] of Object.entries(files)) {
     if (name === 'mimetype') continue;
     staged.push(await stage(name, encoder.encode(content), METHOD_DEFLATE));
   }
 
-  // PNG, JPEG, GIF et WebP sont **déjà** compressés : les repasser au deflate
-  // les alourdirait de l'en-tête du flux sans rien gagner. On les stocke tels quels.
+  // PNG, JPEG, GIF and WebP are **already** compressed: running them through deflate again would add the stream
+  // header for nothing. We store them as they are.
   for (const picture of pictures) {
     staged.push(await stage(picture.path, picture.bytes, METHOD_STORE));
   }
@@ -131,11 +125,11 @@ export async function writeOdt(pack: OdfPackage): Promise<Uint8Array> {
     const header = new Uint8Array(30 + entry.name.length);
     const view = new DataView(header.buffer);
     view.setUint32(0, SIGNATURE_LOCAL, true);
-    view.setUint16(4, 20, true); // version minimale
-    view.setUint16(6, 0, true); // indicateurs
+    view.setUint16(4, 20, true); // minimum version needed
+    view.setUint16(6, 0, true); // flags
     view.setUint16(8, entry.method, true);
-    view.setUint16(10, 0, true); // heure
-    view.setUint16(12, 0x21, true); // date : 1980-01-01, pour un binaire reproductible
+    view.setUint16(10, 0, true); // time
+    view.setUint16(12, 0x21, true); // date: 1980-01-01, for a reproducible binary
     view.setUint32(14, entry.crc, true);
     view.setUint32(18, entry.data.length, true);
     view.setUint32(22, entry.uncompressedSize, true);
@@ -199,29 +193,28 @@ function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 /**
- * Lit les entrées textuelles d'une archive `.odt`.
+ * Reads the text entries of an `.odt` archive.
  *
- * La lecture part du **répertoire central**, en fin de fichier, et non des
- * en-têtes locaux : c'est ce que prescrit le format, et le seul moyen fiable
- * quand un producteur a écrit ses tailles dans un descripteur différé.
+ * Reading starts from the **central directory**, at the end of the file, and not from the local headers: this
+ * is what the format prescribes, and the only reliable way when a producer wrote its sizes in a deferred
+ * descriptor.
  */
 export async function readOdtEntries(data: Uint8Array): Promise<Map<string, string>> {
   return (await readOdtArchive(data)).texts;
 }
 
-/** Ce que porte une archive : ses fichiers XML, et ses images en `data:`. */
+/** What an archive holds: its XML files, and its images as `data:` URLs. */
 export interface OdtArchive {
   texts: Map<string, string>;
-  /** Chemin `Pictures/…` → `data:` complète, prête à poser dans un run. */
+  /** `Pictures/…` path → complete `data:` URL, ready to put in a run. */
   pictures: Map<string, string>;
 }
 
 /**
- * Lit une archive `.odt` : entrées textuelles **et** images.
+ * Reads an `.odt` archive: text entries **and** images.
  *
- * Les images sont rendues en `data:` plutôt qu'en octets bruts parce que c'est
- * la forme que porte le modèle hors ligne : le document rouvert est complet,
- * sans dépendre d'un dépôt ni d'un réseau.
+ * Images are returned as `data:` URLs rather than raw bytes because that is the form the model carries
+ * offline: the reopened document is complete, without depending on a store or a network.
  */
 export async function readOdtArchive(data: Uint8Array): Promise<OdtArchive> {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -260,8 +253,7 @@ export async function readOdtArchive(data: Uint8Array): Promise<OdtArchive> {
     const payload = data.subarray(start, start + compressedSize);
 
     const raw = method === METHOD_DEFLATE ? await inflate(payload) : payload;
-    // Une image n'est pas du texte : la décoder en UTF-8 la détruirait
-    // silencieusement, les octets invalides devenant U+FFFD.
+    // An image is not text: decoding it as UTF-8 would silently destroy it, the invalid bytes turning into U+FFFD.
     if (estImage) pictures.set(name, toDataUrl(mediaTypeForPath(name), raw));
     else texts.set(name, decoder.decode(raw));
   }
@@ -270,8 +262,8 @@ export async function readOdtArchive(data: Uint8Array): Promise<OdtArchive> {
 }
 
 function findEndOfCentralDirectory(view: DataView, length: number): number {
-  // Le commentaire d'archive peut suivre la fin du répertoire : on remonte
-  // depuis la queue jusqu'à retrouver la signature.
+  // The archive comment can follow the end of the directory: we go back from the tail until we find the
+  // signature.
   const lowest = Math.max(0, length - 0xffff - 22);
   for (let offset = length - 22; offset >= lowest; offset -= 1) {
     if (view.getUint32(offset, true) === SIGNATURE_END) return offset;
@@ -279,23 +271,22 @@ function findEndOfCentralDirectory(view: DataView, length: number): number {
   return -1;
 }
 
-/** Sérialise un document complet en archive `.odt`. */
+/** Serializes a whole document into an `.odt` archive. */
 export async function exportOdt(doc: WriterDocumentState): Promise<Uint8Array> {
   return writeOdt(buildOdfPackage(doc));
 }
 
-/** Vérifie l'entrée `mimetype` d'une archive ouverte. */
+/** Checks the `mimetype` entry of an opened archive. */
 export function isTextDocument(entries: ReadonlyMap<string, string>): boolean {
   const mimetype = entries.get('mimetype');
   return mimetype === undefined || mimetype.trim() === ODT_MIMETYPE;
 }
 
 /**
- * Ouvre une archive `.odt` complète : conteneur, puis contenu et styles.
+ * Opens a complete `.odt` archive: the container, then content and styles.
  *
- * `styles.xml` est passé à l'import parce qu'il porte les styles nommés et la
- * géométrie de page ; sans lui, un document produit par Writer perdrait ses
- * marges et son format de feuille.
+ * `styles.xml` is passed to the import because it carries the named styles and the page geometry; without
+ * it, a document produced by Writer would lose its margins and its sheet format.
  */
 export async function openOdt(
   data: Uint8Array,

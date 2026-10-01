@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Partage : projection CRDT, convergence, report du curseur.
+ * Sharing: CRDT projection, convergence, cursor carry-over.
  *
- * Le contrat vérifié ici est celui du document répliqué Yjs, repris de
- * l'application Write. Il remplace l'algèbre d'opérations de blocs de la
- * version précédente, dont le défaut n'était pas un bogue mais une limite de
- * modèle : à la granularité du bloc, deux personnes qui écrivent dans le même
- * paragraphe s'effacent l'une l'autre, et aucun test d'algèbre ne pouvait le
- * voir puisque l'algèbre, elle, était juste.
+ * The contract checked here is that of the replicated Yjs document, taken from the Write application. It replaces the block-operation algebra of the previous version, whose flaw was not a bug but a limit of the model:
+ * at block granularity, two people writing in the same paragraph erase each other, and no algebra test could see it, since the algebra itself was correct.
  *
- * C'est donc cette propriété-là — **deux frappes concurrentes dans la même
- * phrase survivent toutes les deux** — que ce fichier surveille en premier.
+ * It is therefore this property, **two concurrent keystrokes in the same sentence both survive**, that this file watches first.
  *
  * @vitest-environment jsdom
  */
@@ -44,11 +39,11 @@ import {
   type WriterDocumentState,
 } from '../src/domain/document/types';
 
-/* ------------------------------------------------------------------ outils */
+/* ------------------------------------------------------------------ tools */
 
 const ORIGINE = Symbol('test');
 
-/** Un document de test aux identifiants stables — le diff s'y appuie. */
+/** A test document with stable ids: the diff relies on them. */
 function docAvec(...textes: string[]): WriterDocumentState {
   const doc = createEmptyDocument('Document de test');
   doc.id = 'doc-test';
@@ -59,7 +54,7 @@ function docAvec(...textes: string[]): WriterDocumentState {
   return doc;
 }
 
-/** Le bloc `index`, en tant que paragraphe. */
+/** The block at `index`, as a paragraph. */
 function para(doc: WriterDocumentState, index: number): ParagraphNode {
   const block = doc.blocks[index];
   if (!block || !isParagraph(block)) throw new Error(`bloc ${index} : paragraphe attendu`);
@@ -70,14 +65,14 @@ function texteDe(doc: WriterDocumentState, index: number): string {
   return runsText(para(doc, index).runs);
 }
 
-/** Le même paragraphe, texte remplacé — comme le ferait une frappe. */
+/** The same paragraph, text replaced, as a keystroke would do. */
 function retexte(doc: WriterDocumentState, index: number, texte: string): WriterDocumentState {
   const blocks = [...doc.blocks];
   blocks[index] = { ...para(doc, index), runs: [makeRun(texte)] };
   return { ...doc, blocks };
 }
 
-/** Deux répliques amorcées sur le même contenu, comme deux onglets ouverts. */
+/** Two replicas seeded with the same content, like two open tabs. */
 function deuxRepliques(document: WriterDocumentState): {
   alice: Y.Doc;
   bob: Y.Doc;
@@ -90,8 +85,7 @@ function deuxRepliques(document: WriterDocumentState): {
   Y.applyUpdate(bob, Y.encodeStateAsUpdate(alice));
 
   const echanger = (): void => {
-    // Deux différentiels croisés : exactement ce que fait le relais, sans le
-    // réseau. L'ordre d'arrivée ne doit rien changer au résultat.
+    // Two crossed differences: exactly what the relay does, minus the network. The order of arrival must not change the result.
     const versBob = Y.encodeStateAsUpdate(alice, Y.encodeStateVector(bob));
     const versAlice = Y.encodeStateAsUpdate(bob, Y.encodeStateVector(alice));
     Y.applyUpdate(bob, versBob, ORIGINE);
@@ -105,15 +99,15 @@ function lire(ydoc: Y.Doc): WriterDocumentState {
   return new DocumentMirror(ydoc).read();
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
- * Ce que le CRDT apporte, et que le diff de blocs ne pouvait pas donner
- * ══════════════════════════════════════════════════════════════════════════ */
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * What the CRDT brings, and what the block diff could not give
+ * ══════════════════════════════════════════════════════════════════════════
+ */
 
 describe('convergence : deux personnes dans le même paragraphe', () => {
   it('garde les deux frappes, même au même endroit du même bloc', () => {
-    // LE test de non-régression. Avec la synchronisation par diff de blocs,
-    // chacune émettait « remplace p0 » et la dernière arrivée gagnait : une
-    // phrase entière disparaissait sans le moindre signal.
+    // THE non-regression test. With block-diff synchronization, each one emitted "replace p0" and the last to arrive won: a whole sentence disappeared without the slightest signal.
     const depart = docAvec('Bonjour monde');
     const { alice, bob, echanger } = deuxRepliques(depart);
 
@@ -134,8 +128,7 @@ describe('convergence : deux personnes dans le même paragraphe', () => {
     echanger();
 
     const chezAlice = texteDe(lire(alice), 0);
-    // L'ordre entre X et Y est arbitraire — c'est le CRDT qui tranche — mais il
-    // est le **même** des deux côtés, et aucune des deux lettres n'est perdue.
+    // The order between X and Y is arbitrary (the CRDT decides) but it is the **same** on both sides, and neither letter is lost.
     expect(chezAlice).toBe(texteDe(lire(bob), 0));
     expect(chezAlice).toMatch(/^A[XY][XY]B$/);
   });
@@ -143,7 +136,7 @@ describe('convergence : deux personnes dans le même paragraphe', () => {
   it('n’oppose pas la mise en forme de l’un au texte de l’autre', () => {
     const { alice, bob, echanger } = deuxRepliques(docAvec('gras et suite'));
 
-    // Alice met « gras » en gras ; Bob écrit à la fin du même paragraphe.
+    // Alice makes "bold" bold; Bob writes at the end of the same paragraph.
     const chezAlice = lire(alice);
     const blocs = [...chezAlice.blocks];
     blocs[0] = {
@@ -226,9 +219,11 @@ describe('convergence : deux personnes dans le même paragraphe', () => {
   });
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
- * Runs ⇄ Y.Text : la correspondance sur laquelle tout repose
- * ══════════════════════════════════════════════════════════════════════════ */
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * Runs ⇄ Y.Text: the mapping everything rests on
+ * ══════════════════════════════════════════════════════════════════════════
+ */
 
 describe('runs et delta', () => {
   it('fait l’aller-retour sans rien perdre du formatage', () => {
@@ -242,15 +237,13 @@ describe('runs et delta', () => {
   });
 
   it('refusionne les plages voisines de formatage identique', () => {
-    // Invariant de `SwpHints::MergePortions` : deux plages voisines identiques
-    // n'en font qu'une, sinon la comparaison de formatage devient instable.
+    // `SwpHints::MergePortions` invariant: two identical neighboring ranges make only one, otherwise the formatting comparison becomes unstable.
     const delta = [{ insert: 'abc' }, { insert: 'def' }];
     expect(deltaToRuns(delta)).toEqual([makeRun('abcdef')]);
   });
 
   it('ignore les attributs qu’il ne connaît pas', () => {
-    // Un pair d'une version ultérieure peut poser des attributs inconnus : les
-    // recopier casserait la comparaison de formatage, donc la fusion.
+    // A peer of a later version can set unknown attributes: copying them would break the formatting comparison, so the merge.
     const runs = deltaToRuns([{ insert: 'x', attributes: { bold: true, quelqueChose: 42 } }]);
     expect(runs).toEqual([makeRun('x', { bold: true })]);
   });
@@ -264,9 +257,7 @@ describe('runs et delta', () => {
 
     reconcile(ydoc, retexte(lire(ydoc), 0, 'Bonjour le monde'), ORIGINE);
 
-    // Le paragraphe voisin n'est pas reconstruit : c'est ce qui préserve les
-    // modifications concurrentes qu'il pourrait porter, et l'identité d'objet
-    // dont le moteur de mise en page se sert pour ne pas tout repaginer.
+    // The neighboring paragraph is not rebuilt: that is what preserves the concurrent changes it might carry, and the object identity that the layout engine uses so as not to re-paginate everything.
     expect(blocs.get(1).get('text')).toBe(texteIntact);
   });
 
@@ -327,8 +318,7 @@ describe('textChange : la plage réellement remplacée', () => {
   });
 
   it('ne coupe jamais un emoji en deux', () => {
-    // Deux emojis distincts partagent leur premier demi-caractère : une borne
-    // posée entre les deux laisserait un substitut orphelin dans le document.
+    // Two distinct emojis share their first half-character: a boundary placed between the two would leave an orphan surrogate in the document.
     const changement = textChange('a😀b', 'a😁b');
     expect(changement).not.toBeNull();
     const reconstruit =
@@ -340,9 +330,11 @@ describe('textChange : la plage réellement remplacée', () => {
   });
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
- * Lecture : ce qui remonte dans l'éditeur
- * ══════════════════════════════════════════════════════════════════════════ */
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * Reading: what goes up into the editor
+ * ══════════════════════════════════════════════════════════════════════════
+ */
 
 describe('miroir de lecture', () => {
   it('conserve l’identité des blocs qu’une modification distante n’a pas touchés', () => {
@@ -363,8 +355,7 @@ describe('miroir de lecture', () => {
 
     const apres = miroir.read();
     expect(texteDe(apres, 0)).toBe('un modifié');
-    // Les deux autres paragraphes sont les **mêmes objets** : le moteur de mise
-    // en page s'en sert pour ne repaginer que ce qui a bougé.
+    // The two other paragraphs are the **same objects**: the layout engine uses them to re-paginate only what moved.
     expect(apres.blocks[1]).toBe(avant.blocks[1]);
     expect(apres.blocks[2]).toBe(avant.blocks[2]);
   });
@@ -385,7 +376,7 @@ describe('miroir de lecture', () => {
   });
 
   it('ne rend jamais un document sans bloc', () => {
-    // Le curseur n'aurait nulle part où se poser.
+    // The cursor would have nowhere to land.
     const relu = lire(new Y.Doc());
     expect(relu.blocks).toHaveLength(1);
     expect(texteDe(relu, 0)).toBe('');
@@ -433,15 +424,16 @@ describe('miroir de lecture', () => {
     expect(relu.type).toBe('heading');
     expect(relu.headingLevel).toBe(2);
     expect(runsText(relu.runs)).toBe('Deviendra un titre');
-    // Un titre est un paragraphe avec un niveau, pas un autre nœud : le texte
-    // répliqué reste le même, donc les frappes concurrentes y survivent.
+    // A heading is a paragraph with a level, not another node: the replicated text stays the same, so concurrent keystrokes survive there.
     expect(ydoc.getArray<Y.Map<unknown>>(BLOCKS_ROOT).get(0).get('text')).toBe(texteAvant);
   });
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
- * Curseur
- * ══════════════════════════════════════════════════════════════════════════ */
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * Cursor
+ * ══════════════════════════════════════════════════════════════════════════
+ */
 
 describe('report du curseur', () => {
   it('pousse le point quand on écrit avant lui', () => {
@@ -453,8 +445,7 @@ describe('report du curseur', () => {
   });
 
   it('laisse le point en place quand l’insertion tombe exactement dessus', () => {
-    // Le texte du pair s'insère *après* le curseur local : celui-ci ne bouge
-    // pas, sans quoi taper à deux au même endroit ferait fuir le caret.
+    // The peer's text is inserted *after* the local cursor: it does not move, otherwise two people typing at the same spot would make the caret run away.
     expect(remapOffset(5, { at: 5, removed: 0, inserted: 'xyz' })).toBe(5);
   });
 
@@ -467,9 +458,11 @@ describe('report du curseur', () => {
   });
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
- * Partage : liens, présence, images
- * ══════════════════════════════════════════════════════════════════════════ */
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * Sharing: links, presence, images
+ * ══════════════════════════════════════════════════════════════════════════
+ */
 
 describe('liens de partage', () => {
   it('lit la signature et l’adresse dans l’URL', () => {
@@ -486,11 +479,11 @@ describe('liens de partage', () => {
 
   it('produit un jeton lisible et assez long pour n’être pas énumérable', () => {
     const jeton = generateSessionToken('Rapport trimestriel — T3 2026');
-    // 12 caractères minimum côté serveur (`MIN_TOKEN_LEN`).
+    // 12 characters minimum on the server side (`MIN_TOKEN_LEN`).
     expect(jeton.length).toBeGreaterThanOrEqual(12);
     expect(jeton).toMatch(/^[a-z0-9-]+$/);
     expect(jeton).toContain('rapport-trimestriel');
-    // 8 octets de hasard : deux appels ne coïncident pas.
+    // 8 bytes of randomness: two calls do not coincide.
     expect(generateSessionToken('Rapport')).not.toBe(generateSessionToken('Rapport'));
   });
 
@@ -502,8 +495,7 @@ describe('liens de partage', () => {
 
 describe('présence', () => {
   it('donne à chacun la même couleur chez tous', () => {
-    // Déterministe et non aléatoire : deux participants doivent pouvoir parler
-    // du « curseur rouge » et désigner la même personne.
+    // Deterministic and not random: two participants must be able to talk about the "red cursor" and designate the same person.
     expect(presenceColor('alice')).toBe(presenceColor('alice'));
     expect(presenceColor('alice')).toMatch(/^var\(--presence-[1-8]\)$/);
   });

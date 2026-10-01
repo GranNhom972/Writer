@@ -1,29 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Images ancrées « comme caractère ». Transposition de `SwFlyCntFrm`
- * (`sw/source/core/layout/flycnt.cxx`) et de `SwGrfNode` (`sw/source/core/graphic/`).
+ * Images anchored "as a character" (OpenOffice: `SwFlyCntFrm`,
+ * `sw/source/core/layout/flycnt.cxx`, and `SwGrfNode`, `sw/source/core/graphic/`).
  *
- * Writer distingue le **nœud graphique**, qui porte les octets, et le **cadre**,
- * qui porte la géométrie. Le partage se fait de la même façon ici : le run porte
- * une adresse (`imageSrc`) et une taille (`imageWidthPt` × `imageHeightPt`), et
- * les octets vivent ailleurs — dans une `data:` en local, dans le dépôt du
- * serveur une fois le document partagé.
+ * Writer distinguishes the **graphic node**, which carries the bytes, from the
+ * **frame**, which carries the geometry. The split is the same here: the run carries
+ * an address (`imageSrc`) and a size (`imageWidthPt` × `imageHeightPt`), and the bytes
+ * live elsewhere: in a `data:` URL while local, in the server's store once the
+ * document is shared.
  *
- * Le texte du run est un unique **caractère de substitution d'objet**
- * (U+FFFC OBJECT REPLACEMENT CHARACTER), celui-là même qu'insère
- * `SwTxtNode::InsertItem` pour un `SwTxtFlyCnt` (`CH_TXTATR_BREAKWORD`,
- * `sw/inc/txatbase.hxx`). Ce choix n'est pas cosmétique : il donne à l'image
- * **une** position dans la chaîne du paragraphe, donc un offset de curseur
- * unique. Une image occupant plusieurs unités de code laisserait le curseur se
- * poser en son milieu.
+ * The run's text is a single **object replacement character** (U+FFFC OBJECT
+ * REPLACEMENT CHARACTER), the very one `SwTxtNode::InsertItem` inserts for a
+ * `SwTxtFlyCnt` (`CH_TXTATR_BREAKWORD`, `sw/inc/txatbase.hxx`). The choice is not
+ * cosmetic: it gives the image **one** position in the paragraph's string, so a
+ * single cursor offset. An image that took several code units would let the cursor
+ * land in the middle of it.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
 import { pxToPt } from './units';
@@ -36,22 +35,22 @@ import type {
   TextRun,
 } from './types';
 
-/** `CH_TXTATR_BREAKWORD` — la place que l'objet occupe dans le texte. */
+/** `CH_TXTATR_BREAKWORD`: the place the object takes in the text. */
 export const IMAGE_PLACEHOLDER = '￼';
 
-/** Formats que le serveur accepte, reconnus à leurs octets (`assets.rs`). */
+/** Formats the server accepts, recognized from their bytes (`assets.rs`). */
 export const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 
-/** Plafond du dépôt côté serveur — annoncé ici pour ne pas téléverser pour rien. */
+/** Upload limit on the server side, repeated here to avoid uploading for nothing. */
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
-/** Bornes de redimensionnement, en points. Sous 4 pt une image n'est plus visible. */
+/** Resize limits, in points. Below 4 pt an image is no longer visible. */
 export const MIN_IMAGE_SIZE_PT = 4;
 export const MAX_IMAGE_SIZE_PT = 2000;
 
 /**
- * Rognage : ce qui est retranché de chaque bord de l'image **d'origine**,
- * en fraction de 0 à 1. Transposition de `SvxGrfCrop`.
+ * Cropping: what is cut from each edge of the **original** image, as a fraction from
+ * 0 to 1. (OpenOffice: `SvxGrfCrop`.)
  */
 export interface ImageCrop {
   topPct: number;
@@ -63,10 +62,10 @@ export interface ImageCrop {
 export const NO_CROP: ImageCrop = { topPct: 0, rightPct: 0, bottomPct: 0, leftPct: 0 };
 
 /**
- * Part de l'image qui doit rester visible après rognage.
+ * The part of the image that must stay visible after cropping.
  *
- * Rogner la totalité d'un bord ferait disparaître l'image et diviserait par
- * zéro au rendu ; on garde toujours de quoi voir ce qu'on manipule.
+ * Cropping an edge completely would make the image disappear and divide by zero when
+ * rendering; we always keep enough to see what is being handled.
  */
 export const MIN_VISIBLE_FRACTION = 0.05;
 
@@ -76,43 +75,43 @@ export interface ImageAttributes {
   heightPt: number;
   alt?: string;
   crop?: ImageCrop;
-  /** Réglages de légende. Absent = pas de légende du tout. */
+  /** Caption settings. Absent = no caption at all. */
   caption?: ImageCaption;
-  /** Marge autour du cadre, en points. `0` est une valeur légitime. */
+  /** Margin around the frame, in points. `0` is a legitimate value. */
   marginPt?: number;
-  /** Blanc entre l'image et sa légende, en points. `0` est légitime. */
+  /** Space between the image and its caption, in points. `0` is legitimate. */
   captionGapPt?: number;
-  /** Intégration au texte. Absent = dans le fil (`FLY_AS_CHAR`). */
+  /** How the image fits into the text. Absent = in the flow (`FLY_AS_CHAR`). */
   wrap?: ImageWrapPlacement;
 }
 
 /**
- * Position d'un cadre flottant : les items de placement d'OpenOffice, réunis.
+ * Position of a floating frame: OpenOffice's placement items, gathered together.
  *
- * `mode` porte l'habillage et le calque, les cinq autres champs portent
- * `SwFmtHoriOrient`, `SwFmtVertOrient` et la marge d'habillage. Un seul objet
- * pour tout ce qui n'a de sens que **hors du fil du texte** : `mode: 'inline'`
- * les rend tous inutiles d'un coup, ce qu'aucune combinaison de champs plats
- * n'exprimerait aussi clairement.
+ * `mode` carries the wrapping and the layer; the five other fields carry
+ * `SwFmtHoriOrient`, `SwFmtVertOrient` and the wrapping margin. A single object for
+ * everything that only makes sense **outside the text flow**: `mode: 'inline'` makes
+ * them all useless at once, which no combination of flat fields would express as
+ * clearly.
  */
 export interface ImageWrapPlacement {
   mode: ImageWrapMode;
   horiOrient?: FlyHoriOrient;
   horiRelation?: FlyHoriRelation;
-  /** Décalage horizontal, en points. Lu par le seul `from-left`. */
+  /** Horizontal offset, in points. Only read for `from-left`. */
   xPt?: number;
-  /** Décalage vertical depuis le haut de l'ancre, en points. */
+  /** Vertical offset from the top of the anchor, in points. */
   yPt?: number;
-  /** Blanc que le texte laisse autour du cadre, en points. */
+  /** White space the text leaves around the frame, in points. */
   wrapMarginPt?: number;
 }
 
 /**
- * Champs de run pour les espacements — marge et blanc de légende.
+ * Run fields for spacing: margin and caption gap.
  *
- * `0` est une **valeur**, pas une absence : la tester par vérité (`x ? … : …`)
- * la ferait disparaître, et le run retomberait sur le blanc par défaut. C'était
- * exactement le symptôme « les marges ne sont pas tout à fait à zéro ».
+ * `0` is a **value**, not an absence: testing it for truthiness (`x ? … : …`) would
+ * make it vanish, and the run would fall back on the default gap. That was exactly
+ * the symptom "the margins are not quite at zero".
  */
 export function spacingFormatting(
   marginPt: number | undefined,
@@ -129,12 +128,11 @@ export function spacingFormatting(
 }
 
 /**
- * Champs de run correspondant à des réglages de légende.
+ * Run fields that correspond to caption settings.
  *
- * Renvoie `{}` quand il n'y a pas de légende — même convention que
- * `cropFormatting` : c'est l'appelant qui efface les clés existantes avant de
- * répandre ce résultat, faute de quoi retirer une légende ne l'effacerait
- * jamais.
+ * Returns `{}` when there is no caption, the same convention as `cropFormatting`: the
+ * caller clears the existing keys before spreading this result, otherwise removing a
+ * caption would never erase it.
  */
 export function captionFormatting(caption: ImageCaption | undefined): Partial<TextRun> {
   if (!caption) return {};
@@ -142,12 +140,12 @@ export function captionFormatting(caption: ImageCaption | undefined): Partial<Te
     imageCaption: caption.text,
     imageCaptionPosition: caption.position,
     imageCaptionAlign: caption.align,
-    // Le mode automatique étant le défaut, on ne stocke que l'exception.
+    // Automatic mode being the default, only the exception is stored.
     ...(caption.manual ? { imageCaptionManual: true } : {}),
   };
 }
 
-/** Un run porte-t-il une image ? */
+/** Does a run carry an image? */
 export function isImageRun(run: Pick<TextRun, 'imageSrc'>): boolean {
   return typeof run.imageSrc === 'string' && run.imageSrc.length > 0;
 }
@@ -156,7 +154,7 @@ export function isImageFormatting(formatting: RunFormatting): boolean {
   return typeof formatting.imageSrc === 'string' && formatting.imageSrc.length > 0;
 }
 
-/** Lit la géométrie d'un run image, bornes appliquées. */
+/** Reads the geometry of an image run, with the limits applied. */
 export function imageAttributes(run: TextRun): ImageAttributes | null {
   if (!isImageRun(run)) return null;
   const crop = imageCrop(run);
@@ -173,7 +171,7 @@ export function imageAttributes(run: TextRun): ImageAttributes | null {
   };
 }
 
-/** Placement d'un cadre, valeurs par défaut résolues. */
+/** Placement of a frame, with default values resolved. */
 export function imageWrapPlacement(run: RunFormatting): ImageWrapPlacement {
   const mode = imageWrapMode(run);
   if (mode === 'inline') return { mode };
@@ -187,7 +185,7 @@ export function imageWrapPlacement(run: RunFormatting): ImageWrapPlacement {
   };
 }
 
-/** Rognage porté par un run, normalisé. */
+/** Cropping carried by a run, normalized. */
 export function imageCrop(run: Pick<TextRun, 'imageCropTopPct' | 'imageCropRightPct' | 'imageCropBottomPct' | 'imageCropLeftPct'>): ImageCrop {
   return normalizeCrop({
     topPct: run.imageCropTopPct ?? 0,
@@ -203,11 +201,11 @@ export function hasCrop(crop: ImageCrop | undefined): crop is ImageCrop {
 }
 
 /**
- * Ramène un rognage dans le domaine du sens.
+ * Brings a crop back into the domain of sense.
  *
- * Deux bords opposés qui totalisent plus que l'image entière n'ont pas de
- * résultat : on les réduit **proportionnellement** plutôt que d'en écrêter un
- * seul, ce qui déplacerait le centre de la partie visible.
+ * Two opposite edges that add up to more than the whole image have no result: we
+ * reduce them **proportionally** rather than clamp just one, which would shift the
+ * center of the visible part.
  */
 export function normalizeCrop(crop: ImageCrop): ImageCrop {
   const borne = (value: number): number =>
@@ -234,7 +232,7 @@ export function normalizeCrop(crop: ImageCrop): ImageCrop {
   return { topPct: top, rightPct: right, bottomPct: bottom, leftPct: left };
 }
 
-/** Fractions de l'original encore visibles, en largeur et en hauteur. */
+/** Fractions of the original that are still visible, in width and in height. */
 export function visibleFraction(crop: ImageCrop): { width: number; height: number } {
   const normalise = normalizeCrop(crop);
   return {
@@ -244,16 +242,16 @@ export function visibleFraction(crop: ImageCrop): { width: number; height: numbe
 }
 
 /**
- * Compose un second rognage sur un premier.
+ * Applies a second crop on top of a first one.
  *
- * `inner` est exprimé dans le repère de ce qui est **actuellement visible** —
- * c'est ce que l'usager désigne en traçant un cadre sur l'aperçu, lequel montre
- * déjà l'image rognée. Le résultat, lui, est exprimé dans le repère de
- * l'**original**, seul repère stable.
+ * `inner` is expressed in the frame of reference of what is **currently visible**,
+ * which is what the user designates by drawing a box on the preview, since the
+ * preview already shows the cropped image. The result is expressed in the frame of
+ * reference of the **original**, the only stable one.
  *
- * Sans cette conversion, rogner une seconde fois retrancherait des fractions de
- * l'original alors qu'on croit désigner des fractions du visible : le second
- * geste couperait bien plus que ce qui a été montré.
+ * Without this conversion, cropping a second time would remove fractions of the
+ * original while the user believes they are designating fractions of what is visible:
+ * the second gesture would cut far more than what was shown.
  */
 export function composeCrop(existing: ImageCrop, inner: ImageCrop): ImageCrop {
   const base = normalizeCrop(existing);
@@ -269,11 +267,11 @@ export function composeCrop(existing: ImageCrop, inner: ImageCrop): ImageCrop {
 }
 
 /**
- * Géométrie de rendu d'une image rognée.
+ * Rendering geometry of a cropped image.
  *
- * Le cadre fait `frameWidthPx × frameHeightPx` et masque ce qui déborde ;
- * l'image y est agrandie de façon que la part visible remplisse exactement le
- * cadre, puis décalée pour amener le bon coin en haut à gauche.
+ * The frame is `frameWidthPx × frameHeightPx` and hides what overflows; the image is
+ * enlarged inside it so that the visible part fills the frame exactly, then shifted to
+ * bring the right corner to the top left.
  */
 export function cropGeometry(
   crop: ImageCrop,
@@ -295,13 +293,13 @@ export function cropGeometry(
 }
 
 /**
- * Les clés de rognage prêtes à poser sur un run ; vides si pas de rognage.
+ * The crop keys, ready to put on a run; empty when there is no crop.
  *
- * Un bord non rogné est **absent**, jamais posé à zéro. C'est la même forme
- * canonique que pour les booléens de formatage (`patchFormatting`), et pour la
- * même raison : `sameFormatting` compare clé à clé, et `0` ne serait pas égal à
- * « clé absente ». Deux images rognées identiquement mais construites par des
- * chemins différents cesseraient alors de partager leur formatage.
+ * An uncropped edge is **absent**, never set to zero. This is the same canonical form
+ * as for the formatting booleans (`patchFormatting`), for the same reason:
+ * `sameFormatting` compares key by key, and `0` would not equal "key absent". Two
+ * images cropped identically but built by different paths would then stop sharing
+ * their formatting.
  */
 export function cropFormatting(crop: ImageCrop | undefined): Partial<TextRun> {
   if (!hasCrop(crop)) return {};
@@ -320,11 +318,11 @@ export function clampSize(pt: number): number {
 }
 
 /**
- * Construit le run d'une image.
+ * Builds the run of an image.
  *
- * Le formatage hérité est **vidé de ses attributs de texte** : gras, souligné ou
- * lien n'ont aucun sens sur un cadre, et les laisser ferait diverger l'image de
- * ce qu'affiche la barre d'outils lorsqu'on la sélectionne.
+ * The inherited formatting is **stripped of its text attributes**: bold, underline or
+ * a link mean nothing on a frame, and keeping them would make the image differ from
+ * what the toolbar shows when it is selected.
  */
 export function makeImageRun(attributes: ImageAttributes): TextRun {
   return makeRun(IMAGE_PLACEHOLDER, {
@@ -340,12 +338,12 @@ export function makeImageRun(attributes: ImageAttributes): TextRun {
 }
 
 /**
- * Champs de run correspondant à un placement.
+ * Run fields that correspond to a placement.
  *
- * Même convention que `cropFormatting` : les clés absentes valent effacement,
- * et c'est à l'appelant de vider `WRAP_FORMAT_KEYS` avant d'y répandre ce
- * résultat. Un cadre ramené dans le fil du texte rend ici `{}`, et laisserait
- * donc intacte une géométrie flottante qu'on aurait négligé d'effacer.
+ * Same convention as `cropFormatting`: absent keys mean erasure, and the caller must
+ * clear `WRAP_FORMAT_KEYS` before spreading this result. A frame brought back into the
+ * text flow returns `{}` here, so it would leave intact any floating geometry that
+ * someone forgot to erase.
  */
 export function placementFormatting(
   placement: ImageWrapPlacement | undefined,
@@ -371,10 +369,10 @@ export function placementFormatting(
 }
 
 /**
- * Réécrit la géométrie d'un run image en conservant son identité.
+ * Rewrites the geometry of an image run while keeping its identity.
  *
- * `makeImageRun` repartirait de zéro et perdrait un attribut ajouté ailleurs ;
- * ici on ne touche qu'à ce qui change.
+ * `makeImageRun` would start from scratch and lose an attribute added elsewhere; here
+ * we only touch what changes.
  */
 export function resizeImageRun(run: TextRun, widthPt: number, heightPt: number): TextRun {
   return makeRun(run.text, {
@@ -385,12 +383,12 @@ export function resizeImageRun(run: TextRun, widthPt: number, heightPt: number):
 }
 
 /**
- * Taille d'insertion d'une image de `naturalWidthPx` × `naturalHeightPx`.
+ * Insertion size of an image of `naturalWidthPx` × `naturalHeightPx`.
  *
- * Writer insère à la taille naturelle puis réduit si le cadre déborde de la zone
- * imprimable (`SwFEShell::Insert`, `frmmgr.cxx`). Même règle ici : on ne réduit
- * **que** ce qui dépasse, et toujours à rapport conservé — une image élargie de
- * force annoncerait une résolution qu'elle n'a pas.
+ * Writer inserts at natural size and then shrinks it if the frame overflows the
+ * printable area (`SwFEShell::Insert`, `frmmgr.cxx`). Same rule here: we only shrink
+ * what exceeds, and always keeping the aspect ratio. An image stretched by force would
+ * announce a resolution it does not have.
  */
 export function fitToContentWidth(
   naturalWidthPx: number,
@@ -400,8 +398,8 @@ export function fitToContentWidth(
   const width = Number.isFinite(naturalWidthPx) && naturalWidthPx > 0 ? naturalWidthPx : 1;
   const height = Number.isFinite(naturalHeightPx) && naturalHeightPx > 0 ? naturalHeightPx : 1;
 
-  // Les pixels d'une image sont des pixels CSS : 96 par pouce, comme le reste du
-  // moteur. La conversion en points est donc exacte, sans hypothèse de DPI.
+  // The pixels of an image are CSS pixels: 96 per inch, like the rest of the engine. The
+  // conversion to points is therefore exact, with no DPI assumption.
   let widthPt = pxToPt(width);
   let heightPt = pxToPt(height);
 
@@ -414,7 +412,7 @@ export function fitToContentWidth(
   return { widthPt: clampSize(widthPt), heightPt: clampSize(heightPt) };
 }
 
-/** Hauteur qui conserve le rapport d'origine quand la largeur change. */
+/** Height that keeps the original aspect ratio when the width changes. */
 export function heightForWidth(
   widthPt: number,
   ratio: { widthPt: number; heightPt: number },
@@ -423,7 +421,7 @@ export function heightForWidth(
   return clampSize((widthPt * ratio.heightPt) / ratio.widthPt);
 }
 
-/** Largeur qui conserve le rapport d'origine quand la hauteur change. */
+/** Width that keeps the original aspect ratio when the height changes. */
 export function widthForHeight(
   heightPt: number,
   ratio: { widthPt: number; heightPt: number },
@@ -433,12 +431,12 @@ export function widthForHeight(
 }
 
 /**
- * Adresses acceptées pour une image.
+ * Addresses accepted for an image.
  *
- * `javascript:` et `data:text/html` sont des vecteurs d'exécution ; une balise
- * `<img src>` ne les honore pas, mais l'adresse voyage aussi dans l'export ODF
- * et dans le document partagé, où d'autres lecteurs la reprendront. On tranche
- * donc ici, une fois, plutôt qu'à chaque point de sortie.
+ * `javascript:` and `data:text/html` are ways to run code; an `<img src>` tag does not
+ * honor them, but the address also travels in the ODF export and in the shared
+ * document, where other readers will use it. We therefore decide here, once, rather
+ * than at every exit point.
  */
 export function isSafeImageSrc(src: string): boolean {
   const value = src.trim();
@@ -447,7 +445,7 @@ export function isSafeImageSrc(src: string): boolean {
   if (/^data:/i.test(value)) {
     return /^data:image\/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(value);
   }
-  // Relative : c'est la forme que renvoie le dépôt d'images du serveur.
+  // Relative: this is the form returned by the server's image store.
   if (value.startsWith('/') && !value.startsWith('//')) return true;
 
   try {
@@ -459,44 +457,44 @@ export function isSafeImageSrc(src: string): boolean {
 }
 
 /**
- * Toutes les images d'une suite de runs, avec l'offset qu'elles occupent.
+ * All the images of a sequence of runs, with the offset each one occupies.
  *
- * Sert au dépôt des images sur le serveur au partage, et à la collecte des
- * `Pictures/` à l'écriture d'un `.odt`.
+ * Used to upload the images to the server when sharing, and to collect the
+ * `Pictures/` entries when writing an `.odt`.
  */
-/* -------------------------------------------------------------- légendes */
+/* -------------------------------------------------------------- captions */
 
-/** Réglages de légende d'une image, valeurs par défaut résolues. */
+/** Caption settings of an image, with default values resolved. */
 export interface ImageCaption {
   text: string;
   position: 'above' | 'below';
   align: 'left' | 'center' | 'right';
-  /** `false` = numérotation automatique (le défaut). */
+  /** `false` = automatic numbering (the default). */
   manual: boolean;
 }
 
-/** Blanc par défaut entre l'image et sa légende, en points. */
+/** Default space between the image and its caption, in points. */
 export const DEFAULT_CAPTION_GAP_PT = 3;
 
 /**
- * Blanc par défaut que le texte laisse autour d'un cadre flottant, en points.
- * C'est le `SvxLRSpaceItem` du cadre dans Writer.
+ * Default space the text leaves around a floating frame, in points. This is the
+ * frame's `SvxLRSpaceItem` in Writer.
  */
 export const DEFAULT_WRAP_MARGIN_PT = 4;
-/** Plafond des marges réglables, en points (≈ 50 mm). */
+/** Upper bound of the adjustable margins, in points (≈ 50 mm). */
 export const MAX_IMAGE_MARGIN_PT = 142;
 
-/** Marge autour du cadre, bornée. */
+/** Margin around the frame, clamped. */
 export function imageMarginPt(run: Pick<TextRun, 'imageMarginPt'>): number {
   return Math.min(MAX_IMAGE_MARGIN_PT, Math.max(0, run.imageMarginPt ?? 0));
 }
 
-/** Blanc entre l'image et sa légende, borné. */
+/** Space between the image and its caption, clamped. */
 export function imageCaptionGapPt(run: Pick<TextRun, 'imageCaptionGapPt'>): number {
   return Math.min(MAX_IMAGE_MARGIN_PT, Math.max(0, run.imageCaptionGapPt ?? DEFAULT_CAPTION_GAP_PT));
 }
 
-/** Préfixe engendré par la numérotation automatique. */
+/** Prefix generated by automatic numbering. */
 export const FIGURE_LABEL = 'Figure';
 
 export function imageCaptionOf(run: Pick<TextRun, 'imageCaption' | 'imageCaptionPosition' | 'imageCaptionAlign' | 'imageCaptionManual'>): ImageCaption {
@@ -508,20 +506,20 @@ export function imageCaptionOf(run: Pick<TextRun, 'imageCaption' | 'imageCaption
   };
 }
 
-/** Une image porte-t-elle une légende à peindre ? */
+/** Does an image carry a caption to paint? */
 export function hasCaption(run: Pick<TextRun, 'imageCaption' | 'imageCaptionManual'>): boolean {
-  // En mode automatique, « Figure n°3 » se justifie seul : une image numérotée
-  // sans texte reste légendée. En manuel, sans texte il n'y a rien à écrire.
+  // In automatic mode, "Figure n°3" is enough on its own: a numbered image with no text
+  // still has a caption. In manual mode, with no text there is nothing to write.
   if (run.imageCaptionManual === true) return (run.imageCaption ?? '').trim().length > 0;
   return run.imageCaption !== undefined;
 }
 
 /**
- * Texte complet d'une légende, numéro compris.
+ * Full text of a caption, number included.
  *
- * `number` vaut `null` hors numérotation automatique. Le séparateur ne paraît
- * que s'il y a quelque chose à séparer : « Figure n°2 » sans texte ne doit pas
- * traîner un « : » orphelin.
+ * `number` is `null` outside automatic numbering. The separator only appears if there
+ * is something to separate: "Figure n°2" with no text must not drag an orphan ":"
+ * along.
  */
 export function captionText(caption: ImageCaption, number: number | null): string {
   if (caption.manual || number === null) return caption.text;
@@ -529,7 +527,7 @@ export function captionText(caption: ImageCaption, number: number | null): strin
   return caption.text.trim().length > 0 ? `${prefix} : ${caption.text}` : prefix;
 }
 
-/** Clé d'une image dans la table de numérotation : paragraphe et offset. */
+/** Key of an image in the numbering table: paragraph and offset. */
 export function imageKey(blockId: string, offset: number): string {
   return `${blockId}:${offset}`;
 }
@@ -546,32 +544,32 @@ export function collectImageRuns(
   return out;
 }
 
-/* --------------------------------------------- intégration au texte (habillage) */
+/* --------------------------------------------- fitting into the text (wrapping) */
 
 /**
- * Les cinq façons dont une image s'intègre au texte.
+ * The five ways an image fits into the text.
  *
- * Writer n'a pas ce type : il conserve **trois** attributs indépendants —
- * l'ancrage (`SwFmtAnchor`, `RndStdIds`), l'habillage (`SwFmtSurround`,
- * `SwSurround`) et le calque (`RES_OPAQUE`, `SvxOpaqueItem`) — et le menu
- * « Format ▸ Adaptation du texte » n'en montre que les combinaisons utiles.
+ * Writer does not have this type: it keeps **three** independent attributes: the
+ * anchor (`SwFmtAnchor`, `RndStdIds`), the wrapping (`SwFmtSurround`, `SwSurround`)
+ * and the layer (`RES_OPAQUE`, `SvxOpaqueItem`), and the "Format ▸ Wrap" menu only
+ * shows the useful combinations.
  *
- * Ce type **est** cette liste de combinaisons utiles, nommée une fois pour
- * toutes. Il ne remplace pas les trois attributs, il les indexe : le modèle
- * continue de porter les items d'OpenOffice, et eux seuls voyagent en ODF.
- * Sans ce détour, chaque bouton de l'interface devrait décider seul de trois
- * valeurs à la fois, et « devant le texte » — qui est un habillage `through`
- * **plus** un calque — finirait tôt ou tard écrit à moitié.
+ * This type **is** that list of useful combinations, named once and for all. It does
+ * not replace the three attributes, it indexes them: the model keeps carrying
+ * OpenOffice's items, and only those travel in ODF. Without this detour, every button
+ * of the interface would have to decide three values at once by itself, and "in front
+ * of the text", which is `through` wrapping **plus** a layer, would sooner or later end
+ * up half written.
  *
- *  - `inline` — `FLY_AS_CHAR`, l'image coule dans la ligne comme un caractère ;
- *  - `wrap` — `SURROUND_IDEAL`, le texte contourne du côté le plus large ;
- *  - `break` — `SURROUND_NONE`, le texte s'arrête au-dessus et reprend dessous ;
- *  - `behind` — `SURROUND_THROUGHT`, calque `hell` : le texte passe par-dessus ;
- *  - `front` — `SURROUND_THROUGHT`, calque `heaven` : l'image couvre le texte.
+ *  - `inline`: `FLY_AS_CHAR`, the image flows in the line like a character;
+ *  - `wrap`: `SURROUND_IDEAL`, the text goes around on the wider side;
+ *  - `break`: `SURROUND_NONE`, the text stops above and resumes below;
+ *  - `behind`: `SURROUND_THROUGHT`, layer `hell`: the text passes over the image;
+ *  - `front`: `SURROUND_THROUGHT`, layer `heaven`: the image covers the text.
  */
 export type ImageWrapMode = 'inline' | 'wrap' | 'break' | 'behind' | 'front';
 
-/** Libellés du menu, dans l'ordre où ils y paraissent. */
+/** Menu labels, in the order they appear there. */
 export const IMAGE_WRAP_MODES: readonly {
   mode: ImageWrapMode;
   label: string;
@@ -584,7 +582,7 @@ export const IMAGE_WRAP_MODES: readonly {
   { mode: 'front', label: 'Devant le texte', hint: 'L’image recouvre le texte' },
 ];
 
-/** Mode d'intégration d'un cadre, déduit de ses trois attributs. */
+/** Fitting mode of a frame, deduced from its three attributes. */
 export function imageWrapMode(
   run: Pick<TextRun, 'imageAnchor' | 'imageSurround' | 'imageInFront'>,
 ): ImageWrapMode {
@@ -600,16 +598,16 @@ export function imageWrapMode(
 }
 
 /**
- * Attributs de cadre correspondant à un mode, ancrage compris.
+ * Frame attributes that correspond to a mode, anchor included.
  *
- * `anchor` n'est consulté que pour les modes flottants, et il y sert à
- * **conserver** un ancrage à la page déjà choisi : basculer de « derrière » à
- * « devant » ne doit pas ramener au paragraphe un cadre posé sur la feuille.
+ * `anchor` is only looked at for the floating modes, where it serves to **keep** a
+ * page anchor that was already chosen: switching from "behind" to "in front" must not
+ * bring back to the paragraph a frame that was placed on the sheet.
  *
- * Les clés absentes valent effacement — `wrapFormatting('inline')` ne renvoie
- * pas `imageAnchor: undefined` mais rien du tout, et c'est à l'appelant de
- * retirer les clés existantes avant d'y répandre ce résultat. Même convention
- * que `cropFormatting` et `captionFormatting` plus haut.
+ * Absent keys mean erasure: `wrapFormatting('inline')` does not return
+ * `imageAnchor: undefined` but nothing at all, and the caller must remove the existing
+ * keys before spreading this result. Same convention as `cropFormatting` and
+ * `captionFormatting` above.
  */
 export function wrapFormatting(
   mode: ImageWrapMode,
@@ -627,14 +625,14 @@ export function wrapFormatting(
       return { imageAnchor: flottant, imageSurround: 'through', imageInFront: true };
     case 'wrap':
     default:
-      // `SURROUND_IDEAL` plutôt que `PARALLEL` : c'est ce que choisit Writer
-      // pour l'habillage courant, et il se ramène de lui-même à `left` ou
-      // `right` quand le cadre est trop près d'un bord pour qu'on y écrive.
+      // `SURROUND_IDEAL` rather than `PARALLEL`: this is what Writer picks for ordinary
+      // wrapping, and it falls back by itself to `left` or `right` when the frame is too
+      // close to an edge for anything to be written there.
       return { imageAnchor: flottant, imageSurround: 'ideal' };
   }
 }
 
-/** Les clés que `wrapFormatting` gouverne — à effacer avant de le répandre. */
+/** The keys that `wrapFormatting` governs: to be cleared before spreading it. */
 export const WRAP_FORMAT_KEYS = [
   'imageAnchor',
   'imageSurround',
@@ -646,11 +644,11 @@ export const WRAP_FORMAT_KEYS = [
   'imageWrapMarginPt',
 ] as const satisfies readonly (keyof RunFormatting)[];
 
-/** Position par défaut d'un cadre qui vient de quitter le fil du texte. */
+/** Default position of a frame that has just left the text flow. */
 export function defaultFlyPlacement(mode: ImageWrapMode): Partial<TextRun> {
-  // Un cadre qui recouvre le texte se pose là où il est ; un cadre habillé se
-  // range contre un bord, faute de quoi il tomberait au coin haut-gauche du
-  // paragraphe et couperait la première ligne en deux.
+  // A frame that covers the text is placed where it is; a wrapped frame is put against
+  // an edge, otherwise it would fall at the top-left corner of the paragraph and cut the
+  // first line in two.
   const orient: FlyHoriOrient = mode === 'wrap' ? 'right' : 'left';
   return {
     imageHoriOrient: orient,

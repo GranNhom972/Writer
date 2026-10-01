@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Jeu d'icônes Write.
+ * The Write icon set.
  *
- * Règles du système (un seul endroit pour toute la géométrie) :
- *  - grille **24 × 24**, zone vive 20 × 20 (2 px de marge optique sur chaque bord) ;
- *  - **contour** de 1,75 px, extrémités et jonctions arrondies : même poids optique
- *    pour toutes les icônes, quel que soit le nombre de traits ;
- *  - `currentColor` exclusivement : l'icône hérite de l'état du bouton (survol,
- *    actif, désactivé) sans règle CSS supplémentaire ;
- *  - `aria-hidden` + `focusable="false"` : l'icône est **décorative**, le nom
- *    accessible vient toujours de l'`aria-label` du bouton (directive UX §6).
+ * Rules of the system (one single place for all the geometry):
+ *  - **24 × 24** grid, live area 20 × 20 (2 px of optical margin on each edge);
+ *  - **stroke** of 1.75 px, with rounded ends and joins: the same optical weight for every icon, whatever the number of strokes;
+ *  - `currentColor` only: the icon inherits the state of the button (hover, active, disabled) with no extra CSS rule;
+ *  - `aria-hidden` + `focusable="false"`: the icon is **decorative**, the accessible name always comes from the button's `aria-label`
+ *    (UX directive §6).
  *
- * Les formes sont dessinées pour être lisibles à 16 px : pas de détail sous 2 px,
- * traits alignés sur la demi-grille pour rester nets sans rendu flou.
+ * The shapes are drawn to be readable at 16 px: no detail under 2 px, strokes aligned on the half grid to stay crisp without blurry
+ * rendering.
  */
 
 import type { ReactNode } from 'react';
@@ -70,10 +68,10 @@ const dot = (cx: number, cy: number): ReactNode => (
   <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.15" fill="currentColor" stroke="none" />
 );
 
-/** Barres de liste : longueurs différenciées pour évoquer du texte, pas un tableau. */
+/** List bars: lengths differ to suggest text, not a table. */
 const LIST_ROWS = [6, 12, 18] as const;
 
-/** Barres de texte des listes : même abscisse et même rythme pour les trois listes. */
+/** Text bars of the lists: same x coordinate and same rhythm for the three lists. */
 const listLines = (x = 10, length = 10): ReactNode => (
   <>
     {LIST_ROWS.map((y) => (
@@ -83,26 +81,24 @@ const listLines = (x = 10, length = 10): ReactNode => (
 );
 
 /**
- * Quelques icônes dérogent au contour standard : une icône « gras » dessinée au
- * même poids que les autres ne **paraît** pas grasse — l'usager lit le poids
- * optique avant la forme.
+ * A few icons depart from the standard stroke: a "bold" icon drawn at the same weight as the others does not **look** bold, since
+ * users read the optical weight before the shape.
  */
 const STROKE_OVERRIDES: Partial<Record<IconName, number>> = {
   bold: 2.6,
 };
 
 /**
- * Icônes d'habillage : un pavé pour l'image, des filets pour le texte.
+ * Wrapping icons: a block for the image, lines for the text.
  *
- * Les cinq se lisent d'un coup d'œil parce qu'elles partagent le **même** pavé
- * et ne diffèrent que par le tracé des filets — c'est le rapport entre les deux
- * que l'usager compare, pas leur dessin.
+ * The five can be read at a glance because they share the **same** block and only differ by how the lines are drawn: it is the
+ * relationship between the two that the user compares, not their drawing.
  */
 const wrapBox = (x: number, y: number, w: number, h: number): ReactNode => (
   <rect x={x} y={y} width={w} height={h} rx="1.5" />
 );
 
-/** Un filet de texte, plein ou interrompu à l'endroit du pavé. */
+/** A line of text, solid or interrupted where the block is. */
 const wrapRule = (y: number, from = 3, to = 21): ReactNode => (
   <path key={`${y}-${from}`} d={`M${from} ${y}h${to - from}`} />
 );
@@ -177,8 +173,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M8 16.8A4.4 4.4 0 0 0 12 19c2.6 0 4.5-1.3 4.5-3.2 0-1-.5-1.8-1.4-2.4" />
     </>
   ),
-  // Le « A » est remonté dans la grille : la barre de couleur occupe le bas du
-  // cadre (voir `barColor`), les deux forment un seul glyphe compact.
+  // The "A" is raised in the grid: the color bar takes the bottom of the frame (see `barColor`), and the two form one compact glyph.
   'text-color': (
     <>
       <path d="M5.5 15 11 4h2l5.5 11" />
@@ -252,15 +247,13 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   'list-ordered': (
     <>
-      {/* Contour affiné pour les chiffres : à 1,75 px leurs contreformes se
-          bouchent dès 20 px. Le poids optique reste équivalent car les glyphes
-          sont plus petits que les autres formes. */}
+      {/* Finer stroke for the digits: at 1.75 px their counters fill in from 20 px. The optical weight stays equivalent because the glyphs are smaller than the other shapes. */}
       <g strokeWidth={1.4}>
-        {/* « 1 » : hampe + empattement, la forme la plus lisible en très petit. */}
+        {/* "1": stem + serif, the most readable form at a very small size. */}
         <path d="M3.4 4 2.3 4.8M3.9 4v4M2.6 8h2.6" />
-        {/* « 2 » : arc supérieur, diagonale, base. */}
+        {/* "2": upper arc, diagonal, base. */}
         <path d="M2.5 10.6a1.5 1.5 0 0 1 2.7 1c0 1-2.7 2.4-2.7 2.4h2.9" />
-        {/* « 3 » : deux arcs empilés, contreforme ouverte à gauche. */}
+        {/* "3": two stacked arcs, counter open on the left. */}
         <path d="M2.6 16.5a1.4 1.4 0 0 1 2.6.8c0 .7-.6 1.1-1.3 1.1.8 0 1.4.5 1.4 1.2a1.5 1.5 0 0 1-2.8.7" />
       </g>
       {listLines()}
@@ -302,8 +295,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="m8.3 10.7 7.4-3.4M8.3 13.3l7.4 3.4" />
     </>
   ),
-  // Radical + barre : la forme la plus reconnaissable pour « formule », et
-  // lisible à 16 px là où un « ∑ » ou un « π » se referment.
+  // Radical + bar: the most recognizable shape for "formula", and readable at 16 px where a "∑" or a "π" close up.
   math: (
     <>
       <path d="M3 12.5h2.2l2.6 6.5L12 5h9" />
@@ -315,8 +307,7 @@ const SHAPES: Record<IconName, ReactNode> = {
   'chevron-up': <path d="m5.5 15 6.5-6.5 6.5 6.5" />,
   'chevron-down': <path d="m5.5 9 6.5 6.5L18.5 9" />,
 
-  // Deux flèches opposées : la métaphore « échanger » se lit à 16 px, là où un
-  // dessin de document annoté deviendrait illisible.
+  // Two opposite arrows: the "swap" metaphor reads at 16 px, where a drawing of an annotated document would become unreadable.
   replace: (
     <>
       <path d="M4 8.5h13" />
@@ -328,12 +319,12 @@ const SHAPES: Record<IconName, ReactNode> = {
 
   'page-break': (
     <>
-      {/* Haut de page */}
+      {/* Top of page */}
       <path d="M6 9.5v-6h6.5L18 9v.5" />
       <path d="M12.5 3.5V9H18" />
-      {/* Rupture */}
+      {/* Break */}
       <path d="M3 12.5h18" strokeDasharray="3.5 2.5" />
-      {/* Bas de page */}
+      {/* Bottom of page */}
       <path d="M6 15.5v5h12v-5" />
     </>
   ),
@@ -386,7 +377,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M12 5v14M5 12h14" />
     </>
   ),
-  /* Dans la ligne : le pavé et le texte partagent la même hauteur d'assise. */
+  /* In the line: the block and the text share the same baseline height. */
   'wrap-inline': (
     <>
       {wrapBox(3, 8.5, 7, 7)}
@@ -394,7 +385,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       {wrapRule(14, 12)}
     </>
   ),
-  /* Habillage : le texte contourne le pavé, dessus, dessous et à côté. */
+  /* Wrap: the text goes around the block, above, below and beside it. */
   'wrap-around': (
     <>
       {wrapRule(5)}
@@ -404,7 +395,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       {wrapRule(19)}
     </>
   ),
-  /* Intercalé : le texte s'arrête au-dessus et reprend dessous, jamais à côté. */
+  /* Break: the text stops above and resumes below, never beside it. */
   'wrap-break': (
     <>
       {wrapRule(4.5)}
@@ -414,7 +405,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       {wrapRule(20.5)}
     </>
   ),
-  /* Derrière : les filets traversent le pavé sans être coupés. */
+  /* Behind: the lines go through the block without being cut. */
   'wrap-behind': (
     <>
       {wrapBox(6, 6.5, 12, 11)}
@@ -423,7 +414,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       {wrapRule(15)}
     </>
   ),
-  /* Devant : le pavé coupe les filets, qui reparaissent de part et d'autre. */
+  /* In front: the block cuts the lines, which reappear on either side. */
   'wrap-front': (
     <>
       {wrapRule(9, 3, 6)}
@@ -439,13 +430,12 @@ const SHAPES: Record<IconName, ReactNode> = {
 
 interface IconProps {
   name: IconName;
-  /** 20 px dans le ruban, 16 px dans les menus. */
+  /** 20 px in the ribbon, 16 px in the menus. */
   size?: number;
   className?: string;
   /**
-   * Barre de couleur dessinée **dans** le cadre de l'icône (couleur du texte,
-   * surlignage). L'empiler sous le SVG créait un écart optique : le glyphe ne
-   * remplit pas toute la grille, et la barre héritait de cet espace vide.
+   * Color bar drawn **inside** the icon's frame (text color, highlight). Stacking it under the SVG created an optical gap: the glyph does
+   * not fill the whole grid, and the bar inherited that empty space.
    */
   barColor?: string;
 }
@@ -467,9 +457,9 @@ export function Icon({ name, size = 20, className, barColor }: IconProps) {
     >
       {SHAPES[name]}
       {barColor && (
-        /* Largeur calée sur celle du glyphe (et non sur le cadre) et interligne
-           serré : la barre doit se lire comme le soulignement du « A », pas comme
-           un second élément posé dessous. */
+        /*
+         * Width matched to the glyph's (and not to the frame) and tight line spacing: the bar must read as the underline of the "A", not as a second element placed below it.
+         */
         <rect x="5" y="17.6" width="14" height="3.4" rx="1.1" fill={barColor} stroke="none" />
       )}
     </svg>

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Barre de menus (Fichier, Édition, Affichage, Insertion, Format, Outils, Aide).
+ * Menu bar (File, Edit, View, Insert, Format, Tools, Help).
  *
- * Conforme au motif ARIA « menubar » : `Alt` révèle les accès, les flèches
- * naviguent, `Échap` ferme et rend le focus. Toute entrée affiche son raccourci —
- * la barre de menus est le canal de découverte des raccourcis (directive UX §5.1).
+ * Follows the ARIA "menubar" pattern: `Alt` reveals the access keys, the arrows navigate, `Escape` closes and gives the focus back. Every entry shows
+ * its shortcut: the menu bar is the channel through which shortcuts are discovered (UX directive §5.1).
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -16,9 +15,9 @@ export interface MenuEntry {
   shortcut?: string;
   run: () => void;
   disabled?: boolean;
-  /** Marque une entrée à bascule active (affichage, mode…). */
+  /** Marks a toggle entry as active (display, mode...). */
   checked?: boolean;
-  /** Séparateur visuel avant cette entrée. */
+  /** Visual separator before this entry. */
   separatorBefore?: boolean;
 }
 
@@ -117,12 +116,10 @@ export function MenuBar({ menus }: MenuBarProps) {
 }
 
 /**
- * Panneau d'un menu — la liste d'entrées elle-même.
+ * Panel of a menu: the list of entries itself.
  *
- * Exporté pour que le menu contextuel le réutilise tel quel : deux
- * implémentations séparées finiraient par diverger sur un détail de focus, de
- * séparateur ou de coche, et l'utilisateur verrait deux menus différents pour
- * les mêmes commandes.
+ * Exported so that the context menu reuses it as it is: two separate implementations would end up diverging on a detail of focus, separator or tick,
+ * and the user would see two different menus for the same commands.
  */
 export function MenuPanel({ menu, onClose }: { menu: MenuDefinition; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -172,8 +169,7 @@ export function MenuPanel({ menu, onClose }: { menu: MenuDefinition; onClose: ()
             role={entry.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
             {...(entry.checked === undefined ? {} : { 'aria-checked': entry.checked })}
             className="menu__entry"
-            // Nom accessible explicite : la coche visuelle est décorative, l'état
-            // réel est porté par `aria-checked` (pas de double annonce).
+            // Explicit accessible name: the visual tick is decorative, the real state is carried by `aria-checked` (no double announcement).
             aria-label={entry.label}
             disabled={entry.disabled ?? false}
             onClick={() => {

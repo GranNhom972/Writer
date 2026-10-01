@@ -1,42 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Table des matières — génération. Transposition de `SwDoc::UpdateTOX`
- * (`sw/source/core/tox/tox.cxx`) et du modèle de ligne `SwForm`
- * (`sw/inc/tox.hxx`, jetons `TOKEN_ENTRY_TEXT`, `TOKEN_TAB_STOP`,
- * `TOKEN_PAGE_NUMS`).
+ * Table of contents: generation. (OpenOffice: `SwDoc::UpdateTOX`, `sw/source/core/tox/tox.cxx`,
+ * and the `SwForm` line model, `sw/inc/tox.hxx`, tokens `TOKEN_ENTRY_TEXT`, `TOKEN_TAB_STOP`,
+ * `TOKEN_PAGE_NUMS`.)
  *
- * Une ligne de sommaire de Writer se lit comme une suite de jetons :
+ * A line of a Writer table of contents reads as a sequence of tokens:
  *
- *     [numéro de chapitre] [texte de l'entrée] [tabulation à points] [page]
+ *     [chapter number] [entry text] [dotted tab] [page]
  *
- * La tabulation est un **taquet aligné à droite avec caractère de remplissage**
- * (`SvxTabStop` de type `SVX_TAB_ADJUST_RIGHT`, fill char `.`). Le formateur de
- * texte de Writer résout ce taquet à la mise en page, quand il connaît enfin la
- * largeur restante.
+ * The tab is a **right-aligned tab stop with a fill character** (`SvxTabStop` of type
+ * `SVX_TAB_ADJUST_RIGHT`, fill char `.`). Writer's text formatter resolves this tab stop at
+ * layout time, when the remaining width is finally known.
  *
- * On fait la même chose, au même moment : la génération reçoit le mesureur de
- * texte et compose le remplissage au caractère près. C'est pour cela que ce
- * module vit dans `engine/` et non dans `document/` — il lui faut une largeur
- * de colonne et une fonte, deux choses que la couche 1 ignore.
+ * We do the same thing, at the same moment: generation receives the text measurer and builds
+ * the fill character by character. This is why this module lives in `engine/` and not in
+ * `document/`: it needs a column width and a font, two things layer 1 knows nothing about.
  *
- * ## Pourquoi deux passes de pagination
+ * ## Why two pagination passes
  *
- * Le numéro de page d'un titre n'est connu qu'une fois le document paginé, et
- * le document ne peut être paginé qu'une fois le sommaire écrit. Writer tranche
- * en régénérant puis en re-disposant (`UpdateTOX` suivi de `SwLayAction`).
+ * The page number of a heading is only known once the document has been paginated, and the
+ * document can only be paginated once the table of contents is written. Writer settles this by
+ * regenerating and then laying out again (`UpdateTOX` followed by `SwLayAction`).
  *
- * La boucle converge ici en exactement deux passes, et par construction : le
- * **nombre de lignes** du sommaire ne dépend pas des numéros affichés — une
- * entrée occupe une ligne, que sa page soit 3 ou 137. La géométrie est donc
- * identique entre les deux passes, seuls les chiffres changent. C'est ce qui
- * permet à `paginateDocument` de s'arrêter après la seconde sans test de
- * convergence.
+ * Here the loop converges in exactly two passes, by construction: the **number of lines** of
+ * the table of contents does not depend on the displayed numbers, since an entry takes one line
+ * whether its page is 3 or 137. The geometry is therefore identical between the two passes and
+ * only the digits change. That is what allows `paginateDocument` to stop after the second one
+ * without a convergence test.
  */
 
 import { ptToPx } from '../document/units';
@@ -53,28 +49,28 @@ import { resolveFont } from './style';
 import type { TextMeasurer } from './measure';
 import type { LayoutContext } from './lineBreak';
 
-/** Retrait par niveau de titre, en points. `SwForm` en pose 0,5 cm par cran. */
+/** Indent per heading level, in points. `SwForm` uses 0.5 cm per step. */
 const TOC_LEVEL_INDENT_PT = 14;
 
-/** Caractère de remplissage du taquet, celui de `SwForm::SetPattern`. */
+/** Fill character of the tab stop, the one from `SwForm::SetPattern`. */
 const LEADER_CHAR = '.';
 
-/** Espace réservée entre le texte et les points, et entre les points et le numéro. */
+/** Space kept between the text and the dots, and between the dots and the number. */
 const LEADER_GAP_PT = 4;
 
 export interface TocExpansion {
-  /** Paragraphes engendrés, titre du sommaire compris. */
+  /** Generated paragraphs, title of the table of contents included. */
   paragraphs: ParagraphNode[];
-  /** Ligne → identifiant du titre visé, pour rendre l'entrée cliquable. */
+  /** Line → id of the heading it points to, to make the entry clickable. */
   targets: Map<string, string>;
 }
 
 /**
- * Développe un bloc de sommaire en paragraphes concrets.
+ * Expands a table-of-contents block into concrete paragraphs.
  *
- * `pageNumbers` associe l'identifiant d'un titre à sa page **1-indexée**. Une
- * entrée absente de la table est rendue sans numéro : c'est le cas de la
- * première passe, où la pagination n'a pas encore eu lieu.
+ * `pageNumbers` maps the id of a heading to its **1-indexed** page. An entry that is missing
+ * from the table is rendered without a number: that is the case of the first pass, where
+ * pagination has not happened yet.
  */
 export function expandToc(
   doc: WriterDocumentState,
@@ -113,8 +109,8 @@ export function expandToc(
     targets.set(id, entry.blockId);
   });
 
-  // Un sommaire sans aucun titre reste visible, avec une ligne d'explication :
-  // une table vide et muette laisserait croire à une panne.
+  // A table of contents with no heading at all stays visible, with an explanatory line: an
+  // empty, silent table would make people think something is broken.
   if (entries.length === 0) {
     const id = tocLineId(toc.id, 0);
     paragraphs.push({
@@ -130,11 +126,11 @@ export function expandToc(
 }
 
 /**
- * Compose les runs d'une ligne : texte, points de suite, numéro de page.
+ * Builds the runs of a line: text, dot leader, page number.
  *
- * Le remplissage est calculé au caractère près plutôt que posé en CSS : c'est
- * la seule façon d'obtenir le même résultat à l'écran, à l'impression et dans
- * le PDF binaire, qui ne partagent aucun moteur de rendu.
+ * The fill is computed character by character rather than set in CSS: it is the only way to
+ * get the same result on screen, in print and in the binary PDF, which share no rendering
+ * engine.
  */
 function buildEntryRuns(
   text: string,
@@ -167,16 +163,16 @@ function buildEntryRuns(
 
   const dots = leaderDots(available, font, ctx.measurer);
 
-  // Plus de place pour un seul point : la ligne se contente d'une espace. Sans
-  // cette garde, un titre plus large que la colonne produirait un remplissage
-  // négatif, donc une chaîne vide collant le numéro au texte.
+  // No room for even one dot: the line makes do with a space. Without this guard, a heading wider
+  // than the column would produce a negative fill, so an empty string that glues the number to
+  // the text.
   if (dots.length === 0) return [label, makeRun(' '), numberRun];
 
   void level;
   return [label, makeRun(` ${dots} `, { color: '#888888' }), numberRun];
 }
 
-/** Nombre de points de remplissage tenant dans `availablePx`. */
+/** Number of fill dots that fit in `availablePx`. */
 function leaderDots(
   availablePx: number,
   font: { fontFamily: string; fontSizePx: number; bold: boolean; italic: boolean },

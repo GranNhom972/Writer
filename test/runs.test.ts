@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Invariants des plages de formatage (`SwpHints`).
+ * Invariants of the formatting ranges (`SwpHints`).
  */
 import { describe, expect, it } from 'vitest';
 import {

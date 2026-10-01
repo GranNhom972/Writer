@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en Rust, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to Rust. See the NOTICE and
+// LICENSE-APACHE files.
 
-//! Serveur de partage du moteur Writer.
+//! Writer's document-sharing server.
 //!
-//! Rôle : **relais CRDT + journal durable + dépôt d'images**, comme le serveur
-//! de l'application Write dont il reprend la couche de synchronisation. Le
-//! serveur ne connaît pas le schéma du document : il ne manipule que des updates
-//! Yjs opaques et convergentes, ce qui lui évite d'avoir à ordonner quoi que ce
-//! soit — et permet à deux personnes d'écrire dans le même paragraphe sans que
-//! l'une efface l'autre.
+//! Role: **CRDT relay + durable log + image store**, like the server of the Write
+//! application whose synchronization layer it reuses. The server does not know the
+//! document schema: it only handles opaque, convergent Yjs updates. That means it
+//! never has to decide an order for edits, and two people can type in the same
+//! paragraph without one erasing the other.
 //!
-//! Deux chemins **optionnels** font exception, et un seul module les porte
-//! (`content.rs`) : l'amorçage d'un partage à partir du document fourni par le
-//! client, et la projection en JSON pour l'observation. Le cœur du relais, lui,
-//! reste aveugle au contenu.
+//! Two **optional** paths are the exception, and a single module holds them
+//! (`content.rs`): seeding a share from the document supplied by the client, and
+//! projecting the document to JSON for observers. The relay core itself stays
+//! blind to the content.
 
 mod api;
 mod assets;
@@ -67,8 +66,8 @@ async fn main() {
         );
     }
 
-    // Le mode JWT sans secret n'accepterait aucun jeton : tout répondrait 401
-    // sans que rien ne dise pourquoi. Mieux vaut refuser de démarrer.
+    // JWT mode without a secret would reject every token: everything would answer
+    // 401 and nothing would say why. Refusing to start is better.
     if !cfg.auth.is_usable() {
         tracing::error!(
             "WRITER_AUTH_MODE=jwt exige WRITER_JWT_SECRET — le même secret que \
@@ -122,9 +121,8 @@ async fn main() {
         )
         // ── Images ───────────────────────────────────────────────────────────
         //
-        // Le plafond est posé sur la route, pas dans le gestionnaire : une charge
-        // hors limites est ainsi coupée à la lecture du corps, sans jamais être
-        // rassemblée en mémoire.
+        // The size limit is set on the route, not in the handler: an oversized body is
+        // cut off while it is being read and is never collected in memory.
         .route(
             "/api/v1/documents/:doc_id/assets",
             post(assets::upload_asset).layer(DefaultBodyLimit::max(assets::MAX_ASSET_BYTES)),
@@ -133,7 +131,7 @@ async fn main() {
             "/api/v1/documents/:doc_id/assets/:name",
             get(assets::get_asset),
         )
-        // ── Partage ──────────────────────────────────────────────────────────
+        // ── Sharing ──────────────────────────────────────────────────────────
         .route(
             "/api/v1/sessions",
             post(session::create_session).get(session::list_sessions),
@@ -151,14 +149,14 @@ async fn main() {
             "/api/v1/sessions/:token_session/events",
             get(events::events_handler),
         )
-        // ── Synchronisation ──────────────────────────────────────────────────
+        // ── Synchronization ──────────────────────────────────────────────────
         .route("/api/v1/sync/:doc_id", get(sync::sync_handler))
-        // ── Page de l'éditeur ────────────────────────────────────────────────
+        // ── Editor page ──────────────────────────────────────────────────────
         //
-        // En DERNIER, et en repli : toute URL qui n'est pas une route ci-dessus
-        // appartient au routeur React (`/doc/<id>`…). Sans cela, la page devait
-        // être servie à part — et alors son origine ne portait pas l'API, ce que
-        // ni le `fetch` relatif ni le WebSocket de synchronisation ne tolèrent.
+        // This route must come LAST: it is the fallback. Any URL that is not one of the
+        // routes above belongs to the React router (`/doc/<id>`...). Without it the page
+        // had to be served separately, and then its origin did not carry the API, which
+        // neither the relative `fetch` calls nor the sync WebSocket can cope with.
         .fallback(web::spa_fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

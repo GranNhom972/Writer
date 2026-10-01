@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 interface PopoverProps {
-  /** Positionnement explicite (panneau détaché de son bouton dans le DOM). */
+  /** Explicit positioning (panel detached from its button in the DOM). */
   style?: React.CSSProperties;
   className?: string;
-  /** Libellé accessible du panneau. */
+  /** Accessible label of the panel. */
   label: string;
   onClose: () => void;
   children: ReactNode;
-  /** Élément déclencheur : le focus lui revient à la fermeture (WCAG 2.4.3). */
+  /** Trigger element: focus returns to it on closing (WCAG 2.4.3). */
   triggerRef: React.RefObject<HTMLElement | null>;
 }
 
 /**
- * Panneau flottant accessible : `Échap` ferme, un clic extérieur ferme, le focus
- * entre à l'ouverture et **revient au déclencheur** à la fermeture.
+ * Accessible floating panel: `Escape` closes, a click outside closes, focus enters on opening and **returns to the trigger** on
+ * closing.
  */
 export function Popover({ label, onClose, children, triggerRef, style, className }: PopoverProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -25,10 +25,8 @@ export function Popover({ label, onClose, children, triggerRef, style, className
   const [alignEnd, setAlignEnd] = useState(false);
 
   /**
-   * Bascule d'alignement quand le panneau déborderait de la fenêtre : mesuré
-   * avant peinture (`useLayoutEffect`), sinon l'usager voit le panneau sauter.
-   * Sans cela, un sélecteur situé à droite du ruban pousse une barre de
-   * défilement horizontale sur toute la page.
+   * Alignment flip when the panel would overflow the window: measured before painting (`useLayoutEffect`), otherwise the user sees the
+   * panel jump. Without it, a picker located at the right of the ribbon pushes a horizontal scrollbar across the whole page.
    */
   useLayoutEffect(() => {
     const panel = panelRef.current;

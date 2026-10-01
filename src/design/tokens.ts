@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-/** Miroir TypeScript des jetons ayant besoin d'être lus par le code. */
+/** TypeScript mirror of the tokens that code needs to read. */
 
-/** Nombre de couleurs de présence exposées par `tokens.css`. */
+/** Number of presence colors exposed by `tokens.css`. */
 export const PRESENCE_COLOR_COUNT = 8;
 
 export const A4 = {

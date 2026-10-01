@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Palette du document — générée, pas recopiée.
+ * The document palette: generated, not copied.
  *
- * Une palette écrite à la main dérive : les nuances ne sont plus homogènes d'une
- * teinte à l'autre et les noms deviennent approximatifs. Ici, une teinte de base
- * par colonne, des niveaux de clarté partagés, donc :
- *  - un rythme visuel identique sur chaque colonne ;
- *  - un **nom accessible dérivé automatiquement** pour chacune des 80 pastilles
- *    (une pastille sans nom est inutilisable au lecteur d'écran).
+ * A hand-written palette drifts: the shades stop being consistent from one hue to the next and the names become approximate.
+ * Here there is one base hue per column and shared lightness levels, so:
+ *  - an identical visual rhythm in every column;
+ *  - an **accessible name derived automatically** for each of the 80 swatches (a swatch with no name is unusable with a screen
+ *    reader).
  */
 
 import { hslToRgb, toHex } from './color';
@@ -23,18 +22,17 @@ interface BaseHue {
   name: string;
   hue: number;
   saturation: number;
-  /** Clarté de la ligne « pure ». */
+  /** Lightness of the "pure" row. */
   lightness: number;
 }
 
-/** Dix colonnes, comme les palettes bureautiques usuelles. */
+/** Ten columns, like the usual office palettes. */
 const BASE_HUES: readonly BaseHue[] = [
   { name: 'Rouge', hue: 0, saturation: 0.78, lightness: 0.5 },
   { name: 'Orange', hue: 24, saturation: 0.85, lightness: 0.5 },
   { name: 'Jaune', hue: 45, saturation: 0.9, lightness: 0.5 },
-  // « Vert pomme » et non « Vert clair » : ce dernier entrerait en collision avec
-  // la nuance claire de la colonne « Vert », et deux pastilles de même nom sont
-  // indistinguables au lecteur d'écran.
+  // "Vert pomme" (apple green) and not "Vert clair" (light green): the latter would collide with the light shade of the "Vert"
+  // (green) column, and two swatches with the same name cannot be told apart by a screen reader.
   { name: 'Vert pomme', hue: 90, saturation: 0.6, lightness: 0.42 },
   { name: 'Vert', hue: 140, saturation: 0.6, lightness: 0.38 },
   { name: 'Turquoise', hue: 178, saturation: 0.62, lightness: 0.38 },
@@ -44,18 +42,18 @@ const BASE_HUES: readonly BaseHue[] = [
   { name: 'Magenta', hue: 320, saturation: 0.65, lightness: 0.48 },
 ];
 
-/** Niveaux de clarté, du plus clair au plus foncé, appliqués à chaque colonne. */
+/** Lightness levels, from lightest to darkest, applied to every column. */
 const LEVELS: readonly { suffix: string; lightness: number | null }[] = [
   { suffix: 'très clair', lightness: 0.88 },
   { suffix: 'clair', lightness: 0.76 },
   { suffix: 'pâle', lightness: 0.64 },
-  { suffix: '', lightness: null }, // ligne pure : la clarté propre de la teinte
+  { suffix: '', lightness: null }, // pure row: the hue's own lightness
   { suffix: 'foncé', lightness: 0.36 },
   { suffix: 'très foncé', lightness: 0.26 },
   { suffix: 'profond', lightness: 0.17 },
 ];
 
-/** Première ligne : dégradé de gris, du noir au blanc. */
+/** First row: a gradient of greys, from black to white. */
 function greyRow(): Swatch[] {
   const steps = [
     { name: 'Noir', l: 0 },
@@ -75,8 +73,8 @@ function greyRow(): Swatch[] {
 function hueRow(level: (typeof LEVELS)[number]): Swatch[] {
   return BASE_HUES.map((base) => {
     const lightness = level.lightness ?? base.lightness;
-    // Les nuances très claires ou très foncées sont désaturées : sans cela, un
-    // « jaune profond » vire au vert et un « bleu très clair » devient fluo.
+    // Very light or very dark shades are desaturated: without that, a "deep yellow" turns green and a "very light blue" becomes
+    // neon.
     const distance = Math.abs(lightness - base.lightness);
     const saturation = Math.max(0.18, base.saturation - distance * 0.35);
 
@@ -87,10 +85,10 @@ function hueRow(level: (typeof LEVELS)[number]): Swatch[] {
   });
 }
 
-/** Grille complète : 8 lignes × 10 colonnes. */
+/** The full grid: 8 rows × 10 columns. */
 export const DOCUMENT_PALETTE: readonly Swatch[][] = [greyRow(), ...LEVELS.map(hueRow)];
 
-/** Surligneurs : teintes claires uniquement, pour rester lisibles sous du texte. */
+/** Highlighters: light hues only, so they stay readable under text. */
 export const HIGHLIGHT_PALETTE: readonly Swatch[][] = [
   [
     { value: '#fff3a3', name: 'Jaune' },
@@ -108,7 +106,7 @@ export const HIGHLIGHT_PALETTE: readonly Swatch[][] = [
   ],
 ];
 
-/** Nom d'une couleur arbitraire (couleur personnalisée), pour l'`aria-label`. */
+/** Name of an arbitrary color (custom color), for the `aria-label`. */
 export function describeColor(hex: string): string {
   const known = DOCUMENT_PALETTE.flat().find(
     (swatch) => swatch.value.toLowerCase() === hex.toLowerCase(),

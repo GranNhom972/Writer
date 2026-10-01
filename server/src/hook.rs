@@ -1,77 +1,74 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Rappels vers CloudServ : déchargement périodique et fin de session.
+//! Callbacks to CloudServ: periodic hand-over and end of session.
 //!
-//! Writer n'est, pour CloudServ, qu'un éditeur **temporaire** : le document et
-//! son historique appartiennent à CloudServ, et rien ne doit subsister ici une
-//! fois la séance terminée. Ce module tient les deux étapes qui rendent ce
-//! contrat vrai.
+//! For CloudServ, Writer is only a **temporary** editor: the document and its
+//! history belong to CloudServ, and nothing should remain here once the session is
+//! over. This module holds the two steps that make that contract true.
 //!
-//! ## Ce que Writer garde, et ce qu'il rend
+//! ## What Writer keeps, and what it hands back
 //!
 //! ```text
-//!   état de travail   journal CRDT, présence, annulation, points de reprise
-//!                     ─ n'a de sens que connecté, ne sort jamais d'ici
+//!   working state    CRDT log, presence, undo, restore points
+//!                    (only meaningful while connected, never leaves this server)
 //!
-//!   partie utile      le document projeté, images incorporées
-//!                     ─ appartient à CloudServ, lui est remise régulièrement
+//!   useful part      the projected document, images embedded
+//!                    (belongs to CloudServ, handed over regularly)
 //! ```
 //!
-//! ## Le déchargement périodique
+//! ## The periodic hand-over
 //!
-//! Il existe parce qu'une séance n'avait sinon **aucune existence dans le
-//! Drive** avant sa fermeture. Un redémarrage de Writer, et tout le travail
-//! depuis l'ouverture disparaissait : le fichier sur disque n'ayant pas bougé,
-//! CloudServ rouvrait un état périmé sans que rien ne le signale.
+//! It exists because, without it, a session had **no existence in the Drive** until
+//! it was closed. If Writer restarted, all the work since opening was lost: the file
+//! on disk had not moved, so CloudServ would reopen an outdated state and nothing
+//! would tell it.
 //!
-//! `schedule_checkpoint` est appelé à chaque update. Il attend l'accalmie —
-//! projeter le document à chaque frappe serait absurde — sans jamais dépasser
-//! `checkpoint_max_secs`, faute de quoi une frappe continue ne déchargerait
-//! jamais. Ce plafond est exactement ce qu'un arrêt brutal peut coûter.
+//! `schedule_checkpoint` is called on every update. It waits for a quiet moment
+//! (projecting the document on every keystroke would be absurd) without ever
+//! exceeding `checkpoint_max_secs`, otherwise continuous typing would never hand
+//! anything over. That ceiling is exactly what a sudden shutdown can cost.
 //!
-//! Un déchargement manqué n'est pas rattrapé : le suivant emportera un état plus
-//! récent. C'est ce qui le distingue du rappel de fermeture, où l'échec se paie
-//! et où l'on insiste.
+//! A missed hand-over is not retried: the next one will carry a more recent state.
+//! That is what sets it apart from the close callback, where a failure is costly
+//! and where we insist.
 //!
-//! ## Ce qui se passe quand le dernier participant s'en va
+//! ## What happens when the last participant leaves
 //!
 //! ```text
-//!   dernier départ
+//!   last departure
 //!        │
-//!        ├─ attendre le délai de grâce           (un F5 n'est pas un départ)
-//!        ├─ le document est-il resté vide ?      (sinon : abandon silencieux)
-//!        ├─ projeter le document en JSON
-//!        ├─ y incorporer les images              (l'artefact doit être complet)
-//!        ├─ POST vers CloudServ, signé           (CloudServ écrit le fichier
-//!        │                                        et crée une version)
-//!        └─ purger — et seulement si CloudServ a confirmé
+//!        ├─ wait for the grace period            (an F5 is not a departure)
+//!        ├─ did the document stay empty?         (if so: silent abandon)
+//!        ├─ project the document to JSON
+//!        ├─ embed the images in it               (the file must be complete)
+//!        ├─ signed POST to CloudServ             (CloudServ writes the file
+//!        │                                        and creates a version)
+//!        └─ purge, and only if CloudServ confirmed
 //! ```
 //!
-//! ## Trois règles de correction
+//! ## Three rules of correctness
 //!
-//! 1. **On ne purge jamais avant confirmation.** Si CloudServ est injoignable,
-//!    les données restent en place : elles seront resauvegardées à la
-//!    réouverture. Perdre le travail de quelqu'un parce qu'un service voisin
-//!    redémarrait serait indéfendable.
-//! 2. **Un document que CloudServ ne connaît pas n'est pas purgé** (404). C'est
-//!    le cas des documents que Writer héberge pour lui-même, hors intégration.
-//! 3. **Le rappel est signé** (HMAC-SHA256 du corps, secret partagé). Sans
-//!    cela, n'importe qui pourrait annoncer à CloudServ la fin d'une session et
-//!    lui faire écrire le document de son choix.
+//! 1. **Never purge before confirmation.** If CloudServ cannot be reached, the data
+//!    stays in place: it will be saved again on reopening. Losing someone's work
+//!    because a neighboring service was restarting would be indefensible.
+//! 2. **A document CloudServ does not know is not purged** (404). That is the case
+//!    of documents Writer hosts for itself, outside the integration.
+//! 3. **The callback is signed** (HMAC-SHA256 of the body, shared secret). Without
+//!    it, anybody could tell CloudServ that a session ended and make it write the
+//!    document of their choice.
 //!
-//! ## Pourquoi un client HTTP écrit à la main
+//! ## Why a hand-written HTTP client
 //!
-//! Le serveur n'a aujourd'hui aucune dépendance de client HTTP, et ce rappel est
-//! la seule requête sortante du projet : une ligne de POST vers un service
-//! interne. Y faire entrer `reqwest` et sa pile TLS pour cela seul serait
-//! disproportionné.
+//! The server currently has no HTTP client dependency, and this callback is the
+//! only outgoing request of the project: one POST line to an internal service.
+//! Pulling in `reqwest` and its TLS stack for that alone would be out of
+//! proportion.
 //!
-//! La contrepartie est explicite : **seul `http://` est géré**. CloudServ est
-//! joint sur le réseau de la stack (`127.0.0.1:8021` par défaut). Le jour où il
-//! faudra sortir de ce périmètre, c'est ici qu'un vrai client HTTP doit entrer —
-//! et la fonction refuse déjà une adresse `https://` plutôt que de faire
-//! semblant de la traiter.
+//! The trade-off is explicit: **only `http://` is supported**. CloudServ is reached
+//! over the stack's network (`127.0.0.1:8021` by default). The day this has to leave
+//! that perimeter, a real HTTP client must come in here, and the function already
+//! refuses an `https://` address rather than pretend to handle it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -86,29 +83,28 @@ use crate::doc::DocHandle;
 use crate::state::AppState;
 use crate::store::FileStore;
 
-/// Chemin du rappel côté CloudServ.
+/// Path of the session-closed callback on the CloudServ side.
 const CALLBACK_PATH: &str = "/api/cloud/writer/session-closed";
 
-/// Chemin du déchargement périodique côté CloudServ.
+/// Path of the periodic hand-over (checkpoint) on the CloudServ side.
 const CHECKPOINT_PATH: &str = "/api/cloud/writer/session-checkpoint";
 
-/// Tentatives d'envoi, espacées par un délai qui double.
+/// Number of send attempts, separated by a delay that doubles each time.
 ///
-/// CloudServ peut être en train de redémarrer : réessayer trois fois couvre une
-/// indisponibilité de l'ordre de la demi-minute sans retenir la tâche
-/// indéfiniment.
+/// CloudServ may be restarting: trying three times covers an outage of about half
+/// a minute without holding the task forever.
 const MAX_ATTEMPTS: u32 = 3;
 const FIRST_BACKOFF: Duration = Duration::from_secs(2);
 
-/// Plafond de lecture de la réponse : le serveur ne rend qu'un petit JSON.
+/// Cap on how much of the response is read: the server only returns a small JSON.
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Programme la fermeture d'un document dont le dernier participant vient de
-/// partir. Rend immédiatement : l'attente se fait dans une tâche détachée.
+/// Schedules the closing of a document whose last participant has just left.
+/// Returns immediately: the waiting happens in a detached task.
 pub fn schedule_close(state: AppState, handle: Arc<DocHandle>, doc_id: Uuid) {
-    // Sans adresse de CloudServ, le serveur tourne seul : il n'a personne à
-    // prévenir, et surtout rien à purger.
+    // Without a CloudServ address the server runs on its own: there is nobody to
+    // notify and, above all, nothing to purge.
     if state.cfg.cloudserv_url.is_none() {
         return;
     }
@@ -118,9 +114,8 @@ pub fn schedule_close(state: AppState, handle: Arc<DocHandle>, doc_id: Uuid) {
     tokio::spawn(async move {
         tokio::time::sleep(grace).await;
 
-        // Quelqu'un est revenu — ou est passé et reparti, auquel cas une autre
-        // tâche de fermeture, plus récente, fait foi. Dans les deux cas celle-ci
-        // n'a plus rien à faire.
+        // Someone came back, or came and left again (in which case another, more recent
+        // close task is the one that counts). Either way this task has nothing left to do.
         if handle.active_clients() > 0 || handle.occupancy() != temoin {
             tracing::debug!(%doc_id, "fermeture annulée : le document a été rouvert");
             return;
@@ -130,23 +125,23 @@ pub fn schedule_close(state: AppState, handle: Arc<DocHandle>, doc_id: Uuid) {
     });
 }
 
-/// Programme le déchargement de la partie utile vers CloudServ.
+/// Schedules the hand-over of the useful part to CloudServ.
 ///
-/// Appelé à **chaque** update reçue : le travail utile est de n'en retenir
-/// qu'une. Rend immédiatement, l'attente se fait dans une tâche détachée.
+/// Called on **every** update received: the useful work is to keep only one of
+/// them. Returns immediately, the waiting happens in a detached task.
 ///
 /// ```text
-///   frappe ──▶ une tâche veille-t-elle déjà ?  oui ─▶ rien à faire
-///                              │ non
-///                              ▼
-///              attendre l'accalmie, sans dépasser le plafond
-///                              │
-///                              ▼
-///              projeter · incorporer les images · POST signé
+///   keystroke ──▶ is a task already waiting?   yes ─▶ nothing to do
+///                               │ no
+///                               ▼
+///               wait for a quiet moment, without exceeding the ceiling
+///                               │
+///                               ▼
+///               project · embed images · signed POST
 /// ```
 pub fn schedule_checkpoint(state: AppState, handle: Arc<DocHandle>, doc_id: Uuid) {
-    // Sans adresse de CloudServ, le serveur tourne seul : personne à qui
-    // remettre la partie utile, et le document reste ici de toute façon.
+    // Without a CloudServ address the server runs on its own: nobody to hand the
+    // useful part to, and the document stays here anyway.
     if state.cfg.cloudserv_url.is_none() {
         return;
     }
@@ -160,9 +155,9 @@ pub fn schedule_checkpoint(state: AppState, handle: Arc<DocHandle>, doc_id: Uuid
     tokio::spawn(async move {
         let debut = tokio::time::Instant::now();
 
-        // Attendre que la frappe s'arrête — mais pas indéfiniment. Sur un
-        // document écrit sans relâche, l'accalmie ne vient jamais : c'est
-        // précisément le cas où ne pas décharger coûterait le plus cher.
+        // Wait for typing to stop, but not forever. On a document written without a
+        // break the quiet moment never comes, and that is precisely the case where not
+        // handing over would cost the most.
         loop {
             let avant = handle.revision();
             tokio::time::sleep(quiet).await;
@@ -176,17 +171,17 @@ pub fn schedule_checkpoint(state: AppState, handle: Arc<DocHandle>, doc_id: Uuid
         }
 
         checkpoint_document(&state, &handle, doc_id).await;
-        // Rendue seulement maintenant : pendant l'envoi, une frappe de plus n'a
-        // pas à programmer une seconde tâche qui doublerait celle-ci.
+        // Released only now: while sending, one more keystroke must not schedule a second
+        // task that would duplicate this one.
         handle.release_checkpoint();
     });
 }
 
-/// Remet à CloudServ l'état courant du document, sans rien purger.
+/// Hands the current state of the document to CloudServ, without purging anything.
 ///
-/// Un échec ne coûte rien de plus qu'un déchargement manqué : les données
-/// restent ici, et la tentative suivante emportera un état plus récent. On ne
-/// réessaie donc pas — insister ferait doubler la prochaine accalmie.
+/// A failure costs nothing more than a missed hand-over: the data stays here, and
+/// the next attempt will carry a more recent state. So we do not retry: insisting
+/// would only delay the next quiet moment.
 async fn checkpoint_document(state: &AppState, handle: &Arc<DocHandle>, doc_id: Uuid) {
     let Some(base_url) = state.cfg.cloudserv_url.clone() else {
         return;
@@ -210,9 +205,9 @@ async fn checkpoint_document(state: &AppState, handle: &Arc<DocHandle>, doc_id: 
             tracing::info!(%doc_id, revision, "partie utile déchargée dans CloudServ");
         }
         Ok(404) => {
-            // Le document n'appartient pas à CloudServ — Writer l'héberge pour
-            // lui-même. Rien à décharger, et surtout rien à signaler comme
-            // panne : ce cas est normal hors intégration.
+            // The document does not belong to CloudServ: Writer hosts it for itself. Nothing
+            // to hand over and, above all, nothing to report as a fault: this case is normal
+            // outside the integration.
             tracing::debug!(%doc_id, "document inconnu de CloudServ, déchargement sans objet");
         }
         Ok(status) => {
@@ -224,12 +219,12 @@ async fn checkpoint_document(state: &AppState, handle: &Arc<DocHandle>, doc_id: 
     }
 }
 
-/// Projette le document et y incorpore les images. Rend `None` si la projection
-/// a échoué — auquel cas rien ne doit être envoyé.
+/// Projects the document and embeds the images in it. Returns `None` if the
+/// projection failed, in which case nothing must be sent.
 ///
-/// Les images vivent dans le dépôt du serveur, désignées par une adresse
-/// relative. Remettre le document sans elles livrerait à CloudServ un fichier
-/// truffé de liens morts dès la purge.
+/// Images live in the server's store and are referred to by a relative address.
+/// Handing the document over without them would give CloudServ a file full of dead
+/// links as soon as the purge happens.
 async fn projeter(state: &AppState, handle: &Arc<DocHandle>, doc_id: Uuid) -> Option<(u64, Value)> {
     let (revision, document) = handle.snapshot();
     let store = state.store.clone();
@@ -254,14 +249,14 @@ fn secret_partage(state: &AppState) -> Vec<u8> {
         .into_bytes()
 }
 
-/// Sauvegarde dans CloudServ puis purge. Toute erreur laisse les données en place.
+/// Saves to CloudServ, then purges. Any error leaves the data in place.
 async fn close_document(state: &AppState, handle: &Arc<DocHandle>, doc_id: Uuid) {
     let Some(base_url) = state.cfg.cloudserv_url.clone() else {
         return;
     };
 
-    // Sans projection, rien à sauvegarder — et surtout rien à purger : les
-    // données restent en place pour la prochaine tentative.
+    // Without a projection there is nothing to save, and above all nothing to purge:
+    // the data stays in place for the next attempt.
     let Some((revision, document)) = projeter(state, handle, doc_id).await else {
         tracing::error!(%doc_id, "projection impossible, sauvegarde abandonnée");
         return;
@@ -286,8 +281,8 @@ async fn close_document(state: &AppState, handle: &Arc<DocHandle>, doc_id: Uuid)
                 return;
             }
             Ok(404) => {
-                // CloudServ ne connaît pas ce document : il ne lui appartient
-                // pas. Le purger effacerait le travail de quelqu'un d'autre.
+                // CloudServ does not know this document: it does not belong to it. Purging it
+                // would erase somebody else's work.
                 tracing::info!(%doc_id, "document inconnu de CloudServ, conservé tel quel");
                 return;
             }
@@ -304,15 +299,15 @@ async fn close_document(state: &AppState, handle: &Arc<DocHandle>, doc_id: Uuid)
         }
     }
 
-    // Échec définitif : on garde tout. Le document sera resauvegardé à la
-    // prochaine ouverture, quand CloudServ le redemandera.
+    // Final failure: keep everything. The document will be saved again the next time
+    // it is opened, when CloudServ asks for it.
     tracing::error!(
         %doc_id,
         "sauvegarde impossible après {MAX_ATTEMPTS} tentatives — données conservées pour reprise"
     );
 }
 
-/// Efface le document du disque et de la mémoire.
+/// Erases the document from disk and from memory.
 pub async fn purge(state: &AppState, doc_id: Uuid) {
     let store = state.store.clone();
     let cle = doc_id.to_string();
@@ -326,17 +321,17 @@ pub async fn purge(state: &AppState, doc_id: Uuid) {
     }
 }
 
-// ── Incorporation des images ─────────────────────────────────────────────────
+// ── Embedding images ─────────────────────────────────────────────────────────
 
-/// Préfixe des adresses d'images servies par ce serveur.
+/// Prefix of the image addresses served by this server.
 fn asset_prefix(doc_id: &str) -> String {
     format!("/api/v1/documents/{doc_id}/assets/")
 }
 
-/// Remplace chaque adresse d'image locale par une URI `data:` autonome.
+/// Replaces every local image address with a self-contained `data:` URI.
 ///
-/// Le document sauvegardé dans CloudServ doit se suffire à lui-même : c'est un
-/// fichier de l'utilisateur, pas une vue sur un serveur qui, lui, va disparaître.
+/// The document saved in CloudServ must be complete by itself: it is a user's file,
+/// not a view onto a server that is about to disappear.
 pub fn inline_assets(store: &FileStore, doc_id: &str, mut document: Value) -> Value {
     let prefixe = asset_prefix(doc_id);
     if let Some(blocks) = document.get_mut("blocks").and_then(Value::as_array_mut) {
@@ -354,9 +349,9 @@ fn inline_block(store: &FileStore, doc_id: &str, prefixe: &str, bloc: &mut Value
         }
     }
 
-    // Un tableau porte ses propres blocs, jusqu'à trois niveaux plus bas :
-    // rows → cells → blocks. Une image dans une cellule est une image comme
-    // une autre, et l'oublier ne se verrait qu'après la purge.
+    // A table carries its own blocks, up to three levels down: rows → cells →
+    // blocks. An image in a cell is an image like any other, and forgetting it would
+    // only show after the purge.
     if let Some(rows) = bloc.get_mut("rows").and_then(Value::as_array_mut) {
         for row in rows.iter_mut() {
             let Some(cells) = row.get_mut("cells").and_then(Value::as_array_mut) else {
@@ -378,13 +373,14 @@ fn inline_run(store: &FileStore, doc_id: &str, prefixe: &str, run: &mut Value) {
     let Some(src) = run.get("imageSrc").and_then(Value::as_str) else {
         return;
     };
-    // Une image déjà en `data:` ou pointant ailleurs n'a rien à faire ici.
+    // An image that is already a `data:` URL or points elsewhere has nothing to do
+    // here.
     let Some(nom) = src.strip_prefix(prefixe) else {
         return;
     };
 
-    // Le nom passe par la même validation qu'à la lecture : c'est la seule
-    // frontière entre un segment d'adresse et un chemin de fichier.
+    // The name goes through the same validation as when reading: it is the only
+    // boundary between an address segment and a file path.
     let Some((_, kind)) = crate::assets::parse_asset_name(nom) else {
         tracing::warn!(%doc_id, nom, "adresse d'image ignorée : nom non conforme");
         return;
@@ -400,17 +396,18 @@ fn inline_run(store: &FileStore, doc_id: &str, prefixe: &str, run: &mut Value) {
             run["imageSrc"] = Value::String(data_uri);
         }
         Err(e) => {
-            // L'image manque : on laisse l'adresse telle quelle plutôt que de
-            // la vider. Un lien mort se diagnostique, un run amputé ne se voit
-            // pas — et le reste du document doit être sauvegardé quoi qu'il arrive.
+            // The image is missing: leave the address as it is rather than emptying it. A dead
+            // link can be diagnosed, a truncated run cannot be seen, and the rest of the
+            // document must be saved whatever happens.
             tracing::warn!(%doc_id, nom, error = %e, "image introuvable, non incorporée");
         }
     }
 }
 
-// ── Client HTTP minimal ──────────────────────────────────────────────────────
+// ── Minimal HTTP client ──────────────────────────────────────────────────────
 
-/// Adresse décomposée : autorité à joindre, hôte annoncé, préfixe de chemin.
+/// A decomposed address: the authority to connect to, the announced host and the
+/// path prefix.
 struct Cible {
     adresse: String,
     host: String,
@@ -446,7 +443,7 @@ fn parse_base_url(base: &str) -> Result<Cible, String> {
     })
 }
 
-/// POST d'un corps JSON signé. Rend le code de statut HTTP.
+/// POSTs a signed JSON body. Returns the HTTP status code.
 async fn post_json(base: &str, path: &str, body: &str, secret: &[u8]) -> Result<u16, String> {
     let cible = parse_base_url(base)?;
     let chemin = format!("{}{}", cible.prefixe, path);
@@ -474,8 +471,8 @@ async fn post_json(base: &str, path: &str, body: &str, secret: &[u8]) -> Result<
             .map_err(|e| format!("envoi: {e}"))?;
         flux.flush().await.map_err(|e| format!("envoi: {e}"))?;
 
-        // `Connection: close` : le serveur ferme, la lecture s'arrête d'elle-même.
-        // Le plafond protège d'une réponse qui ne finirait pas.
+        // `Connection: close`: the server closes, so reading stops by itself. The cap
+        // protects against a response that would never end.
         let mut reponse = Vec::new();
         let mut tampon = [0u8; 8192];
         loop {
@@ -501,7 +498,7 @@ async fn post_json(base: &str, path: &str, body: &str, secret: &[u8]) -> Result<
     parse_status(&reponse)
 }
 
-/// Extrait le code de statut de la ligne de réponse : `HTTP/1.1 200 OK`.
+/// Extracts the status code from the response line: `HTTP/1.1 200 OK`.
 fn parse_status(reponse: &[u8]) -> Result<u16, String> {
     let ligne = reponse
         .split(|o| *o == b'\n')
@@ -561,8 +558,8 @@ mod tests {
 
     #[test]
     fn une_image_dans_une_cellule_de_tableau_est_incorporee() {
-        // Le cas qu'on oublie : les blocs d'une cellule ne sont pas dans
-        // `blocks` mais trois niveaux plus bas.
+        // The case that gets forgotten: the blocks of a cell are not in `blocks` but
+        // three levels down.
         let (store, doc_id, dir) = store_temporaire("tableau");
         let gif = b"GIF89a-donnees".to_vec();
         let nom = format!("{}.gif", Uuid::new_v4());
@@ -602,8 +599,8 @@ mod tests {
                 "runs": [
                     { "text": "a", "imageSrc": "data:image/png;base64,AAAA" },
                     { "text": "b", "imageSrc": "https://exemple.test/photo.png" },
-                    // Adresse d'un AUTRE document : la purge de celui-ci ne la
-                    // concerne pas, et la lire serait une fuite entre documents.
+                    // The address of ANOTHER document: purging this one is none of its business, and
+                    // reading it would be a leak between documents.
                     { "text": "c", "imageSrc": format!("/api/v1/documents/{}/assets/x.png", Uuid::now_v7()) },
                 ],
             }],
@@ -658,8 +655,8 @@ mod tests {
         assert_eq!(cible.host, "127.0.0.1:8021");
         assert_eq!(cible.prefixe, "");
 
-        // Sans port : le port HTTP par défaut, mais l'en-tête `Host` reste
-        // celui qu'attend le serveur virtuel.
+        // No port: the default HTTP port, but the `Host` header stays the one the virtual
+        // host expects.
         let sans_port = parse_base_url("http://cloudserv.interne").unwrap();
         assert_eq!(sans_port.adresse, "cloudserv.interne:80");
         assert_eq!(sans_port.host, "cloudserv.interne");
@@ -670,7 +667,7 @@ mod tests {
 
     #[test]
     fn https_est_refuse_explicitement() {
-        // Mieux vaut une erreur nette qu'une requête en clair vers un port TLS.
+        // A clean error is better than a plain-text request to a TLS port.
         assert!(parse_base_url("https://cloudserv.interne").is_err());
         assert!(parse_base_url("cloudserv.interne").is_err());
     }

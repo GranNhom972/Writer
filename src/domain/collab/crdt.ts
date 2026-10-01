@@ -1,48 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Projection du modèle Writer dans un document répliqué Yjs.
+ * Projection of the Writer model into a replicated Yjs document.
  *
- * ## Pourquoi un CRDT, et plus un diff de blocs
+ * ## Why a CRDT, and no longer a block diff
  *
- * La version précédente comparait deux `WriterDocumentState` et en déduisait des
- * opérations de bloc (`replace-block`, `insert-block`…), qu'un serveur
- * séquenceur ordonnait. Le modèle converge — mais à la **granularité du bloc** :
- * deux personnes qui écrivent dans le même paragraphe produisent chacune un
- * `replace-block`, et le second efface le premier. Sur un paragraphe, c'est une
- * phrase perdue sans le moindre avertissement ; c'est exactement ce que l'on
- * observait.
+ * The previous version compared two `WriterDocumentState`s and derived block operations from them (`replace-block`,
+ * `insert-block`...), which a sequencing server put in order. The model converges, but at **block granularity**: two people
+ * writing in the same paragraph each produce a `replace-block`, and the second erases the first. On a paragraph, that is a
+ * sentence lost without any warning, which is exactly what was observed.
  *
- * L'application Write n'a pas ce défaut parce qu'elle ne compare rien : son
- * document **est** un CRDT (Yjs), et deux insertions concurrentes dans la même
- * phrase fusionnent caractère par caractère. C'est cette couche-là qui est
- * reprise ici, sans ProseMirror — le moteur de texte reste le nôtre.
+ * The Write application does not have this flaw because it compares nothing: its document **is** a CRDT (Yjs), and two
+ * concurrent insertions in the same sentence merge character by character. This is the layer reused here, without ProseMirror:
+ * the text engine stays ours.
  *
- * ## La correspondance
+ * ## The mapping
  *
  * ```
- *  writer:meta    Y.Map      titre, auteur, dates            (registre par clé)
- *  writer:setup   Y.Map      pageSetup, defaults, furniture  (valeurs entières)
- *  writer:blocks  Y.Array    un Y.Map par bloc de premier niveau
- *      ├─ id, type          clés simples
- *      ├─ text   Y.Text     le texte du paragraphe ; le **formatage de
- *      │                    caractère est porté par les attributs de Y.Text**,
- *      │                    dont la représentation en delta est exactement une
- *      │                    liste de `TextRun` (`SwpHints` aplati)
- *      ├─ attrs  Y.Map      attributs de paragraphe (alignement, liste, retraits)
- *      └─ rows   Y.Array    tableaux : lignes → cellules → blocs, récursivement
+ *  writer:meta    Y.Map      title, author, dates            (register per key)
+ *  writer:setup   Y.Map      pageSetup, defaults, furniture  (whole values)
+ *  writer:blocks  Y.Array    one Y.Map per top-level block
+ *      ├─ id, type          plain keys
+ *      ├─ text   Y.Text     the paragraph's text; the **character formatting is
+ *      │                    carried by the Y.Text attributes**, whose delta
+ *      │                    representation is exactly a list of `TextRun`
+ *      │                    (a flattened `SwpHints`)
+ *      ├─ attrs  Y.Map      paragraph attributes (alignment, list, indents)
+ *      └─ rows   Y.Array    tables: rows → cells → blocks, recursively
  * ```
  *
- * `Y.Text` et `TextRun[]` disent la même chose : une suite de plages de texte
- * homogènes. La conversion est donc une bijection, et non une approximation —
- * c'est ce qui permet de garder le moteur de rendu intact.
+ * `Y.Text` and `TextRun[]` say the same thing: a sequence of homogeneous text ranges. The conversion is therefore a bijection
+ * and not an approximation, which is what lets the rendering engine stay untouched.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
 import * as Y from 'yjs';
@@ -72,18 +67,17 @@ import { DEFAULT_DEFAULTS } from '../document/document';
 import { readFurniture, type PageFurniture } from '../document/pageFurniture';
 import { DEFAULT_TOC_MAX_LEVEL, DEFAULT_TOC_TITLE } from '../document/tox';
 
-/* ------------------------------------------------------------------ schéma */
+/* ------------------------------------------------------------------ schema */
 
 /**
- * Noms des racines partagées. Le serveur les connaît aussi
- * (`server/src/content.rs`) : il amorce un document et sait le relire en JSON.
- * Les changer d'un seul côté rendrait tous les partages existants illisibles.
+ * Names of the shared roots. The server knows them too (`server/src/content.rs`): it seeds a document and can read it back as
+ * JSON. Changing them on one side only would make every existing share unreadable.
  */
 export const BLOCKS_ROOT = 'writer:blocks';
 export const META_ROOT = 'writer:meta';
 export const SETUP_ROOT = 'writer:setup';
 
-/** Attributs de paragraphe répliqués, un par clé du `Y.Map` `attrs`. */
+/** Replicated paragraph attributes, one per key of the `attrs` `Y.Map`. */
 const PARAGRAPH_ATTRS = [
   'headingLevel',
   'styleName',
@@ -109,13 +103,11 @@ const PARAGRAPH_ATTRS = [
 const TABLE_ATTRS = ['pageBreakBefore', 'borderColor', 'borderWidthPt'] as const;
 
 /**
- * Attributs d'une table des matières.
+ * Attributes of a table of contents.
  *
- * Un `TocNode` n'a **ni texte ni lignes** : il ne porte que sa définition, son
- * contenu étant régénéré à la pagination (cf. document/tox.ts). C'est ce qui le
- * rend trivial à répliquer — deux pairs qui modifient la profondeur d'un
- * sommaire ne peuvent pas produire de conflit de texte, seulement une dernière
- * valeur écrite qui gagne, ce qui est le bon comportement pour un réglage.
+ * A `TocNode` has **neither text nor lines**: it only carries its definition, its content being regenerated at pagination time
+ * (see document/tox.ts). That is what makes it trivial to replicate: two peers who change the depth of a table of contents
+ * cannot produce a text conflict, only a last written value that wins, which is the right behavior for a setting.
  */
 const TOC_ATTRS = ['title', 'maxLevel', 'showPageNumbers', 'useDotLeader', 'pageBreakBefore'] as const;
 
@@ -129,23 +121,22 @@ const CELL_ATTRS = [
 ] as const;
 
 /**
- * Identifiant du paragraphe de secours d'un document vide.
+ * Id of the fallback paragraph of an empty document.
  *
- * Un document sans aucun bloc n'est pas représentable : le curseur n'aurait nulle
- * part où se poser. La valeur est **fixe** et non tirée au hasard, pour que deux
- * pairs qui ouvrent le même document vide ne fabriquent pas deux paragraphes
- * différents qu'il faudrait ensuite réconcilier.
+ * A document with no block at all cannot be represented: the cursor would have nowhere to land. The value is **fixed** and not
+ * drawn at random, so that two peers opening the same empty document do not make up two different paragraphs that would then
+ * have to be reconciled.
  */
 const EMPTY_BLOCK_ID = 'p-vide';
 
-/* ------------------------------------------------- runs ⇄ delta de Y.Text */
+/* ------------------------------------------------- runs ⇄ Y.Text delta */
 
 interface DeltaOp {
   insert?: string | object;
   attributes?: Record<string, unknown> | undefined;
 }
 
-/** Attributs de `Y.Text` correspondant à un run, ou `undefined` s'il n'en a pas. */
+/** `Y.Text` attributes that correspond to a run, or `undefined` if it has none. */
 function attributesOf(run: TextRun): Record<string, unknown> | undefined {
   const formatting = runFormatting(run);
   const out: Record<string, unknown> = {};
@@ -161,11 +152,10 @@ function attributesOf(run: TextRun): Record<string, unknown> | undefined {
 }
 
 /**
- * Ne retient que les clés de formatage connues.
+ * Keeps only the known formatting keys.
  *
- * Les attributs viennent du réseau : un pair d'une version ultérieure peut en
- * poser que ce moteur ne sait pas rendre. Les recopier tels quels dans un run
- * casserait `sameFormatting`, donc la fusion des plages voisines.
+ * The attributes come from the network: a peer of a later version can set some that this engine does not know how to render.
+ * Copying them as they are into a run would break `sameFormatting`, so the merging of neighboring ranges.
  */
 function formattingFrom(attributes: Record<string, unknown> | undefined): RunFormatting {
   const out: Record<string, unknown> = {};
@@ -178,19 +168,18 @@ function formattingFrom(attributes: Record<string, unknown> | undefined): RunFor
   return out as RunFormatting;
 }
 
-/** Delta Yjs → runs Writer, invariant de fusion rétabli (`MergePortions`). */
+/** Yjs delta → Writer runs, merge invariant restored (`MergePortions`). */
 export function deltaToRuns(delta: readonly DeltaOp[]): TextRun[] {
   const runs: TextRun[] = [];
   for (const op of delta) {
-    // Les insertions non textuelles (objets embarqués) n'existent pas dans ce
-    // schéma : une image est un attribut de run, pas un nœud à part.
+    // Non-text insertions (embedded objects) do not exist in this schema: an image is a run attribute, not a separate node.
     if (typeof op.insert !== 'string' || op.insert.length === 0) continue;
     runs.push(makeRun(op.insert, formattingFrom(op.attributes)));
   }
   return normalizeRuns(runs);
 }
 
-/** Runs Writer → delta Yjs. Les runs vides ne sont pas représentables. */
+/** Writer runs → Yjs delta. Empty runs cannot be represented. */
 export function runsToDelta(runs: readonly TextRun[]): DeltaOp[] {
   const delta: DeltaOp[] = [];
   for (const run of runs) {
@@ -229,15 +218,13 @@ const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xd
 const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff;
 
 /**
- * Ce qui a changé entre deux chaînes, exprimé comme **une** plage remplacée.
+ * What changed between two strings, expressed as **one** replaced range.
  *
- * La frappe, la suppression et le collage produisent tous exactement cela ; en
- * déduire une insertion et une suppression contiguës plutôt que de réécrire le
- * paragraphe entier est ce qui permet à deux personnes d'écrire dans la même
- * phrase sans s'effacer.
+ * Typing, deletion and pasting all produce exactly that; deriving a contiguous insertion and deletion from it, rather than
+ * rewriting the whole paragraph, is what lets two people write in the same sentence without erasing each other.
  *
- * Les bornes ne tombent jamais entre les deux moitiés d'une paire de substituts :
- * couper un emoji laisserait un demi-caractère dans le document répliqué.
+ * The bounds never fall between the two halves of a surrogate pair: cutting an emoji would leave half a character in the
+ * replicated document.
  */
 export function textChange(
   before: string,
@@ -266,7 +253,7 @@ export function textChange(
   };
 }
 
-/** Formatage à donner au texte inséré : celui de la plage qui l'accueille. */
+/** Formatting to give to the inserted text: that of the range that receives it. */
 function formattingAtIndex(runs: readonly TextRun[], index: number): Record<string, unknown> {
   let consomme = 0;
   for (const run of runs) {
@@ -279,7 +266,7 @@ function formattingAtIndex(runs: readonly TextRun[], index: number): Record<stri
   return {};
 }
 
-/** Écart d'attributs à appliquer : `null` retire une clé, comme le veut `Y.Text`. */
+/** Attribute difference to apply: `null` removes a key, as `Y.Text` requires. */
 function attributePatch(
   courant: Record<string, unknown>,
   cible: Record<string, unknown>,
@@ -298,11 +285,10 @@ function attributePatch(
 }
 
 /**
- * Aligne un `Y.Text` sur une liste de runs, en ne touchant qu'au nécessaire.
+ * Aligns a `Y.Text` on a list of runs, touching only what is necessary.
  *
- * Deux passes, et l'ordre compte : le texte d'abord, le formatage ensuite. Une
- * plage de formatage s'exprime en positions, et les poser avant de déplacer le
- * texte les appliquerait à côté.
+ * Two passes, and the order matters: the text first, the formatting afterwards. A formatting range is expressed in positions,
+ * and setting them before moving the text would apply them in the wrong place.
  */
 export function syncText(ytext: Y.Text, runs: readonly TextRun[]): void {
   const avant = ytext.toDelta() as DeltaOp[];
@@ -315,8 +301,7 @@ export function syncText(ytext: Y.Text, runs: readonly TextRun[]): void {
     }
   }
 
-  // Le formatage se compare sur l'état **d'après** l'édition : les positions
-  // d'avant ne désignent plus les mêmes caractères.
+  // Formatting is compared on the state **after** the edit: the positions from before no longer designate the same characters.
   const courant = segmentsOf(ytext.toDelta() as DeltaOp[]);
   let position = 0;
   for (const run of runs) {
@@ -336,14 +321,13 @@ export function syncText(ytext: Y.Text, runs: readonly TextRun[]): void {
   }
 }
 
-/* ------------------------------------------------------- lecture du document */
+/* ------------------------------------------------------- reading the document */
 
 /**
- * Miroir en lecture du document répliqué.
+ * Reading mirror of the replicated document.
  *
- * Il tient un cache par bloc : une frappe distante dans un paragraphe ne doit
- * pas reconstruire les quarante autres, ni casser leur identité d'objet — le
- * moteur de mise en page s'en sert pour ne repaginer que ce qui a bougé.
+ * It keeps a cache per block: a remote keystroke in one paragraph must not rebuild the forty others, nor break their object
+ * identity, since the layout engine uses it to re-paginate only what moved.
  */
 export class DocumentMirror {
   private cache = new WeakMap<Y.Map<unknown>, DocumentBlock>();
@@ -362,17 +346,16 @@ export class DocumentMirror {
     return this.ydoc.getMap<unknown>(SETUP_ROOT);
   }
 
-  /** Le document répliqué a-t-il déjà un contenu ? */
+  /** Does the replicated document already have content? */
   get seeded(): boolean {
     return this.blocks.length > 0;
   }
 
   /**
-   * Oublie ce qu'un événement a rendu faux.
+   * Forgets what an event has made wrong.
    *
-   * On remonte la chaîne des parents plutôt que d'interpréter `event.path` :
-   * l'ascendance mène au `Y.Map` du bloc quel que soit son enfouissement — dans
-   * une cellule d'un tableau, le chemin fait cinq niveaux.
+   * We climb the chain of parents rather than interpret `event.path`: the ancestry leads to the block's `Y.Map` however deeply it
+   * is buried; in a table cell the path is five levels long.
    */
   invalidate(events: readonly Y.YEvent<Y.AbstractType<unknown>>[]): void {
     for (const event of events) {
@@ -384,9 +367,9 @@ export class DocumentMirror {
     }
   }
 
-  /** Vide entièrement le cache — après un `snapshot` ou un rattrapage massif. */
+  /** Empties the cache entirely, after a `snapshot` or a massive catch-up. */
   reset(): void {
-    // Un `WeakMap` ne se vide pas : on en prend un neuf.
+    // A `WeakMap` cannot be emptied: we take a new one.
     this.cache = new WeakMap();
   }
 
@@ -410,8 +393,7 @@ export class DocumentMirror {
       pageSetup: (asObject(setup.get('pageSetup')) as PageSetup | null) ?? { ...A4_PORTRAIT },
       defaults:
         (asObject(setup.get('defaults')) as DocumentDefaults | null) ?? { ...DEFAULT_DEFAULTS },
-      // Un document vide n'est pas représentable : le curseur n'aurait nulle
-      // part où se poser.
+      // An empty document cannot be represented: the cursor would have nowhere to land.
       blocks: blocks.length > 0 ? blocks : [emptyParagraph()],
     };
 
@@ -528,11 +510,10 @@ function asObject(value: unknown): Record<string, unknown> | null {
 }
 
 /**
- * Recopie les attributs connus d'un `Y.Map` sur un nœud.
+ * Copies the known attributes of a `Y.Map` onto a node.
  *
- * Les clés inconnues sont ignorées : elles viennent du réseau, et une version
- * ultérieure du modèle ne doit pas pouvoir injecter n'importe quoi dans un nœud
- * que le moteur croit typé.
+ * Unknown keys are ignored: they come from the network, and a later version of the model must not be able to inject anything into
+ * a node that the engine believes is typed.
  */
 function assignAttrs(
   cible: object,
@@ -547,15 +528,13 @@ function assignAttrs(
   }
 }
 
-/* ------------------------------------------------------ écriture du document */
+/* ------------------------------------------------------ writing the document */
 
 /**
- * Aligne le document répliqué sur un état local, en ne touchant qu'au nécessaire.
+ * Aligns the replicated document on a local state, touching only what is necessary.
  *
- * Ce n'est **pas** un remplacement : les paragraphes inchangés ne sont pas
- * réécrits, et un paragraphe modifié ne l'est qu'à l'endroit de la modification.
- * C'est cette économie qui fait converger deux frappes concurrentes au lieu de
- * les faire s'écraser.
+ * This is **not** a replacement: unchanged paragraphs are not rewritten, and a modified paragraph is only rewritten at the spot of
+ * the change. This economy is what makes two concurrent keystrokes converge instead of overwriting each other.
  */
 export function reconcile(ydoc: Y.Doc, next: WriterDocumentState, origin: unknown): void {
   ydoc.transact(() => {
@@ -602,15 +581,13 @@ function reconcileBlocks(
 ): void {
   const attendus = new Set(next.map((bloc) => bloc.id));
 
-  // 1. Ce qui a disparu s'en va d'abord, de la fin vers le début : supprimer en
-  //    remontant laisse les index de gauche valides.
+  // 1. What has disappeared goes first, from the end to the start: deleting backwards leaves the indices on the left valid.
   for (let i = yblocks.length - 1; i >= 0; i -= 1) {
     const id = idOf(yblocks.get(i));
     if (id === null || !attendus.has(id)) yblocks.delete(i, 1);
   }
 
-  // 2. Alignement position par position. Le cas courant — rien n'a bougé —
-  //    ne coûte qu'une comparaison d'identifiant par bloc.
+  // 2. Alignment position by position. The usual case, where nothing moved, only costs one id comparison per block.
   for (let i = 0; i < next.length; i += 1) {
     const cible = next[i]!;
     const courant = i < yblocks.length ? yblocks.get(i) : undefined;
@@ -620,27 +597,25 @@ function reconcileBlocks(
       continue;
     }
 
-    // Le bloc existe plus loin : il a été déplacé. Un `Y.Array` ne sait pas
-    // déplacer un élément — on le retire et on le repose. Le déplacement reste
-    // rare (glisser-déposer, opérations de tableau), contrairement à la frappe.
+    // The block exists further on: it was moved. A `Y.Array` does not know how to move an element, so we remove it and put it back.
+    // Moving remains rare (drag and drop, table operations), unlike typing.
     const ailleurs = indexOfId(yblocks, cible.id, i);
     if (ailleurs >= 0) yblocks.delete(ailleurs, 1);
     yblocks.insert(i, [buildBlock(cible)]);
   }
 
-  // 3. La queue : ce qu'un pair a inséré au-delà de ce que l'on connaît.
+  // 3. The tail: what a peer inserted beyond what we know.
   if (yblocks.length > next.length) {
     yblocks.delete(next.length, yblocks.length - next.length);
   }
 }
 
 /**
- * Un paragraphe ne devient pas un tableau : changer de nature, c'est renaître.
+ * A paragraph does not become a table: changing nature means being born again.
  *
- * La comparaison se fait sur la **famille** du bloc — texte, tableau, sommaire —
- * et non sur son `type` exact : basculer `paragraph` en `heading` doit se
- * réconcilier sur place, sans détruire le `Y.Text` et donc l'historique
- * collaboratif du paragraphe.
+ * The comparison is made on the block's **family** (text, table, table of contents) and not on its exact `type`: switching
+ * `paragraph` to `heading` must reconcile in place, without destroying the `Y.Text` and therefore the collaborative history of the
+ * paragraph.
  */
 function sameKind(ybloc: Y.Map<unknown>, bloc: DocumentBlock): boolean {
   return familyOf(asString(ybloc.get('type')) ?? '') === familyOf(bloc.type);
@@ -664,8 +639,8 @@ function reconcileBlock(ybloc: Y.Map<unknown>, bloc: DocumentBlock): void {
     return;
   }
 
-  // `paragraph` ⇄ `heading` : un titre est un paragraphe avec un niveau, pas un
-  // autre nœud. Basculer l'un en l'autre ne doit donc rien reconstruire.
+  // `paragraph` ⇄ `heading`: a heading is a paragraph with a level, not another node. Switching one to the other must therefore
+  // rebuild nothing.
   if (ybloc.get('type') !== bloc.type) ybloc.set('type', bloc.type);
 
   const ytext = ybloc.get('text');
@@ -804,8 +779,7 @@ export function buildBlock(bloc: DocumentBlock): Y.Map<unknown> {
 
   const ytext = new Y.Text();
   ybloc.set('text', ytext);
-  // `applyDelta` plutôt qu'un `insert` par run : une seule transformation, donc
-  // un seul élément CRDT par plage au lieu d'un par appel.
+  // `applyDelta` rather than one `insert` per run: a single transformation, so one CRDT item per range instead of one per call.
   const delta = runsToDelta(bloc.runs);
   if (delta.length > 0) ytext.applyDelta(delta);
   ybloc.set('attrs', buildAttrs(bloc as unknown as Record<string, unknown>, PARAGRAPH_ATTRS));
@@ -832,15 +806,13 @@ function buildCell(cell: TableCellNode): Y.Map<unknown> {
   return ycell;
 }
 
-/* ------------------------------------------------------------------ amorçage */
+/* ------------------------------------------------------------------ seeding */
 
 /**
- * Installe un document dans un `Y.Doc` **vide**.
+ * Installs a document in an **empty** `Y.Doc`.
  *
- * Réservé à l'ouverture d'un partage : celui qui partage y dépose ce qu'il a
- * sous les yeux. Sur un document déjà amorcé, `reconcile` est la bonne porte —
- * amorcer deux fois dupliquerait tout le contenu, un CRDT ne remplaçant jamais,
- * il ajoute.
+ * Reserved for opening a share: the person sharing puts in what they have in front of them. On an already seeded document,
+ * `reconcile` is the right door: seeding twice would duplicate all the content, since a CRDT never replaces, it adds.
  */
 export function seed(ydoc: Y.Doc, document: WriterDocumentState, origin: unknown): void {
   ydoc.transact(() => {
@@ -862,16 +834,14 @@ export function seed(ydoc: Y.Doc, document: WriterDocumentState, origin: unknown
   }, origin);
 }
 
-/* --------------------------------------------------------- report du curseur */
+/* --------------------------------------------------------- cursor carry-over */
 
 /**
- * Où se retrouve un offset de curseur après une modification distante.
+ * Where a cursor offset ends up after a remote change.
  *
- * Sans ce report, écrire au-dessus de quelqu'un lui décale son texte sous le
- * curseur : il croit taper à un endroit et les lettres tombent ailleurs. La
- * règle est celle de `SwIndexReg` — une insertion **avant** le point le pousse,
- * une insertion après ne le concerne pas, et une suppression qui l'englobe le
- * ramène à son début.
+ * Without this carry-over, writing above someone shifts their text under their cursor: they believe they are typing in one place
+ * and the letters land elsewhere. The rule is that of `SwIndexReg`: an insertion **before** the point pushes it, an insertion after
+ * does not concern it, and a deletion that encloses it brings it back to its start.
  */
 export function remapOffset(
   offset: number,
@@ -883,7 +853,7 @@ export function remapOffset(
   return offset - removed + inserted.length;
 }
 
-/** Ce que `remapOffset` a besoin de savoir, extrait d'un événement `Y.Text`. */
+/** What `remapOffset` needs to know, extracted from a `Y.Text` event. */
 export function changeOfTextEvent(event: Y.YTextEvent): {
   at: number;
   removed: number;

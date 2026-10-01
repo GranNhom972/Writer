@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, createParagraph, createTable } from '../src/domain/document/document';
@@ -27,13 +27,13 @@ describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
 
     const text = new TextDecoder('latin1').decode(bytes);
 
-    // En-tête standard
+    // Standard header
     expect(text.startsWith('%PDF-1.4')).toBe(true);
 
-    // Clôture standard
+    // Standard trailer
     expect(text.trimEnd().endsWith('%%EOF')).toBe(true);
 
-    // Objets indispensables
+    // Essential objects
     expect(text).toContain('/Type /Catalog');
     expect(text).toContain('/Type /Pages');
     expect(text).toContain('/Type /Page');
@@ -66,7 +66,7 @@ describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
     const bytes = exportToPdfBytes(doc, layout);
     const text = new TextDecoder('latin1').decode(bytes);
 
-    // 'É' est code 201 = \311, 'é' est code 233 = \351
+    // 'É' is code 201 = \311, 'é' is code 233 = \351
     expect(text).toContain('\\311dition & Cr\\351ation');
   });
 
@@ -103,7 +103,7 @@ describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
     const bytes = exportToPdfBytes(doc, layout);
     const text = new TextDecoder('latin1').decode(bytes);
 
-    // Opérateur de tracé de rectangle pour les bordures de cellule
+    // Rectangle drawing operator for the cell borders
     expect(text).toContain(' re S');
     expect(text).toContain('Cellule 1');
     expect(text).toContain('Cellule 4');
@@ -155,17 +155,15 @@ describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
     expect(text).toContain('(Droite) Tj');
     expect(text).toContain('(Pied G) Tj');
     expect(text).toContain('(Pied D) Tj');
-    // Vérification du filet séparateur dashed '[4 2] 0 d'
+    // Checking the dashed separator line '[4 2] 0 d'
     expect(text).toContain('[4 2] 0 d');
   });
 
   /**
-   * Cadres flottants au PDF.
+   * Floating frames in the PDF.
    *
-   * Le PDF les ignorait : une image habillée y disparaissait, et il ne restait
-   * que le trou qu'elle avait creusé dans le texte. Faute d'un rastériseur dans
-   * les tests, on vérifie le **cadre de remplacement** que trace `paintImage`
-   * quand les octets manquent — sa présence prouve que le cadre a été visité.
+   * The PDF used to ignore them: a wrapped image vanished from it, and only the hole it had dug in the text remained. With no rasterizer in the tests, we check the **placeholder frame** that `paintImage` draws when the bytes
+   * are missing: its presence proves that the frame was visited.
    */
   function cadreFlottant(surround: 'parallel' | 'through', extra: Record<string, unknown> = {}) {
     return makeRun('￼', {
@@ -188,7 +186,7 @@ describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
     expect(layout.pages[0]?.flies).toHaveLength(1);
 
     const text = new TextDecoder('latin1').decode(exportToPdfBytes(doc, layout));
-    // `120 × 90 pt`, la taille du cadre, tracée en rectangle de remplacement.
+    // `120 × 90 pt`, the size of the frame, drawn as a placeholder rectangle.
     expect(text).toContain('120.00 90.00 re S');
   });
 
@@ -206,7 +204,7 @@ describe('Génération et exportation PDF native (vcl::PDFWriter)', () => {
     const cadre = text.indexOf('120.00 90.00 re S');
     const dernierTexte = text.lastIndexOf('ET');
     expect(cadre).toBeGreaterThan(-1);
-    // L'ordre de `SwRootFrm::Paint` : le calque `heaven` passe après le texte.
+    // The order of `SwRootFrm::Paint`: the `heaven` layer comes after the text.
     expect(cadre).toBeGreaterThan(dernierTexte);
   });
 

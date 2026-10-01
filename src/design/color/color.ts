@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Conversions de couleur et mesure de contraste (module pur, couche 2).
+ * Color conversions and contrast measurement (pure module, layer 2).
  *
- * Ces couleurs sont du **contenu de document** : elles partent dans le fichier ODF
- * et ne suivent pas le thème de l'interface. Les valeurs littérales sont donc
- * légitimes ici — contrairement au chrome applicatif, qui n'utilise que des jetons.
+ * These colors are **document content**: they go into the ODF file and do not follow the interface theme. Literal values are
+ * therefore legitimate here, unlike the application chrome, which only uses tokens.
  */
 
 export interface Rgb {
@@ -16,11 +15,11 @@ export interface Rgb {
 }
 
 export interface Hsv {
-  /** Teinte, 0–360. */
+  /** Hue, 0–360. */
   h: number;
   /** Saturation, 0–1. */
   s: number;
-  /** Valeur (luminosité), 0–1. */
+  /** Value (brightness), 0–1. */
   v: number;
 }
 
@@ -29,7 +28,7 @@ const clamp = (value: number, min: number, max: number): number =>
 
 export const clampChannel = (value: number): number => Math.round(clamp(value, 0, 255));
 
-/** Accepte `#abc`, `#aabbcc`, `abc`, `aabbcc`. Renvoie `null` si illisible. */
+/** Accepts `#abc`, `#aabbcc`, `abc`, `aabbcc`. Returns `null` if unreadable. */
 export function parseHex(input: string): Rgb | null {
   const raw = input.trim().replace(/^#/, '');
   const expanded =
@@ -100,7 +99,7 @@ export function hsvToRgb({ h, s, v }: Hsv): Rgb {
   };
 }
 
-/** HSL → RGB : utilisé pour générer les nuances de la palette. */
+/** HSL → RGB: used to generate the shades of the palette. */
 export function hslToRgb(h: number, s: number, l: number): Rgb {
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const hue = ((h % 360) + 360) % 360;
@@ -127,7 +126,7 @@ export function hslToRgb(h: number, s: number, l: number): Rgb {
   };
 }
 
-/** Luminance relative WCAG 2.x. */
+/** WCAG 2.x relative luminance. */
 export function relativeLuminance({ r, g, b }: Rgb): number {
   const channel = (value: number): number => {
     const normalized = value / 255;
@@ -136,7 +135,7 @@ export function relativeLuminance({ r, g, b }: Rgb): number {
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
-/** Rapport de contraste WCAG, de 1 (identique) à 21 (noir sur blanc). */
+/** WCAG contrast ratio, from 1 (identical) to 21 (black on white). */
 export function contrastRatio(a: Rgb, b: Rgb): number {
   const la = relativeLuminance(a);
   const lb = relativeLuminance(b);
@@ -148,8 +147,7 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
 export type ContrastVerdict = 'AAA' | 'AA' | 'AA-large' | 'insuffisant';
 
 /**
- * Verdict WCAG pour du texte de document.
- * Le seuil « grand texte » (3:1) s'applique à partir de 18 pt (ou 14 pt gras).
+ * WCAG verdict for document text. The "large text" threshold (3:1) applies from 18 pt (or 14 pt bold).
  */
 export function contrastVerdict(ratio: number): ContrastVerdict {
   if (ratio >= 7) return 'AAA';
@@ -158,7 +156,7 @@ export function contrastVerdict(ratio: number): ContrastVerdict {
   return 'insuffisant';
 }
 
-/** Couleur de trait lisible par-dessus une pastille (repère de sélection). */
+/** Stroke color that is readable on top of a swatch (the selection marker). */
 export function readableOutline(color: Rgb): string {
   return relativeLuminance(color) > 0.5 ? '#16191d' : '#ffffff';
 }

@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Dialogue ergonomique d'édition des en-têtes et pieds de page.
+ * Ergonomic dialog for editing headers and footers.
  *
- * Ils sont identiques sur toutes les pages : le dialogue en tient compte et
- * n'expose qu'une seule définition, pas un éditeur par page. Les jetons
- * ({page}, {titre}, {date}…) évitent d'apprendre une syntaxe.
+ * They are identical on every page: the dialog takes that into account and only exposes a single definition, not one editor per page. The tokens ({page}, {titre}, {date}...) save people
+ * from learning a syntax.
  *
- * Chaque bande a son propre atelier avec rendu véridique et repères magnétiques.
+ * Each band has its own workshop with a truthful rendering and magnetic guides.
  */
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';

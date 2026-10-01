@@ -1,36 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Poignées et repères d'un tableau posé sur une page.
+ * Handles and guides of a table placed on a page.
  *
- * Le moteur peint les tableaux comme il peint le texte : des cadres absolus,
- * sans le moindre nœud interactif. C'est ce qui rend la mise en page exacte,
- * mais cela laisse l'utilisateur sans prise — rien à saisir, rien à survoler,
- * aucune indication qu'une colonne puisse se redimensionner.
+ * The engine paints tables as it paints text: absolute frames, without a single interactive node. That is what makes the layout exact, but it leaves the user with nothing to grab: nothing to hold, nothing to hover,
+ * no sign that a column can be resized.
  *
- * Cette couche rend visibles les gestes que la grille autorise déjà :
+ * This layer makes visible the gestures that the grid already allows:
  *
- *  - une **poignée par frontière de colonne**, qui donne le curseur
- *    `col-resize` au survol : l'affordance précède l'explication ;
- *  - une **réglette par ligne et par colonne**, hors du texte, qui sélectionne
- *    la bande entière d'un clic (`SwFEShell::SelTblRow` / `SelTblCol`) ;
- *  - un **coin** qui sélectionne le tableau entier ;
- *  - le **liseré de la cellule courante**, sans lequel on ne sait pas sur quoi
- *    porteront « supprimer la ligne » ou « fusionner ».
+ *  - a **handle per column boundary**, which gives the `col-resize` cursor on hover: the affordance comes before the explanation;
+ *  - a **guide per row and per column**, outside the text, which selects the whole band with one click (`SwFEShell::SelTblRow` / `SelTblCol`);
+ *  - a **corner** that selects the whole table;
+ *  - the **outline of the current cell**, without which you cannot know what "delete the row" or "merge" will act on.
  *
- * Les réglettes n'apparaissent que lorsque le curseur est dans le tableau : sur
- * un document de vingt-cinq pages, les afficher toutes en permanence noierait
- * le texte sous les décorations.
+ * The guides only appear when the cursor is in the table: on a twenty-five page document, showing them all permanently would drown the text under decorations.
  *
- * ## Pourquoi deux couches
+ * ## Why two layers
  *
- * La teinte de sélection doit passer **sous** le texte — peinte par-dessus,
- * même très transparente, elle délave les lettres qu'elle est censée mettre en
- * valeur. Les poignées, elles, doivent rester **au-dessus** pour être
- * saisissables. Ces deux exigences sont contradictoires dans un seul nœud :
- * d'où `TableTint`, posée avant les paragraphes, et `TableHandles`, posée
- * après.
+ * The selection tint has to go **under** the text: painted over it, even very transparent, it washes out the letters it is supposed to highlight. The handles, on the other hand, must stay **above** to be
+ * grabbable. These two requirements contradict each other in a single node: hence `TableTint`, placed before the paragraphs, and `TableHandles`, placed after.
  */
 
 import { useCallback, useEffect, useRef, type JSX } from 'react';
@@ -42,21 +31,21 @@ import {
 import type { PlacedTable } from '../../domain/engine/paginate';
 import { cellFrameHeightPx } from '../../domain/engine/paginate';
 
-/** Épaisseur des réglettes de sélection, en pixels de page. */
+/** Thickness of the selection guides, in page pixels. */
 const GRIP_PX = 12;
-/** Écart entre une réglette et le bord du tableau. */
+/** Gap between a guide and the edge of the table. */
 const GRIP_GAP_PX = 3;
-/** Demi-largeur de la zone de saisie d'une frontière de colonne. */
+/** Half-width of the grab zone of a column boundary. */
 const GRAB_PX = 4;
 
-/** Cellule sous le curseur et rectangle sélectionné, pour un tableau donné. */
+/** Cell under the cursor and selected rectangle, for a given table. */
 export interface TableFocus {
   rowIndex: number;
   cellIndex: number;
   rect: CellRect | null;
 }
 
-/** Géométrie de chaque colonne de grille, en pixels de page. */
+/** Geometry of each grid column, in page pixels. */
 function columnBoxes(
   table: PlacedTable,
   contentWidthPx: number,
@@ -70,7 +59,7 @@ function columnBoxes(
   });
 }
 
-/** Bornes verticales du fragment de tableau posé sur cette page. */
+/** Vertical bounds of the table fragment placed on this page. */
 function verticalExtent(table: PlacedTable): { top: number; height: number } | null {
   const first = table.rows[0];
   const last = table.rows[table.rows.length - 1];
@@ -79,9 +68,9 @@ function verticalExtent(table: PlacedTable): { top: number; height: number } | n
   return { top, height: table.topPx + last.topPx + last.heightPx - top };
 }
 
-/* ------------------------------------------------------------ couche basse */
+/* ------------------------------------------------------------ lower layer */
 
-/** Teinte des cellules sélectionnées et liseré de la cellule courante. */
+/** Tint of the selected cells and outline of the current cell. */
 export function TableTint({
   table,
   focus,
@@ -105,9 +94,7 @@ export function TableTint({
             cell.cellIndex >= rect.fromCol &&
             cell.cellIndex <= rect.toCol;
 
-          // Hors sélection multiple, seule la cellule du curseur se signale, et
-          // par un liseré : une teinte sur la cellule où l'on tape ferait
-          // croire que son contenu est sélectionné.
+          // Outside a multiple selection, only the cursor's cell shows itself, and by an outline: a tint on the cell where you are typing would make people think its content is selected.
           const isCurrent =
             rect === null &&
             row.rowIndex === focus.rowIndex &&
@@ -133,17 +120,17 @@ export function TableTint({
   );
 }
 
-/* ------------------------------------------------------------ couche haute */
+/* ------------------------------------------------------------ upper layer */
 
 export interface TableHandlesProps {
   table: PlacedTable;
-  /** Largeur utile de la page — la base des pourcentages de colonne. */
+  /** Usable width of the page: the base of the column percentages. */
   contentWidthPx: number;
-  /** Facteur d'échelle appliqué à la feuille, pour convertir les mouvements. */
+  /** Scale factor applied to the sheet, to convert movements. */
   zoom: number;
-  /** Cellule et sélection dans ce tableau, ou `null` si le curseur est ailleurs. */
+  /** Cell and selection in this table, or `null` if the cursor is elsewhere. */
   focus: TableFocus | null;
-  /** En lecture seule, les poignées de largeur disparaissent (voir plus bas). */
+  /** In read-only mode, the width handles disappear (see below). */
   readOnly?: boolean;
   onResizeColumn: (tableId: string, boundaryIndex: number, deltaPercent: number) => void;
   onSelectRow: (tableId: string, rowIndex: number) => void;
@@ -151,7 +138,7 @@ export interface TableHandlesProps {
   onSelectTable: (tableId: string) => void;
 }
 
-/** Poignées de largeur et réglettes de sélection. */
+/** Width handles and selection guides. */
 export function TableHandles({
   table,
   contentWidthPx,
@@ -166,9 +153,7 @@ export function TableHandles({
   const tableId = table.table.id;
 
   /*
-   * Le glissement se mesure en **écart au dernier événement**, pas en écart au
-   * point de départ : la commande applique un delta relatif, et cumuler depuis
-   * l'origine appliquerait plusieurs fois le même déplacement.
+   * The drag is measured as the **difference from the last event**, not from the starting point: the command applies a relative delta, and accumulating from the origin would apply the same movement several times.
    */
   const drag = useRef<{ boundary: number; lastX: number } | null>(null);
 
@@ -176,8 +161,7 @@ export function TableHandles({
     (event: PointerEvent) => {
       const current = drag.current;
       if (!current) return;
-      // Le mouvement est en pixels d'écran : le zoom le ramène en pixels de
-      // page, seule unité dans laquelle un pourcentage de colonne a un sens.
+      // The movement is in screen pixels: the zoom brings it back to page pixels, the only unit in which a column percentage means anything.
       const deltaPx = (event.clientX - current.lastX) / zoom;
       if (deltaPx === 0) return;
       current.lastX = event.clientX;
@@ -193,9 +177,7 @@ export function TableHandles({
   }, []);
 
   useEffect(() => {
-    // Les écouteurs vivent sur la fenêtre, pas sur la poignée : un glissement
-    // rapide sort de la bande de 8 px bien avant que la souris ne s'arrête, et
-    // un `onPointerMove` local perdrait le geste en route.
+    // The listeners live on the window, not on the handle: a fast drag leaves the 8 px band long before the mouse stops, and a local `onPointerMove` would lose the gesture on the way.
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', endDrag);
     window.addEventListener('pointercancel', endDrag);
@@ -211,13 +193,9 @@ export function TableHandles({
   if (!extent) return null;
 
   /*
-   * Les réglettes se calent sur la **grille**, pas sur les cellules de la
-   * première ligne.
+   * The guides line up on the **grid**, not on the cells of the first row.
    *
-   * Une ligne d'en-tête fusionnée n'a qu'une cellule pour trois colonnes : s'en
-   * servir de gabarit ne donnait qu'une seule réglette, et les colonnes
-   * absorbées devenaient insélectionnables. La grille, elle, a toujours autant
-   * de colonnes que le tableau.
+   * A merged header row only has one cell for three columns: using it as a template gave a single guide, and the absorbed columns became unselectable. The grid always has as many columns as the table.
    */
   const columns = columnBoxes(table, contentWidthPx);
   const boundaries = columns.slice(0, -1).map((column) => column.leftPx + column.widthPx);
@@ -226,16 +204,12 @@ export function TableHandles({
   const gripLeft = -GRIP_PX - GRIP_GAP_PX;
 
   /*
-   * Une réglette ne s'allume que si **toute sa bande** est prise.
+   * A guide only lights up if **its whole band** is taken.
    *
-   * Se contenter de l'intersection allumerait les trois réglettes de colonne
-   * dès qu'une ligne est sélectionnée — la sélection d'une ligne couvre bien
-   * toutes les colonnes, mais aucune colonne n'est pour autant sélectionnée.
-   * L'utilisateur y lirait « ligne et colonnes », c'est-à-dire tout le tableau.
+   * Settling for the intersection would light up the three column guides as soon as a row is selected: selecting a row does cover all the columns, but no column is selected for that. The user would read "row and
+   * columns", meaning the whole table.
    *
-   * Les bornes se prennent sur le tableau entier, pas sur le fragment posé ici :
-   * une grille à cheval sur deux pages n'a pas trois lignes parce que la
-   * première page n'en montre que trois.
+   * The bounds are taken on the whole table, not on the fragment placed here: a grid that straddles two pages does not have three rows because the first page only shows three.
    */
   const totalRows = table.table.rows.length;
   const totalColumns = tableColumnCount(table.table);
@@ -244,13 +218,7 @@ export function TableHandles({
 
   return (
     <div className="writer-table-chrome">
-      {/*
-        Poignées de largeur, sur chaque frontière interne.
-
-        Rien à saisir en lecture seule : la transaction serait refusée par
-        `transactionAutorisee`, et un curseur `col-resize` qui ne redimensionne
-        pas promet un geste que le document n'accepte pas.
-      */}
+      {/* Width handles, on every inner boundary.  Nothing to grab in read-only mode: the transaction would be refused by `transactionAutorisee`, and a `col-resize` cursor that does not resize promises a gesture that the document does not accept. */}
       {(readOnly ? [] : boundaries).map((left, index) => (
         <div
           key={`bnd-${index}`}
@@ -264,8 +232,7 @@ export function TableHandles({
           title="Glisser pour changer la largeur de la colonne"
           onPointerDown={(event) => {
             if (event.button !== 0) return;
-            // Sans cela, le clic traverse jusqu'à la page et repose le curseur
-            // dans la cellule voisine avant même que le glissement commence.
+            // Without this, the click goes through to the page and puts the cursor back in the neighboring cell before the drag even starts.
             event.preventDefault();
             event.stopPropagation();
             drag.current = { boundary: index, lastX: event.clientX };
@@ -276,10 +243,7 @@ export function TableHandles({
         </div>
       ))}
 
-      {/*
-        Les réglettes ne sortent qu'avec le curseur : ce sont elles qui portent
-        la sélection de bande, geste sans objet tant qu'on n'édite pas la grille.
-      */}
+      {/* The guides only come out with the cursor: they are what carries the band selection, a gesture with no purpose as long as you are not editing the grid. */}
       {focus ? (
         <>
           <button

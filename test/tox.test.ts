@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Table des matières — `SwTOXBase` / `SwDoc::UpdateTOX`
- * (`sw/source/core/tox/tox.cxx`).
+ * Table of contents: `SwTOXBase` / `SwDoc::UpdateTOX` (`sw/source/core/tox/tox.cxx`).
  *
- * Le point qui compte : le sommaire ne **stocke** pas ses entrées, il les
- * dérive. Ces tests vérifient qu'il ne peut donc pas se désynchroniser du
- * corps, et que les numéros de page sont ceux de la mise en page réelle.
+ * The point that matters: the table of contents does not **store** its entries, it derives them. These tests check that it therefore cannot get out of sync with the body, and that the page numbers are those of the real layout.
  *
  * @vitest-environment jsdom
  */
@@ -72,8 +69,7 @@ describe('Définition du sommaire (SwTOXBase)', () => {
   it('ignore les titres placés dans une cellule de tableau', () => {
     const toc = createToc();
     const doc = docOf([toc, titre('Au fil du texte', 1)]);
-    // `tocEntries` ne parcourt que `doc.blocks` : un titre imbriqué dans une
-    // cellule n'a pas de position dans la hiérarchie du document.
+    // `tocEntries` only walks `doc.blocks`: a heading nested in a cell has no position in the document's hierarchy.
     expect(tocEntries(doc, toc)).toHaveLength(1);
   });
 
@@ -125,10 +121,10 @@ describe('Développement à la pagination (SwDoc::UpdateTOX)', () => {
     const doc = docOf([toc, titre('Alpha', 1), titre('Beta', 2)]);
     const layout = paginateDocument(doc, { measurer });
 
-    // Le document lui-même n'a pas changé : le sommaire reste compact.
+    // The document itself has not changed: the table of contents stays compact.
     expect(doc.blocks[0]?.type).toBe('toc');
 
-    // Mais la mise en page voit bien un titre et deux lignes.
+    // But the layout does see a heading and two lines.
     expect(layout.generatedBlockIds.has(tocTitleId(toc.id))).toBe(true);
     expect(layout.generatedBlockIds.has(tocLineId(toc.id, 0))).toBe(true);
     expect(layout.generatedBlockIds.has(tocLineId(toc.id, 1))).toBe(true);
@@ -146,7 +142,7 @@ describe('Développement à la pagination (SwDoc::UpdateTOX)', () => {
   it('affiche le numéro de page réel du titre visé', () => {
     const toc = createToc();
     const premier = titre('Premier', 1);
-    // Assez de matière pour pousser le second titre sur une page suivante.
+    // Enough material to push the second heading onto a following page.
     const remplissage = Array.from({ length: 90 }, (_, i) =>
       createParagraph(`Paragraphe de remplissage numéro ${i} pour occuper la page.`),
     );
@@ -162,7 +158,7 @@ describe('Développement à la pagination (SwDoc::UpdateTOX)', () => {
     const ligneSecond = layout.paragraphLayouts.get(tocLineId(toc.id, 1));
     const texte = ligneSecond?.lines.flatMap((l) => l.segments.map((s) => s.text)).join('') ?? '';
 
-    // La ligne se termine par le numéro de page 1-indexé du titre.
+    // The line ends with the heading's 1-indexed page number.
     expect(texte.startsWith('Second')).toBe(true);
     expect(texte.trimEnd().endsWith(String(pageSecond + 1))).toBe(true);
   });
@@ -177,8 +173,7 @@ describe('Développement à la pagination (SwDoc::UpdateTOX)', () => {
     const first = paginateDocument(doc, { measurer });
     const second = paginateDocument(doc, { measurer });
 
-    // Deux appels donnent le même résultat : la fonction reste pure malgré
-    // les deux passes internes.
+    // Two calls give the same result: the function stays pure despite the two internal passes.
     expect(second.pages).toHaveLength(first.pages.length);
     for (const [id, layout] of first.paragraphLayouts) {
       expect(second.paragraphLayouts.get(id)?.lines.length).toBe(layout.lines.length);
@@ -233,7 +228,7 @@ describe('Aller-retour ODF du sommaire', () => {
     expect(xml).toContain('text:outline-level="2"');
     expect(xml).toContain('<text:index-title-template>Sommaire</text:index-title-template>');
     expect(xml).toContain('style:leader-char="."');
-    // Le rendu contient bien les entrées retenues, pas celle de niveau 3.
+    // The rendering does contain the entries that were kept, not the level-3 one.
     expect(xml).toContain('Alpha');
     expect(xml).toContain('Beta');
 
@@ -244,8 +239,7 @@ describe('Aller-retour ODF du sommaire', () => {
     expect(relue?.useDotLeader).toBe(true);
     expect(relue?.showPageNumbers).toBe(true);
 
-    // Les entrées ne sont pas réimportées comme des paragraphes figés :
-    // seul le bloc de définition subsiste, les titres restant la source.
+    // The entries are not re-imported as frozen paragraphs: only the definition block remains, the headings staying the source.
     const paragraphes = relu.blocks.filter((b) => b.type !== 'toc');
     expect(paragraphes.some((b) => b.type === 'paragraph' && 'runs' in b && b.runs.some((r) => r.text.includes('....')))).toBe(false);
   });

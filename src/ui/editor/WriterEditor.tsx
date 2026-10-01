@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * L'éditeur complet assemblé : Barre de menus, Ruban avec icônes vectorielles,
- * Règle graduée, Plan du document (DocumentOutline), Recherche/Remplacement,
- * Palette de commandes (Ctrl+K), Éditeur de formules mathématiques (MathDialog),
- * En-têtes et pieds de page ergonomiques (PageFurnitureDialog),
- * Dialogues de styles/marges et feuilles A4 physiques.
+ * The complete assembled editor: menu bar, ribbon with vector icons, graduated ruler, document outline (DocumentOutline), find/replace, command palette (Ctrl+K), math formula editor (MathDialog),
+ * ergonomic page headers and footers (PageFurnitureDialog), styles/margins dialogs and physical A4 sheets.
  *
- * Moteur 100 % natif OpenOffice Writer (sw) sans aucune bibliothèque de rich-text externe.
+ * A 100 % native OpenOffice Writer (sw) engine with no external rich-text library.
  */
 
 import {
@@ -75,17 +72,16 @@ import type { ConnectionStatus, PeerPresence } from '../../domain/collab/session
 import './editor.css';
 
 const PAGE_GAP_PX = 16;
-/** Rembourrage horizontal de la surface de pages, gouttières comprises. */
+/** Horizontal padding of the page surface, gutters included. */
 const SURFACE_GUTTER_PX = 24;
 
-/** Écart entre le bord droit de la feuille et la bande de commentaires. */
+/** Gap between the right edge of the sheet and the comment band. */
 const COMMENT_GUTTER_GAP_PX = 16;
 
 /**
- * Trois états de connexion, pas plus.
+ * Three connection states, no more.
  *
- * « Reconnexion en cours » et « tentative 4 sur 7 » disent la même chose à qui
- * rédige : que ça ne passe pas encore. Le détail appartient aux journaux.
+ * "Reconnecting" and "attempt 4 of 7" tell the writer the same thing: that it is not getting through yet. The detail belongs in the logs.
  */
 const CONNEXION_LIBELLE: Record<ConnectionStatus, string> = {
   local: 'Local',
@@ -112,13 +108,12 @@ export interface WriterEditorProps {
   onExportPdf?: () => void;
   onTitleChange?: (title: string) => void;
   /**
-   * Partage. Absent, l'éditeur fonctionne exactement comme avant : le document
-   * vit dans cet onglet, et rien ne part sur le réseau.
+   * Sharing. When absent, the editor works exactly as before: the document lives in this tab, and nothing goes out on the network.
    */
   collab?: CollabBinding;
 }
 
-/** Ce que l'éditeur attend de la couche de partage, et rien de plus. */
+/** What the editor expects from the sharing layer, and nothing more. */
 export interface CollabBinding {
   status: ConnectionStatus;
   peers: readonly PeerPresence[];
@@ -126,25 +121,21 @@ export interface CollabBinding {
   pending: number;
   rejection: string | null;
   canWrite: boolean;
-  /** Vrai quand le document est effectivement partagé. */
+  /** True when the document is actually shared. */
   shared: boolean;
-  /** Un nouvel état local à publier. */
+  /** A new local state to publish. */
   publish: (doc: WriterDocumentState) => void;
   setCursor: (cursor: { blockId: string; offset: number } | null) => void;
   clearRejection: () => void;
   onOpenShare: () => void;
   /**
-   * Dépose une image sur le serveur et rend son adresse.
+   * Uploads an image to the server and returns its address.
    *
-   * Rend `null` quand le document n'est pas partagé ou que le dépôt échoue :
-   * l'image reste alors en `data:`, ce qui marche, mais alourdit chaque
-   * synchronisation du paragraphe qui la porte.
+   * Returns `null` when the document is not shared or when the upload fails: the image then stays as a `data:` URL, which works but makes every synchronization of the paragraph that carries it heavier.
    */
   uploadImage: (dataUrl: string) => Promise<string | null>;
   /**
-   * Reçoit la commande d'application d'une modification distante. L'éditeur
-   * l'appelle **une fois**, à l'ouverture : c'est ainsi que la couche de
-   * partage obtient de quoi écrire dans le document sans le posséder.
+   * Receives the command that applies a remote change. The editor calls it **once**, on opening: that is how the sharing layer gets something to write into the document with, without owning it.
    */
   bindApplyRemote: (
     apply: (
@@ -172,8 +163,7 @@ export function WriterEditor({
   const printRef = useRef<() => void>(() => {});
   const findReplaceRef = useRef<() => void>(() => {});
 
-  // Partagé sans droit d'écriture : l'éditeur devient une visionneuse. On
-  // n'attend pas le refus du serveur pour le dire — voir `WriterHooks.readOnly`.
+  // Shared without write permission: the editor becomes a viewer. We do not wait for the server's refusal to say so; see `WriterHooks.readOnly`.
   const lectureSeule = collab?.shared === true && !collab.canWrite;
 
   const controller = useWriterInput(initialDocument, {
@@ -211,23 +201,18 @@ export function WriterEditor({
   const geometry = layout.geometry;
 
   /**
-   * Le document courant, accessible sans en dépendre.
+   * The current document, reachable without depending on it.
    *
-   * Certains rappels ont besoin de le lire au moment où l'utilisateur agit,
-   * mais descendent jusqu'à des composants mémoïsés. En faire une dépendance
-   * de `useCallback` les recréerait à chaque frappe et propagerait le rendu à
-   * tout le document ; une réf donne la même lecture sans l'instabilité.
+   * Some callbacks need to read it at the moment the user acts, but they go down to memoized components. Making it a `useCallback` dependency would recreate them on every keystroke and spread the render to the whole
+   * document; a ref gives the same reading without the instability.
    */
   const docRef = useRef(doc);
   docRef.current = doc;
 
   /**
-   * Ce que les poignées de tableau doivent peindre.
+   * What the table handles have to paint.
    *
-   * Reprend le contexte calculé par le contrôleur en n'en gardant que la
-   * géométrie : les feuilles n'ont pas à connaître le nombre de lignes, et un
-   * objet réduit leur évite un rendu à chaque déplacement du curseur dans une
-   * même cellule.
+   * Takes the context computed by the controller and only keeps the geometry: the sheets do not need to know the number of rows, and a reduced object saves them a render on every cursor move within the same cell.
    */
   const activeTable = useMemo(
     () =>
@@ -243,18 +228,16 @@ export function WriterEditor({
   );
 
   /**
-   * Auteur des commentaires et des révisions.
+   * Author of the comments and revisions.
    *
-   * Le nom affiché en session partagée l'emporte : c'est celui que voient les
-   * autres participants, et signer d'un nom différent dans la gouttière rendrait
-   * un fil de discussion illisible.
+   * The name displayed in a shared session wins: it is the one the other participants see, and signing with a different name in the gutter would make a discussion thread unreadable.
    */
   const authorName = collab?.self?.displayName || doc.meta.author || 'Moi';
 
-  /** Texte actuellement sélectionné — ce qu'un commentaire ou un signet ancrerait. */
+  /** Text currently selected: what a comment or a bookmark would anchor. */
   const selectedText = useMemo(() => selectionText(session.state), [session.state]);
 
-  /** Fil dont l'ancre contient le curseur : c'est lui que la gouttière met en avant. */
+  /** Thread whose anchor contains the cursor: it is the one the gutter puts forward. */
   const activeThreadId = useMemo(() => {
     const focusPos = session.state.selection.focus;
     const anchor = commentAnchors(doc).find(
@@ -269,21 +252,16 @@ export function WriterEditor({
   const bookmarkNames = useMemo(() => listBookmarks(doc).map((mark) => mark.name), [doc]);
 
   const redlineRanges = useMemo(() => listRedlineRanges(doc), [doc]);
-  /** Mode révision (`REDLINE_ON`) : miroir local de l'état porté par la session. */
+  /** Review mode (`REDLINE_ON`): a local mirror of the state carried by the session. */
   const [reviewing, setReviewing] = useState(false);
 
   const hasComments = useMemo(() => commentThreads(doc).length > 0, [doc]);
 
   /**
-   * Taille de la pile de pages **avant** zoom, gouttière comprise.
+   * Size of the page stack **before** zoom, gutter included.
    *
-   * `transform: scale()` ne redimensionne pas la boîte de mise en page : un
-   * élément mis à l'échelle occupe toujours sa taille d'origine dans le flux.
-   * La surface calculait donc ses barres de défilement sur la pile à 100 % quel
-   * que soit le zoom — du vide sous la dernière page en dessous de 100 %, des
-   * pages rognées et inatteignables au-dessus. Ces deux mesures servent à donner
-   * au cadre de zoom une hauteur et une largeur réelles, égales à ce que l'œil
-   * voit.
+   * `transform: scale()` does not resize the layout box: an element that is scaled always takes its original size in the flow. The surface therefore computed its scrollbars on the stack at 100 % whatever the zoom:
+   * empty space under the last page below 100 %, cropped and unreachable pages above. These two measurements give the zoom frame a real height and width, equal to what the eye sees.
    */
   const pileHeightPx =
     layout.pages.length * geometry.pageHeightPx +
@@ -293,15 +271,12 @@ export function WriterEditor({
     (hasComments ? COMMENT_GUTTER_GAP_PX + COMMENT_BAND_WIDTH_PX : 0);
 
   /**
-   * Ajustement à la largeur, à l'ouverture seulement.
+   * Fit to width, on opening only.
    *
-   * Une page A4 fait 794px : sur un téléphone de 412px, le document s'ouvrait
-   * décalé sur sa moitié gauche et entraînait la fenêtre entière en défilement
-   * horizontal. On réduit donc le zoom d'entrée pour que la page tienne —
-   * jamais pour l'agrandir, un écran large garde son 100 %.
+   * An A4 page is 794 px: on a 412 px phone, the document opened shifted onto its left half and dragged the whole window into horizontal scrolling. So we reduce the opening zoom so that the page fits, and never to
+   * enlarge it: a wide screen keeps its 100 %.
    *
-   * Une seule fois : passé l'ouverture, le zoom appartient à qui écrit, et une
-   * rotation d'écran ne doit pas défaire son réglage.
+   * Only once: after opening, the zoom belongs to the person writing, and rotating the screen must not undo their setting.
    */
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const zoomAjusteRef = useRef(false);
@@ -313,18 +288,15 @@ export function WriterEditor({
     if (disponible <= 0) return;
     zoomAjusteRef.current = true;
     if (pileWidthPx <= disponible) return;
-    // `setZoom` borne lui-même à [MIN_ZOOM, MAX_ZOOM].
+    // `setZoom` clamps to [MIN_ZOOM, MAX_ZOOM] by itself.
     setZoom(disponible / pileWidthPx);
   }, [pileWidthPx, setZoom]);
 
   /**
-   * Message annoncé aux lecteurs d'écran.
+   * Message announced to screen readers.
    *
-   * Les changements **structurels** — pagination, mode révision, nombre de fils
-   * ouverts — ne se voient pas au clavier : ils ne produisent aucun mouvement de
-   * curseur, et sans annonce un utilisateur non voyant n'apprend jamais qu'une
-   * page vient d'apparaître. Les frappes, elles, ne sont pas annoncées : le
-   * lecteur d'écran les lit déjà, et les doubler rendrait la saisie inaudible.
+   * **Structural** changes (pagination, review mode, number of open threads) cannot be seen with the keyboard: they produce no cursor movement, and without an announcement a blind user never learns that a page has just
+   * appeared. Keystrokes, on the other hand, are not announced: the screen reader already reads them, and doubling them would make typing inaudible.
    */
   const announcement = useMemo(() => {
     const parts = [`${layout.pages.length} page${layout.pages.length > 1 ? 's' : ''}`];
@@ -334,8 +306,8 @@ export function WriterEditor({
     return parts.join(', ');
   }, [layout.pages.length, reviewing, redlineRanges.length, lectureSeule]);
 
-  // États des panneaux et dialogues UI
-  /** Point d'ouverture du menu contextuel, ou `null` s'il est fermé. */
+  // UI panel and dialog states
+  /** Opening point of the context menu, or `null` if it is closed. */
   const [contextMenuAt, setContextMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
@@ -347,16 +319,14 @@ export function WriterEditor({
   const [bookmarkDialogOpen, setBookmarkDialogOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   /**
-   * Bouton « lien » du ruban.
+   * The "link" button of the ribbon.
    *
-   * Le menu et `Ctrl+K` déclenchent **ce** bouton plutôt que d'ouvrir un second
-   * dialogue : un seul composant à tenir, et le panneau s'ancre là où l'usager
-   * s'attend à le voir apparaître.
+   * The menu and `Ctrl+K` trigger **this** button rather than open a second dialog: one component to maintain, and the panel is anchored where the user expects to see it appear.
    */
   const linkButtonRef = useRef<HTMLButtonElement | null>(null);
   const [mathDraft, setMathDraft] = useState<MathDraft | null>(null);
   const [imageDraft, setImageDraft] = useState<ImageDraft | null>(null);
-  /** Image saisie dans l'éditeur : poignées et barre d'actions. */
+  /** Image grabbed in the editor: handles and action bar. */
   const [imageSelection, setImageSelection] = useState<{ blockId: string; offset: number } | null>(
     null,
   );
@@ -415,16 +385,14 @@ export function WriterEditor({
     setMathDraft({ blockId, latex, display });
   }, []);
 
-  /** Largeur de la zone imprimable — plafond d'insertion d'une image. */
+  /** Width of the printable area: the insertion ceiling for an image. */
   const contentWidthPt = useMemo(() => pxToPt(geometry.contentWidthPx), [geometry.contentWidthPx]);
 
 /**
- * Placement d'un cadre, mis à plat pour le brouillon de la fenêtre.
+ * Placement of a frame, flattened for the window's draft.
  *
- * `ImageDraft` est plat parce qu'un formulaire l'est : chaque champ y a son
- * état. Le modèle, lui, réunit le placement en un objet, seul niveau où
- * « inline » peut rendre les cinq autres valeurs sans objet d'un seul coup.
- * Cette fonction est la charnière entre les deux formes.
+ * `ImageDraft` is flat because a form is: each field has its own state. The model, for its part, gathers the placement into one object, the only level at which "inline" can make the five other values pointless
+ * in one go. This function is the hinge between the two shapes.
  */
 function placementDraft(placement: ImageWrapPlacement | undefined): Partial<ImageDraft> {
   if (!placement) return {};
@@ -440,11 +408,9 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
 }
 
   /**
-   * Ouvre l'atelier d'image.
+   * Opens the image workshop.
    *
-   * Si le curseur touche déjà un cadre, on l'ouvre **sur ce cadre** plutôt que
-   * d'en proposer un nouveau : c'est le geste attendu quand on veut redimensionner
-   * l'image où l'on se trouve, et il évite d'en empiler deux par mégarde.
+   * If the cursor already touches a frame, we open it **on that frame** rather than offer a new one: it is the expected gesture when you want to resize the image you are on, and it avoids stacking two by accident.
    */
   const openImageDialog = useCallback(() => {
     const position = session.state.selection.focus;
@@ -483,14 +449,11 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   }, [session.state, contentWidthPt, layout.figureNumbers]);
 
   /**
-   * Adresse définitive d'une image, une fois déposée s'il y a lieu.
+   * Final address of an image, once uploaded where applicable.
    *
-   * En partage, une `data:` part sur le serveur **avant** d'entrer dans le
-   * document : l'y poser d'abord ferait transiter la version lourde une fois
-   * chez chaque participant, avant de la remplacer par son adresse.
+   * In a share, a `data:` URL goes to the server **before** entering the document: putting it there first would make the heavy version travel once to every participant, before being replaced by its address.
    *
-   * Hors partage, ou si le dépôt échoue, la `data:` est conservée : elle
-   * s'affiche, s'exporte et s'enregistre — seulement plus lourdement.
+   * Outside a share, or if the upload fails, the `data:` URL is kept: it displays, exports and saves, only more heavily.
    */
   const uploadImage = collab?.uploadImage;
   const adresseFinale = useCallback(
@@ -515,14 +478,10 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         alt: cadre.alt ?? '',
         ...(cadre.crop ? { crop: cadre.crop } : {}),
         ...(cadre.caption ? { caption: cadre.caption } : {}),
-        // Sans ces deux-là, rouvrir la fenêtre pour changer autre chose
-        // remettait les espacements à leur valeur par défaut : une marge réglée
-        // à zéro y reprenait 4 px sans que rien ne l'ait demandé.
+        // Without these two, reopening the window to change something else reset the spacings to their default value: a margin set to zero went back to 4 px with nothing having asked for it.
         ...(cadre.marginPt !== undefined ? { marginPt: cadre.marginPt } : {}),
         ...(cadre.captionGapPt !== undefined ? { captionGapPt: cadre.captionGapPt } : {}),
-        // Intégration au texte : la fenêtre doit rouvrir sur le mode courant,
-        // faute de quoi valider un simple changement de légende ramènerait
-        // l'image dans le fil du texte.
+        // How the image fits into the text: the window must reopen on the current mode, otherwise validating a simple caption change would bring the image back into the text flow.
         ...placementDraft(cadre.wrap),
         figureNumber:
           layout.figureNumbers.get(imageKey(blockId, cadre.offset)) ??
@@ -530,21 +489,17 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       });
     },
     /*
-     * `layout.figureNumbers` est désormais canonisé et ne change qu'avec les
-     * numéros eux-mêmes ; le document, lui, change à chaque frappe. Il est donc
-     * lu par référence : ce rappel descend jusqu'aux paragraphes mémoïsés, et
-     * en dépendre les aurait tous fait rendre à chaque caractère saisi.
+     * `layout.figureNumbers` is now canonicalized and only changes with the numbers themselves; the document, for its part, changes on every keystroke. It is therefore read by reference: this callback goes down to the
+     * memoized paragraphs, and depending on it would have made all of them render at every character typed.
      */
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [docRef, layout.figureNumbers],
   );
 
   /**
-   * Insertion d'une image déposée sur la page.
+   * Inserting an image dropped onto the page.
    *
-   * Le glisser-déposer court-circuite le dialogue : la taille est celle de
-   * l'image, ramenée à la largeur imprimable, exactement comme le ferait
-   * `SwFEShell::Insert`. Un dialogue à ce moment-là ferait perdre le geste.
+   * Drag and drop bypasses the dialog: the size is that of the image, brought down to the printable width, exactly as `SwFEShell::Insert` would. A dialog at that moment would lose the gesture.
    */
   const handleDropImage = useCallback(
     async (dataUrl: string) => {
@@ -553,7 +508,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         const taille = fitToContentWidth(naturelle.widthPx, naturelle.heightPx, contentWidthPt);
         commands.insertImage({ src: await adresseFinale(dataUrl), ...taille });
       } catch {
-        // Image indécodable : on ouvre l'atelier, qui dira pourquoi.
+        // Undecodable image: we open the workshop, which will say why.
         setImageDraft({ src: dataUrl, widthPt: contentWidthPt / 2, heightPt: contentWidthPt / 3, alt: '' });
       }
     },
@@ -561,16 +516,12 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   );
 
   /**
-   * Export PDF par le moteur binaire (`vcl::PDFWriter`).
+   * PDF export through the binary engine (`vcl::PDFWriter`).
    *
-   * Le moteur de `domain/pdf/export.ts` écrit la structure PDF 1.4 à partir de
-   * la **même** mise en page que l'écran : mêmes ruptures de ligne, mêmes
-   * pages, mêmes notes. `window.print()` repasse au contraire par le moteur de
-   * rendu du navigateur, qui repagine à sa façon — deux documents différents
-   * pour un seul contenu.
+   * The engine of `domain/pdf/export.ts` writes the PDF 1.4 structure from the **same** layout as the screen: same line breaks, same pages, same notes. `window.print()` on the contrary goes back through the browser's
+   * rendering engine, which paginates in its own way: two different documents for one content.
    *
-   * L'impression, elle, garde la boîte du navigateur : c'est le pilote système
-   * qu'il faut atteindre, pas un fichier.
+   * Printing, for its part, keeps the browser's dialog: it is the system driver that must be reached, not a file.
    */
   const handleExportPdf = useCallback(() => {
     if (onExportPdf) {
@@ -578,9 +529,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       return;
     }
     void downloadPdfWithImages(doc, layout, `${doc.meta.title || 'document'}.pdf`).catch(() => {
-      // Le moteur binaire a renoncé — police introuvable, image indécodable.
-      // La boîte d'impression reste un chemin complet vers un PDF, elle prend
-      // le relais plutôt que de laisser l'utilisateur sans export.
+      // The binary engine gave up (font not found, undecodable image). The print dialog remains a complete path to a PDF, and it takes over rather than leave the user with no export.
       printDocument(doc.meta.title);
     });
   }, [onExportPdf, doc, layout]);
@@ -600,11 +549,9 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   printRef.current = handlePrint;
   findReplaceRef.current = () => setFindReplaceOpen(true);
 
-  /* ------------------------------------------------------------- partage */
+  /* ------------------------------------------------------------- sharing */
 
-  // La commande d'application distante est remise **une fois** à la couche de
-  // partage. La redonner à chaque rendu recréerait la session WebSocket, donc
-  // reconnecterait à chaque frappe.
+  // The remote-apply command is handed **once** to the sharing layer. Giving it again on every render would recreate the WebSocket session, so reconnect on every keystroke.
   const bindApplyRemote = collab?.bindApplyRemote;
   const applyRemote = commands.applyRemote;
   useEffect(() => {
@@ -612,49 +559,41 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   }, [bindApplyRemote, applyRemote]);
 
   /**
-   * Publication de l'état local.
+   * Publication of the local state.
    *
-   * On publie le document **après** rendu, pas dans la commande : une commande
-   * qui émettrait elle-même devrait connaître le réseau, et l'éditeur cesserait
-   * de fonctionner isolé. Ici, le partage n'est qu'un observateur de plus.
+   * We publish the document **after** rendering, not in the command: a command that emitted by itself would have to know about the network, and the editor would stop working in isolation. Here, sharing is just one more
+   * observer.
    */
   const publish = collab?.publish;
-  // `useLayoutEffect` et non `useEffect` : la publication doit avoir lieu dans
-  // la même tâche que la frappe qui l'a produite. Un effet passif est rejeté à
-  // une tâche ultérieure, et une trame distante reçue entre les deux ferait
-  // relire un document répliqué où la frappe ne figure pas encore — elle serait
-  // alors perdue au profit de l'état venu du réseau.
+  // `useLayoutEffect` and not `useEffect`: the publication must happen in the same task as the keystroke that produced it. A passive effect is pushed to a later task, and a remote frame received in between would make us
+  // read back a replicated document where the keystroke is not there yet, so it would be lost in favor of the state that came from the network.
   useLayoutEffect(() => {
     publish?.(doc);
   }, [publish, doc]);
 
-  // Le curseur suit, mais n'est pas publié à la frappe : c'est la session qui
-  // l'annonce à intervalle régulier, sinon chaque déplacement produirait une trame.
+  // The cursor follows, but is not published on typing: it is the session that announces it at regular intervals, otherwise every move would produce a frame.
   const setCursor = collab?.setCursor;
   useEffect(() => {
     const position = session.state.selection.focus;
     setCursor?.({ blockId: position.blockId, offset: position.offset });
   }, [setCursor, session.state.selection.focus]);
 
-  // Focus initial
+  // Initial focus
   useEffect(() => {
     focus();
   }, [focus]);
 
   /**
-   * Raccourcis qui doivent fonctionner même quand le focus a quitté le document
-   * — dans un dialogue, la règle ou le plan.
+   * Shortcuts that must work even when the focus has left the document: in a dialog, the ruler or the outline.
    *
-   * `Ctrl+K` et `Ctrl+F` en sont **absents** volontairement : le contrôleur les
-   * traite déjà. Les gérer ici aussi les déclencherait deux fois, `preventDefault`
-   * n'arrêtant pas la propagation — `Ctrl+K` ouvrait le lien *et* la palette.
+   * `Ctrl+K` and `Ctrl+F` are deliberately **absent**: the controller already handles them. Handling them here too would trigger them twice, since `preventDefault` does not stop propagation: `Ctrl+K` opened the link
+   * *and* the palette.
    */
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const meta = e.ctrlKey || e.metaKey;
       if (meta && e.shiftKey && e.key.toLowerCase() === 'p') {
-        // Convention des palettes de commandes, partagée avec les éditeurs de
-        // code : `Ctrl+K` reste au lien hypertexte, comme dans Writer et Word.
+        // Convention of command palettes, shared with code editors: `Ctrl+K` stays with the hyperlink, as in Writer and Word.
         e.preventDefault();
         setCommandPaletteOpen((open) => !open);
       } else if (meta && e.shiftKey && e.key.toLowerCase() === 'e') {
@@ -674,15 +613,11 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   }, [handlePrint, openMathDialog, openImageDialog]);
 
   /**
-   * Statistiques de la barre d'état.
+   * Statistics of the status bar.
    *
-   * Différées, et non calculées en temps réel : le comptage traverse tout le
-   * document, et il était refait à chaque caractère saisi — sur le chemin
-   * critique de la frappe, pour un affichage dont personne n'attend qu'il soit
-   * synchrone. `useDeferredValue` laisse React reposer la mise en page et le
-   * curseur d'abord, puis rattraper le comptage quand la frappe marque une
-   * pause. Le chiffre affiché peut retarder d'une frappe ou deux ; la latence
-   * de saisie, elle, ne dépend plus de la taille du document.
+   * Deferred, and not computed in real time: the count walks the whole document, and it used to be redone at every character typed, on the critical path of typing, for a display that nobody expects to be synchronous.
+   * `useDeferredValue` lets React lay out the page and the cursor first, then catch up on the count when typing pauses. The figure shown may lag by a keystroke or two; typing latency, for its part, no longer depends on
+   * the size of the document.
    */
   const docPourStatistiques = useDeferredValue(doc);
   const statistics = useMemo(
@@ -690,19 +625,17 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     [docPourStatistiques],
   );
 
-  // Recherche & Remplacement
+  // Find & Replace
   const matches = useMemo(
     () => (findReplaceOpen && findReplaceState.query ? findMatches(doc, findReplaceState.query, findReplaceState.options) : []),
     [doc, findReplaceOpen, findReplaceState.query, findReplaceState.options],
   );
 
   /**
-   * Rang de l'occurrence courante.
+   * Rank of the current match.
    *
-   * On repère depuis le **début** de la sélection, pas depuis sa tête : une
-   * occurrence sélectionnée a sa tête à sa propre fin, si bien que partir de la
-   * tête désignerait déjà l'occurrence suivante — et `Entrée` en sauterait une
-   * sur deux.
+   * We locate from the **start** of the selection, not from its head: a selected match has its head at its own end, so starting from the head would already designate the next match, and `Enter` would skip every other
+   * one.
    */
   const currentMatchIndex = useMemo(() => {
     if (matches.length === 0) return -1;
@@ -711,14 +644,11 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   }, [doc, matches, session.state.selection]);
 
   /**
-   * Rectangles de toutes les occurrences.
+   * Rectangles of all the matches.
    *
-   * Surligner **toutes** les occurrences, et pas seulement la courante, permet
-   * de juger d'un coup d'œil si le mot cherché est le bon : un compteur seul
-   * oblige à parcourir le document pour s'en assurer.
+   * Highlighting **all** the matches, and not only the current one, lets you judge at a glance whether the searched word is the right one: a counter alone forces you to go through the document to make sure.
    *
-   * La géométrie vient du moteur (`rangeRects`), la même que celle de la
-   * sélection — deux calculs distincts finiraient par diverger.
+   * The geometry comes from the engine (`rangeRects`), the same as the selection's: two separate computations would end up diverging.
    */
   const searchRects = useMemo(() => {
     if (matches.length === 0) return [];
@@ -732,11 +662,9 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   }, [matches, currentMatchIndex, doc, layout, measurer]);
 
   /**
-   * Occurrences regroupées par page.
+   * Matches grouped by page.
    *
-   * Creux comme `rectsByPage`, et pour la même raison : recherche fermée, la
-   * table est vide et **toutes** les feuilles reçoivent la même constante
-   * gelée — aucune ne voit sa prop changer d'identité.
+   * Sparse like `rectsByPage`, and for the same reason: with the search closed, the table is empty and **all** the sheets receive the same frozen constant, so none sees its prop change identity.
    */
   const searchRectsByPage = useMemo(() => {
     const pages = new Map<number, SearchRect[]>();
@@ -777,7 +705,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     );
   }, [findReplaceState, run]);
 
-  // Sélection d'un titre depuis le plan du document
+  // Selecting a heading from the document outline
   const handleSelectHeading = useCallback(
     (blockId: string) => {
       commands.goToBlock(blockId);
@@ -786,7 +714,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     [commands, focus],
   );
 
-  // Mise à jour des marges et styles par défaut
+  // Updating the default margins and styles
   const handleSavePageSetupAndDefaults = useCallback(
     (nextPageSetup: PageSetup, nextDefaults: DocumentDefaults) => {
       commands.updateDocument('Mise en page', (current) => ({
@@ -799,7 +727,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     [commands, doc, focus],
   );
 
-  // Modification des marges depuis la règle
+  // Changing the margins from the ruler
   const handleRulerMarginChange = useCallback(
     (margins: { leftMm?: number; rightMm?: number }) => {
       commands.updateDocument(
@@ -818,7 +746,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     [commands],
   );
 
-  // Positionnement de la zone de saisie invisible
+  // Positioning of the invisible input area
   const inputStyle = caret
     ? {
         left: `${geometry.contentLeftPx + caret.xPx}px`,
@@ -832,25 +760,18 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     : { left: '-9999px', top: '0px' };
 
   /**
-   * Ce que l'éditeur sait faire d'une image sans rouvrir la fenêtre.
+   * What the editor can do with an image without reopening the window.
    *
-   * Tous ces gestes passent par l'historique : retaille, déplacement et
-   * changement d'habillage s'annulent comme le reste. Les glissements — poignée
-   * de taille comme cadre déplacé — se regroupent en une seule entrée
-   * (`dragGroup` côté commande), faute de quoi défaire une image retaillée
-   * demanderait trente `Ctrl+Z`.
+   * All these gestures go through the history: resizing, moving and changing the wrapping can be undone like the rest. Drags (size handle as well as moved frame) are grouped into a single entry (`dragGroup` on the
+   * command side), otherwise undoing a resized image would take thirty `Ctrl+Z`.
    */
   /**
-   * Fin d'un glissement d'image : ré-ancrage au point de dépôt.
+   * End of an image drag: re-anchoring at the drop point.
    *
-   * Le glissement écoute la **fenêtre** — il faut bien suivre un pointeur qui
-   * sort du cadre —, et n'a donc que des coordonnées d'écran. On retrouve ici
-   * la feuille visée par son `data-page-index`, puis le paragraphe par la même
-   * recherche que le clic ordinaire (`positionFromPoint`).
+   * The drag listens on the **window** (it has to follow a pointer that leaves the frame), and therefore only has screen coordinates. Here we find the targeted sheet through its `data-page-index`, then the paragraph by
+   * the same lookup as the ordinary click (`positionFromPoint`).
    *
-   * Sans ce ré-ancrage, une image traînée loin de son paragraphe restait
-   * dessinée sur la page de celui-ci : le cadre suivait bien le pointeur, mais
-   * lâché deux pages plus bas il ressortait hors de la feuille d'origine.
+   * Without this re-anchoring, an image dragged far from its paragraph stayed drawn on that paragraph's page: the frame did follow the pointer, but dropped two pages further down it came out outside the original sheet.
    */
   const handleImageRelocated = useCallback(
     (blockId: string, offset: number, clientX: number, clientY: number) => {
@@ -864,7 +785,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       const pageIndex = Number(feuille.dataset.pageIndex);
       if (!Number.isInteger(pageIndex)) return;
 
-      // Coordonnées dans la zone de contenu, zoom défait — le modèle l'ignore.
+      // Coordinates in the content area, zoom undone: the model knows nothing about it.
       const rect = feuille.getBoundingClientRect();
       const xPx = (clientX - rect.left) / zoom - layout.geometry.contentLeftPx;
       const yPx = (clientY - rect.top) / zoom - layout.geometry.contentTopPx;
@@ -873,12 +794,10 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       if (!cible) return;
 
       /*
-       * Position du cadre relative à sa **nouvelle** ancre.
+       * Position of the frame relative to its **new** anchor.
        *
-       * Le paragraphe d'accueil n'a pas bougé de la passe précédente : on lit
-       * donc son ordonnée telle quelle. Les quelques pixels d'écart que la
-       * reprise de mise en page introduira ensuite sont invisibles, là où
-       * conserver l'ancienne origine ferait sauter l'image d'un paragraphe.
+       * The receiving paragraph has not moved since the previous pass: we therefore read its y coordinate as it is. The few pixels of gap that the layout recomputation will introduce afterwards are invisible, whereas keeping
+       * the old origin would make the image jump by a paragraph.
        */
       const accueil = layout.placements.get(cible.blockId)?.[0]?.placed.topPx ?? 0;
       const cadre = paragraphIndex(session.state.doc).byId.get(blockId)?.paragraph;
@@ -890,9 +809,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         blockId,
         offset,
         cible,
-        // Le point saisi devient le **centre** du cadre : c'est là que l'œil
-        // croit tenir l'image, et poser son coin sous le pointeur la décalerait
-        // d'une demi-largeur à chaque dépôt.
+        // The grabbed point becomes the **center** of the frame: that is where the eye believes it is holding the image, and putting its corner under the pointer would shift it by half a width at every drop.
         pxToPt(xPx - largeurPx / 2),
         pxToPt(yPx - accueil),
       );
@@ -909,7 +826,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       readOnly: lectureSeule,
       onSelect: (blockId, offset) => setImageSelection({ blockId, offset }),
       onOpenDialog: () => {
-        /* l'ouverture passe par `onEditImage`, déjà branché sur la page */
+        /* opening goes through `onEditImage`, already wired on the page */
       },
       onResize: (blockId, offset, widthPt, heightPt) =>
         commands.resizeImage(blockId, offset, widthPt, heightPt),
@@ -929,13 +846,10 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   );
 
   /**
-   * Désélectionne l'image dès qu'on clique ailleurs.
+   * Deselects the image as soon as you click elsewhere.
    *
-   * `ImageFrame` arrête la propagation de son propre `pointerdown` : seuls les
-   * clics qui atteignent la feuille passent ici, et ce sont exactement ceux qui
-   * doivent lever la sélection. Sans cela la barre d'actions restait affichée
-   * indéfiniment, y compris après avoir cliqué dans le texte — elle semblait
-   * figée à l'écran.
+   * `ImageFrame` stops the propagation of its own `pointerdown`: only the clicks that reach the sheet come through here, and they are exactly the ones that must clear the selection. Without this, the action bar stayed
+   * displayed indefinitely, even after clicking in the text: it looked frozen on screen.
    */
   const onPagePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, pageIndex: number) => {
@@ -945,8 +859,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     [handlers],
   );
 
-  // `Échap` lève aussi la sélection : c'est le geste attendu, et il évite d'avoir
-  // à viser le texte pour se débarrasser des poignées.
+  // `Escape` also clears the selection: it is the expected gesture, and it saves having to aim at the text to get rid of the handles.
   useEffect(() => {
     if (!imageSelection) return;
     const onKey = (event: KeyboardEvent): void => {
@@ -956,7 +869,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     return () => window.removeEventListener('keydown', onKey);
   }, [imageSelection]);
 
-  // Définition des menus de la MenuBar
+  // Definition of the menus of the MenuBar
   const menus = useMemo<MenuDefinition[]>(
     () => [
       {
@@ -1066,10 +979,8 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       {
         label: 'Tableau',
         /*
-         * Toute entrée qui agit sur une grille est grisée hors d'une grille.
-         * Les commandes sous-jacentes sont inertes dans ce cas — elles renvoient
-         * l'état inchangé — et une entrée active sans effet est le pire des
-         * retours : l'utilisateur croit avoir raté son clic.
+         * Every entry that acts on a grid is greyed out outside a grid. The underlying commands are inert in that case (they return the state unchanged), and an active entry with no effect is the worst kind of
+         * feedback: the user thinks they missed their click.
          */
         entries: [
           { label: 'Insérer un tableau (3×3)', run: () => commands.insertTable(3, 3) },
@@ -1078,8 +989,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           {
             label: 'Supprimer la ligne',
             run: commands.deleteTableRow,
-            // Supprimer la dernière ligne emporte le tableau : l'entrée dédiée
-            // le dit, celle-ci ne doit pas le faire par surprise.
+            // Deleting the last row takes the table with it: the dedicated entry says so, and this one must not do it by surprise.
             disabled: !table || table.rowCount <= 1,
           },
           { label: 'Insérer une colonne à gauche', run: commands.insertTableColumnLeft, separatorBefore: true, disabled: !table },
@@ -1099,15 +1009,12 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
             label: 'Fusionner les cellules',
             run: commands.mergeCells,
             separatorBefore: true,
-            // Fusionner demande au moins deux cellules : sans rectangle, la
-            // commande n'a pas d'objet.
+            // Merging needs at least two cells: without a rectangle, the command has no object.
             disabled: !table?.rect,
           },
           /*
-           * Sur une cellule fusionnée, `splitTableCell` ne découpe pas : il
-           * rend la grille en libérant les cellules absorbées. Proposer alors
-           * « scinder en 2 colonnes » promettrait un découpage qui n'aura pas
-           * lieu — d'où une entrée unique, et son vrai nom.
+           * On a merged cell, `splitTableCell` does not cut: it gives the grid back by freeing the absorbed cells. Offering "split into 2 columns" then would promise a split that will not happen, hence a single entry, with its
+           * real name.
            */
           ...(table?.merged
             ? [
@@ -1206,9 +1113,8 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       statistics,
       openMathDialog,
       openImageDialog,
-      // Le menu Tableau grise ses entrées d'après le contexte du curseur, et le
-      // menu Révision affiche l'état du suivi : sans ces dépendances, les deux
-      // restent figés sur ce qu'ils valaient au dernier changement de document.
+      // The Table menu greys its entries according to the cursor's context, and the Revision menu shows the state of the tracking: without these dependencies, both stay frozen on what they were worth at the last change of
+      // document.
       table,
       reviewing,
       authorName,
@@ -1217,13 +1123,10 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   );
 
   /**
-   * Contenu du menu contextuel.
+   * Content of the context menu.
    *
-   * Il se compose au lieu de se dupliquer : les entrées de tableau ne
-   * paraissent que dans une grille, et elles sont exactement celles du menu
-   * « Tableau », séparateurs compris. Un même intitulé y désigne toujours la
-   * même commande — c'est ce qui permet d'apprendre l'un en se servant de
-   * l'autre.
+   * It is composed instead of duplicated: the table entries only appear in a grid, and they are exactly those of the "Table" menu, separators included. The same label always designates the same command there, which is
+   * what lets you learn one by using the other.
    */
   const contextMenu = useMemo<MenuDefinition>(() => {
     const tableEntries = menus.find((menu) => menu.label === 'Tableau')?.entries ?? [];
@@ -1246,8 +1149,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         {
           label: 'Coller',
           shortcut: shortcutLabel('Mod-v'),
-          // Le presse-papiers système ne se lit pas sans geste de l'utilisateur
-          // dans le document : on redonne le focus, et `Ctrl+V` fait le reste.
+          // The system clipboard cannot be read without a user gesture in the document: we give the focus back, and `Ctrl+V` does the rest.
           run: () => controller.focus(),
           disabled: lectureSeule,
         },
@@ -1263,8 +1165,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           run: () => linkButtonRef.current?.click(),
           disabled: lectureSeule,
         },
-        // Hors tableau, rien n'est ajouté : un bloc entier d'entrées grisées
-        // n'apprend rien et allonge le menu pour tout le monde.
+        // Outside a table, nothing is added: a whole block of greyed-out entries teaches nothing and lengthens the menu for everybody.
         ...(table
           ? tableEntries
               .filter((entry) => entry.label !== 'Insérer un tableau (3×3)')
@@ -1274,7 +1175,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     };
   }, [menus, selectedText, lectureSeule, table, controller]);
 
-  // Commandes pour la palette Ctrl+K
+  // Commands for the Ctrl+K palette
   const paletteCommands = useMemo<PaletteCommand[]>(
     () => [
       { id: 'furniture-header', title: 'En-tête de page…', category: 'Insertion', perform: () => setFurnitureBandToEdit('header') },
@@ -1312,8 +1213,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
     [commands, onSave, doc, handleExportPdf, handlePrint, openMathDialog, openImageDialog],
   );
 
-  // Titre de l'onglet = titre du document : un lecteur d'écran l'annonce en
-  // revenant sur l'onglet, et l'impression en PDF le propose comme nom.
+  // Tab title = document title: a screen reader announces it when coming back to the tab, and printing to PDF suggests it as the file name.
   const documentTitle = doc.meta.title || 'Sans titre';
   useEffect(() => {
     document.title = `${documentTitle} – Writer`;
@@ -1321,7 +1221,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
 
   return (
     <div className="writer">
-      {/* Barre de titre principale avec le titre et le menu empilés à gauche, et les actions à droite */}
+      {/* Main title bar with the title and the menu stacked on the left, and the actions on the right */}
       <header className="titlebar">
         <div className="titlebar__identity">
           <DocumentTitle
@@ -1347,14 +1247,11 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
               <span>{collab.shared ? 'Partagé' : 'Partager'}</span>
             </button>
           )}
-          {/* Ouvrir, Enregistrer, Exporter PDF et Imprimer vivent dans le menu
-              Fichier, et Imprimer aussi dans le ruban. Les répéter ici encombrait
-              l'en-tête sans rien offrir de plus. Reste le partage, qui n'a pas
-              d'autre point d'entrée. */}
+          {/* Open, Save, Export PDF and Print live in the File menu, and Print also in the ribbon. Repeating them here cluttered the header without offering anything more. What remains is sharing, which has no other entry point. */}
         </div>
       </header>
 
-      {/* Ruban complet avec les icônes vectorielles du système */}
+      {/* Full ribbon with the system's vector icons */}
       <Ribbon
         controller={controller}
         onPrint={handlePrint}
@@ -1368,7 +1265,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         linkButtonRef={linkButtonRef}
       />
 
-      {/* Panneau de recherche ancré */}
+      {/* Anchored search panel */}
       {findReplaceOpen && (
         <FindReplacePanel
           state={findReplaceState}
@@ -1383,7 +1280,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         />
       )}
 
-      {/* Règle graduée interactive */}
+      {/* Interactive graduated ruler */}
       {showRuler && (
         <Ruler
           zoom={zoom}
@@ -1400,19 +1297,15 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         />
       )}
 
-      {/* Espace de travail principal avec plan latéral et surface A4.
-          La classe est indispensable : `overflow: hidden` convient à l'écran,
-          mais rognerait les pages à l'impression. Seule une classe permet à la
-          feuille `@media print` de neutraliser ce conteneur. */}
+      {/* Main work area with the side outline and the A4 surface. The class is indispensable: `overflow: hidden` suits the screen, but would crop the pages when printing. Only a class lets the `@media print` stylesheet neutralize this container. */}
       <div
         className="writer-workspace"
-        // Repère principal : le raccourci « aller au contenu » des lecteurs
-        // d'écran mène au document plutôt qu'au ruban.
+        // Main landmark: the screen readers' "skip to content" shortcut leads to the document rather than to the ribbon.
         role="main"
         aria-label="Document"
         style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}
       >
-        {/* Plan du document (DocumentOutline) */}
+        {/* Document outline (DocumentOutline) */}
         <DocumentOutline
           documentState={doc}
           open={outlineOpen}
@@ -1420,25 +1313,14 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           onSelectHeading={handleSelectHeading}
         />
 
-        {/* Surface des pages physiques */}
+        {/* Surface of the physical pages */}
         <div ref={surfaceRef} className="writer-surface" style={{ flex: 1 }}>
-          {/*
-            Cadre du zoom. Il ne contient rien lui-même : sa seule raison d'être
-            est de porter, en pixels, la taille **mise à l'échelle** du contenu.
-            La mise à l'échelle se fait sur son enfant, qui garde sa taille
-            d'origine dans le flux — et c'est ce cadre, dimensionné à ce que
-            l'œil voit, qui décide des barres de défilement de la surface.
-          */}
+          {/* Zoom frame. It contains nothing itself: its only reason for existing is to carry, in pixels, the **scaled** size of the content. The scaling is done on its child, which keeps its original size in the flow, and it is this frame, sized to what the eye sees, that decides the scrollbars of the surface. */}
           <div
             className="writer-zoom"
             style={{ width: `${pileWidthPx * zoom}px`, height: `${pileHeightPx * zoom}px` }}
           >
-            {/*
-              L'enfant garde la taille **d'origine** : sans largeur explicite il
-              s'étirait sur celle du cadre, déjà multipliée par le zoom, et se
-              faisait mettre à l'échelle une seconde fois — 2 408 px de large à
-              150 % au lieu de 1 605.
-            */}
+            {/* The child keeps its **original** size: without an explicit width it stretched to that of the frame, already multiplied by the zoom, and got scaled a second time: 2,408 px wide at 150 % instead of 1,605. */}
             <div
               className="writer-zoom__contenu"
               style={{
@@ -1453,9 +1335,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                   width: `${geometry.pageWidthPx}px`,
                   gap: `${PAGE_GAP_PX}px`,
                 }}
-                // Déposer une image sur la page l'insère au curseur. `preventDefault`
-                // sur le survol est obligatoire : sans lui le navigateur refuse le
-                // dépôt et ouvre le fichier à la place, en quittant le document.
+                // Dropping an image on the page inserts it at the cursor. `preventDefault` on the hover is mandatory: without it the browser refuses the drop and opens the file instead, leaving the document.
                 onDragOver={(event) => {
                   if (event.dataTransfer.types.includes('Files')) event.preventDefault();
                 }}
@@ -1468,7 +1348,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                   void readFileAsDataUrl(fichier)
                     .then(handleDropImage)
                     .catch(() => {
-                      /* fichier illisible : rien de déposé, rien de cassé */
+                      /* unreadable file: nothing dropped, nothing broken */
                     });
                 }}
               >
@@ -1506,7 +1386,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                   />
                 ))}
 
-                {/* Zone de frappe invisible mais contrôlée */}
+                {/* Invisible but controlled typing area */}
                 <textarea
                   ref={inputRef}
                   className="writer-input"
@@ -1514,8 +1394,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
-                  // Cible de l'`aria-controls` de la barre de mise en forme :
-                  // sans cet identifiant, la référence ne menait nulle part.
+                  // Target of the formatting bar's `aria-controls`: without this id, the reference led nowhere.
                   id="document-body"
                   aria-label="Document Writer"
                   aria-multiline="true"
@@ -1531,17 +1410,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                 />
               </div>
 
-              {/*
-                Gouttière de commentaires (`SwPostItMgr`). Hors de la feuille, et
-                non dans sa marge : un commentaire est un objet de relecture, il ne
-                doit pas s'imprimer.
-
-                Elle est **dans** le cadre mis à l'échelle, et non à côté : c'est la
-                même transformation que les pages, donc chaque bulle reste en face
-                de son ancre à tous les niveaux de zoom sans porter son propre
-                `scale`. Sa hauteur est celle de la pile — les bulles y sont posées
-                en absolu, et sans hauteur explicite la bande était plate.
-              */}
+              {/* Comment gutter (`SwPostItMgr`). Outside the sheet, and not in its margin: a comment is a review object, it must not be printed.  It is **inside** the scaled frame, and not beside it: it is the same transformation as the pages, so every bubble stays opposite its anchor at all zoom levels without carrying its own `scale`. Its height is that of the stack: the bubbles are placed absolutely in it, and without an explicit height the band was flat. */}
               {hasComments && (
                 <div
                   className="writer-comment-gutter"
@@ -1573,7 +1442,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
 
       <LiveRegion message={announcement} />
 
-      {/* Barre d'état en bas */}
+      {/* Status bar at the bottom */}
       <div className="writer-status">
         <span>{`${layout.pages.length} page${layout.pages.length > 1 ? 's' : ''}`}</span>
         <span>{`${statistics.words} mot${statistics.words > 1 ? 's' : ''}`}</span>
@@ -1597,7 +1466,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         <span>{`${Math.round(zoom * 100)} %`}</span>
       </div>
 
-      {/* Dialogues et modales */}
+      {/* Dialogs and modals */}
       {collab?.rejection && (
         <div className="writer-refus" role="alert">
           <span>{collab.rejection}</span>
@@ -1674,8 +1543,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           contentWidthPt={contentWidthPt}
           onCancel={() => setImageDraft(null)}
           onSubmit={(resultat) => {
-            // Le dialogue se ferme tout de suite : attendre le dépôt derrière
-            // une fenêtre encore ouverte donnerait l'impression d'un blocage.
+            // The dialog closes right away: waiting for the upload behind a window that is still open would give the impression of a freeze.
             setImageDraft(null);
             void adresseFinale(resultat.src).then((src) => {
               const attributs = {
@@ -1685,8 +1553,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                 alt: resultat.alt,
                 ...(resultat.crop ? { crop: resultat.crop } : {}),
                 ...(resultat.caption ? { caption: resultat.caption } : {}),
-                // `0` est une valeur : on teste la présence, jamais la vérité,
-                // sinon une marge remise à zéro n'atteindrait jamais le run.
+                // `0` is a value: we test for presence, never for truthiness, otherwise a margin reset to zero would never reach the run.
                 ...(resultat.marginPt !== undefined ? { marginPt: resultat.marginPt } : {}),
                 ...(resultat.captionGapPt !== undefined
                   ? { captionGapPt: resultat.captionGapPt }
@@ -1736,11 +1603,8 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           bandeInitiale={furnitureBandToEdit}
           onChange={(updatedFurniture) => {
             /*
-             * Le dialogue publie à chaque frappe, pour que la page derrière lui
-             * montre l'en-tête en train de s'écrire. La commande ne doit donc
-             * ni reprendre le focus — le champ le perdrait une frappe sur deux
-             * — ni refonder la session, qui emporterait l'historique du
-             * document. `'mobilier'` regroupe la saisie en une seule annulation.
+             * The dialog publishes on every keystroke, so that the page behind it shows the header being written. The command must therefore neither take the focus back (the field would lose it every other keystroke) nor
+             * rebuild the session, which would take the document's history with it. `'mobilier'` (furniture) groups the typing into a single undo.
              */
             commands.updateDocument(
               'En-tête et pied de page',
@@ -1767,17 +1631,17 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   );
 }
 
-/** Statistiques du document */
-/** Un caractère d'espacement au sens d'`Intl` — le séparateur de mots. */
+/** Document statistics */
+/** A whitespace character in the `Intl` sense: the word separator. */
 function estEspace(code: number): boolean {
   return (
-    code === 0x20 || // espace
-    code === 0x09 || // tabulation
-    code === 0x0a || // saut de ligne
-    code === 0x0d || // retour chariot
-    code === 0x0c || // saut de page
-    code === 0x0b || // tabulation verticale
-    code === 0xa0 || // espace insécable
+    code === 0x20 || // space
+    code === 0x09 || // tab
+    code === 0x0a || // line feed
+    code === 0x0d || // carriage return
+    code === 0x0c || // form feed
+    code === 0x0b || // vertical tab
+    code === 0xa0 || // non-breaking space
     code === 0x1680 ||
     code === 0xfeff ||
     code === 0x2028 ||
@@ -1790,12 +1654,10 @@ function estEspace(code: number): boolean {
 }
 
 /**
- * Mots et caractères du document.
+ * Words and characters of the document.
  *
- * Le comptage se fait caractère par caractère plutôt que par `text.match(/\S+/g)` :
- * l'expression régulière alloue le tableau de **tous** les mots du paragraphe
- * pour n'en lire que la longueur, et le jette aussitôt. Sur un document long,
- * c'est une pression de ramasse-miettes gratuite, répétée à chaque comptage.
+ * Counting is done character by character rather than with `text.match(/\S+/g)`: the regular expression allocates the array of **all** the words of the paragraph only to read its length, then throws it away
+ * immediately. On a long document, that is free garbage-collector pressure, repeated on every count.
  */
 function computeStatistics(doc: WriterDocumentState): { words: number; characters: number } {
   let words = 0;

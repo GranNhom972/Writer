@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Rechercher et remplacer. Transposition de `SwCursor::Find` et de
- * `sw/source/core/crsr/findtxt.cxx`.
+ * Find and replace. (OpenOffice: `SwCursor::Find` and `sw/source/core/crsr/findtxt.cxx`.)
  *
- * La recherche se fait **paragraphe par paragraphe**. Une occurrence peut donc
- * traverser un changement de formatage — « bon**jour** » reste trouvable, parce
- * que les runs ne sont qu'une découpe de la même chaîne — mais jamais une
- * frontière de nœud, où le texte n'est pas contigu pour le lecteur.
+ * The search runs **paragraph by paragraph**. A match can therefore cross a formatting change
+ * ("bon**jour**" can still be found, because runs are only a way of cutting up the same
+ * string) but never a node boundary, where the text is not contiguous for the reader.
  *
- * Module pur : aucun React, aucun DOM.
+ * Pure module: no React, no DOM.
  */
 
 import { paragraphIndex, paragraphText, replaceParagraph } from '../document/document';
@@ -48,7 +46,7 @@ export interface SearchMatch {
   end: number;
 }
 
-/** Neutralise les caractères spéciaux : la saisie est du texte, pas un motif. */
+/** Neutralizes special characters: what the user types is text, not a pattern. */
 export function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -58,21 +56,20 @@ function buildRegExp(query: string, options: SearchOptions): RegExp | null {
 
   let pattern = escapeRegExp(query);
   if (options.wholeWord) {
-    // `\b` échoue sur les lettres accentuées : « é » n'est pas un caractère de
-    // mot au sens ASCII, si bien que « été » se découperait en trois. On
-    // délimite donc explicitement par « ni lettre, ni chiffre ».
+    // `\b` fails on accented letters: "é" is not a word character in the ASCII sense, so "été"
+    // would be cut into three. We therefore delimit explicitly with "neither letter nor digit".
     pattern = `(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`;
   }
 
   try {
     return new RegExp(pattern, options.matchCase ? 'gu' : 'giu');
   } catch {
-    // Motif impossible à compiler : on ne trouve rien plutôt que de lever.
+    // A pattern that cannot be compiled: we find nothing rather than throw.
     return null;
   }
 }
 
-/** Toutes les occurrences du document, dans l'ordre de lecture. */
+/** All the matches in the document, in reading order. */
 export function findMatches(
   doc: WriterDocumentState,
   query: string,
@@ -95,7 +92,7 @@ export function findMatches(
       const found = regexp.exec(text);
       if (!found) break;
       matches.push({ blockId, start: found.index, end: found.index + found[0].length });
-      // Une occurrence vide ferait boucler `exec` sur place : on avance d'un cran.
+      // An empty match would make `exec` loop in place: we step forward by one.
       if (found[0].length === 0) regexp.lastIndex += 1;
     }
   }
@@ -103,7 +100,7 @@ export function findMatches(
   return matches;
 }
 
-/** Position documentaire du début et de la fin d'une occurrence. */
+/** Document position of the start and the end of a match. */
 export function matchRange(match: SearchMatch): { start: DocumentPosition; end: DocumentPosition } {
   return {
     start: { blockId: match.blockId, offset: match.start },
@@ -112,11 +109,11 @@ export function matchRange(match: SearchMatch): { start: DocumentPosition; end: 
 }
 
 /**
- * Index de l'occurrence à considérer comme courante après un déplacement.
+ * Index of the match to treat as current after a move.
  *
- * On repart de la position du curseur plutôt que d'un compteur : après une
- * frappe, le nombre d'occurrences a pu changer, et un indice conservé
- * désignerait une autre occurrence que celle sous les yeux de l'usager.
+ * We start again from the cursor position rather than from a counter: after a keystroke the
+ * number of matches may have changed, and a kept index would designate a different match from
+ * the one the user is looking at.
  */
 export function matchNearest(
   doc: WriterDocumentState,
@@ -132,34 +129,34 @@ export function matchNearest(
     const rang = order.indexOf(match.blockId);
     if (rang > rangDepart || (rang === rangDepart && match.start >= from.offset)) return i;
   }
-  // Aucune occurrence après le curseur : la recherche boucle sur la première.
+  // No match after the cursor: the search wraps around to the first one.
   return 0;
 }
 
 /**
- * Formatage à donner au texte de remplacement.
+ * Formatting to give to the replacement text.
  *
- * Celui du **premier caractère de l'occurrence**, et non celui de la position
- * qui la précède : `formattingAt` hérite de la gauche, ce qui est la bonne
- * règle pour une frappe mais la mauvaise ici. Remplacer un mot en gras placé
- * juste après du texte normal lui aurait fait perdre son gras.
+ * That of the **first character of the match**, and not that of the position that precedes
+ * it: `formattingAt` inherits from the left, which is the right rule for typing but the wrong
+ * one here. Replacing a bold word placed right after normal text would have made it lose its
+ * bold.
  */
 function formattingOfMatch(runs: readonly TextRun[], start: number, end: number): RunFormatting {
   const first = sliceRuns(runs, start, end)[0];
   return first && first.text.length > 0 ? runFormatting(first) : formattingAt(runs, start);
 }
 
-/** Sélectionne une occurrence — c'est ainsi qu'on la met en évidence. */
+/** Selects a match: this is how it is highlighted. */
 export function selectMatch(state: EditorState, match: SearchMatch): EditorState {
   const { start, end } = matchRange(match);
   return { ...state, selection: makeSelection(start, end) };
 }
 
 /**
- * Remplace une occurrence.
+ * Replaces one match.
  *
- * Le texte inséré prend le formatage du **début** de l'occurrence : remplacer
- * un mot en gras par un autre le laisse en gras, ce qu'attend l'usager.
+ * The inserted text takes the formatting of the **start** of the match: replacing a bold word
+ * with another one leaves it bold, which is what the user expects.
  */
 export function replaceMatch(
   state: EditorState,
@@ -186,11 +183,11 @@ export function replaceMatch(
 }
 
 /**
- * Remplace toutes les occurrences, en **une** transformation.
+ * Replaces all the matches, in **one** transformation.
  *
- * Le remplacement s'effectue de la fin vers le début de chaque paragraphe :
- * dans l'autre sens, chaque substitution décalerait les occurrences suivantes
- * et il faudrait recalculer leurs positions à chaque tour.
+ * The replacement runs from the end to the start of each paragraph: the other way round, each
+ * substitution would shift the following matches and their positions would have to be
+ * recomputed on every turn.
  */
 export function replaceAll(
   state: EditorState,

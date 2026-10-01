@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Choix de la taille d'un tableau par survol d'une grille.
+ * Choosing the size of a table by hovering over a grid.
  *
- * Deux champs numériques dans une fenêtre modale demandent de se représenter un
- * tableau à partir de deux nombres, puis de valider pour savoir si on s'est
- * trompé. La grille **montre** la taille pendant qu'on la choisit : un geste,
- * aucune validation, aucun aller-retour.
+ * Two numeric fields in a modal window require imagining a table from two numbers, then validating to find out whether you were wrong. The grid **shows** the size while you choose it: one
+ * gesture, no validation, no round trip.
  *
- * Le clavier reste équivalent : flèches pour dimensionner, `Entrée` pour insérer
- * — le libellé annonce en continu la taille visée.
+ * The keyboard stays equivalent: arrows to size, `Enter` to insert; the label continuously announces the targeted size.
  */
 
 import { useRef, useState } from 'react';
@@ -112,8 +109,7 @@ export function TableSizePicker({
                         key={col}
                         type="button"
                         role="gridcell"
-                        // Une seule cellule est atteignable par tabulation : les
-                        // 80 cases sont parcourues aux flèches (motif « grid »).
+                        // Only one cell can be reached by tabbing: the 80 cells are moved through with the arrows ("grid" pattern).
                         tabIndex={-1}
                         className={`table-picker__cell${active ? ' table-picker__cell--active' : ''}`}
                         aria-label={`${col + 1} colonne${col > 0 ? 's' : ''} sur ${row + 1} ligne${row > 0 ? 's' : ''}`}
@@ -128,7 +124,7 @@ export function TableSizePicker({
               ))}
             </div>
 
-            {/* Retour permanent : la taille visée se lit sans compter les cases. */}
+            {/* Permanent feedback: the targeted size can be read without counting cells. */}
             <p className="table-picker__label" aria-live="polite">
               {size.cols} × {size.rows}
               <span className="table-picker__hint">

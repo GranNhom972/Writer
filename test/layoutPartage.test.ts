@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Partage structurel des mises en page entre deux paginations.
+ * Structural sharing of layouts between two paginations.
  *
- * La pagination est pure : mêmes entrées, même résultat. Ce qui est vérifié ici
- * est plus fort — mêmes entrées, **même objet**. C'est cette identité, et non
- * seulement l'égalité, qui permet à `React.memo(ParagraphView)` de renoncer au
- * rendu d'un paragraphe inchangé, et qui évite de recomposer ses lignes.
+ * Pagination is pure: same inputs, same result. What is checked here is stronger: same inputs, **same object**. It is that identity, and not merely equality, that lets `React.memo(ParagraphView)` skip rendering an unchanged
+ * paragraph, and that avoids recomposing its lines.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -55,11 +53,8 @@ describe('Partage structurel des mises en page', () => {
     const premier = paginateDocument(doc, { measurer });
 
     /*
-     * Une frappe telle que l'éditeur la produit : `replaceParagraph` remplace
-     * le seul nœud touché et reconduit tout le reste — les autres paragraphes
-     * comme les réglages par défaut — par identité. C'est cette conservation
-     * qui rend le partage possible, et c'est pourquoi le test passe par la
-     * commande réelle plutôt que de reconstruire un document à la main.
+     * A keystroke as the editor produces it: `replaceParagraph` replaces the single touched node and carries everything else over by identity (the other paragraphs as well as the default settings). It is this conservation
+     * that makes the sharing possible, and that is why the test goes through the real command rather than rebuilding a document by hand.
      */
     const cible = blocs[14]!;
     const second = paginateDocument(
@@ -77,7 +72,7 @@ describe('Partage structurel des mises en page', () => {
       if (avant !== undefined && avant === maintenant) partages += 1;
     }
 
-    // Les vingt-neuf autres sont réutilisés tels quels.
+    // The twenty-nine others are reused as they are.
     expect(partages).toBe(29);
     expect(second.paragraphLayouts.get(blocs[14]!.id)).not.toBe(
       premier.paragraphLayouts.get(blocs[14]!.id),
@@ -135,9 +130,8 @@ describe('Partage structurel des mises en page', () => {
     );
 
     /*
-     * Le document a changé, la table non : elle doit rester le **même** objet.
-     * C'est elle qui porte le contexte d'images transmis à chaque paragraphe ;
-     * une table neuve à chaque frappe suffirait à faire rendre tout le document.
+     * The document changed, the table did not: it must stay the **same** object. It is the one that carries the image context handed to every paragraph; a new table on every keystroke would be enough to make the whole
+     * document render.
      */
     expect(apres.figureNumbers).toBe(avant.figureNumbers);
   });

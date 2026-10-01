@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Styles OpenDocument. Transposition de `XMLTextStyleContext` et
- * `SvXMLStyleContext` (`xmloff/source/text/`, `xmloff/source/style/`).
+ * OpenDocument styles. (OpenOffice: `XMLTextStyleContext` and `SvXMLStyleContext`, `xmloff/source/text/`,
+ * `xmloff/source/style/`.)
  *
- * ODF sépare **styles nommés** (`styles.xml`, réutilisables) et **styles
- * automatiques** (`content.xml`, engendrés pour chaque combinaison d'attributs
- * réellement employée). Le modèle natif, lui, porte le formatage directement
- * sur les runs. La conversion est donc :
- *   – à la lecture, on **aplatit** : le style et ses parents deviennent des
- *     attributs de run ;
- *   – à l'écriture, on **factorise** : chaque jeu d'attributs distinct reçoit un
- *     style automatique, réutilisé partout où il réapparaît.
+ * ODF separates **named styles** (`styles.xml`, reusable) from **automatic styles** (`content.xml`,
+ * generated for each combination of attributes actually used). The native model, for its part, carries the
+ * formatting directly on the runs. The conversion is therefore:
+ *   - when reading, we **flatten**: the style and its parents become run attributes;
+ *   - when writing, we **factor**: each distinct attribute set gets an automatic style, reused wherever it
+ *     reappears.
  */
 
 import type {
@@ -34,7 +32,7 @@ import type {
 import { attr, localName, NS } from './namespaces';
 import { formatCm, formatPt, parseLengthPt, parsePercent } from './units';
 
-/** Attributs de paragraphe qu'un style peut porter. */
+/** Paragraph attributes a style can carry. */
 export type ParagraphAttributes = Partial<
   Pick<
     ParagraphNode,
@@ -52,28 +50,27 @@ export type ParagraphAttributes = Partial<
   >
 >;
 
-/** Attributs qu'un style de cellule peut porter (`<style:table-cell-properties>`). */
+/** Attributes a cell style can carry (`<style:table-cell-properties>`). */
 export type CellAttributes = Partial<
   Pick<TableCellNode, 'backgroundColor' | 'borderColor' | 'paddingPt'>
 >;
 
 /**
- * Propriétés graphiques d'un cadre. Une seule est portée : `fo:clip`, le
- * rognage — les autres (habillage, position flottante) supposent un cadre hors
- * flux, que l'ancrage « comme caractère » n'a pas.
+ * Graphic properties of a frame. Only one is carried: `fo:clip`, the crop. The others (wrapping, floating
+ * position) assume a frame outside the flow, which the "as a character" anchoring does not have.
  */
 export interface GraphicAttributes {
-  /** `fo:clip="rect(haut droite bas gauche)"`, tel quel. */
+  /** `fo:clip="rect(top right bottom left)"`, as is. */
   clip?: string;
-  /** `style:wrap` — mode d'habillage d'un cadre flottant (`SwFmtSurround`). */
+  /** `style:wrap`: wrapping mode of a floating frame (`SwFmtSurround`). */
   surround?: FlySurround;
-  /** `fo:margin-left` du cadre : la marge d'habillage, en points. */
+  /** `fo:margin-left` of the frame: the wrapping margin, in points. */
   wrapMarginPt?: number;
-  /** `style:horizontal-pos` — alignement horizontal (`SwFmtHoriOrient`). */
+  /** `style:horizontal-pos`: horizontal alignment (`SwFmtHoriOrient`). */
   horiOrient?: FlyHoriOrient;
-  /** `style:horizontal-rel` — repère de cet alignement (`text::RelOrientation`). */
+  /** `style:horizontal-rel`: the reference of that alignment (`text::RelOrientation`). */
   horiRelation?: FlyHoriRelation;
-  /** `style:run-through="foreground"` — le cadre couvre le texte (`RES_OPAQUE`). */
+  /** `style:run-through="foreground"`: the frame covers the text (`RES_OPAQUE`). */
   inFront?: boolean;
 }
 
@@ -95,16 +92,14 @@ export interface OdfStyle {
 
 export type StyleTable = Map<string, OdfStyle>;
 
-/* ------------------------------------------------------------------ lecture */
+/* ------------------------------------------------------------------ reading */
 
 /**
- * `style:wrap` d'ODF vers `SwSurround`.
+ * ODF's `style:wrap` to `SwSurround`.
  *
- * `dynamic` et `biggest` sont les deux formes du « côté le plus large » de
- * Writer, et elles se relisent en `ideal` — `SURROUND_IDEAL`, dont c'est
- * exactement la règle. Les ramener à `parallel`, comme on le faisait, perdait
- * l'arbitrage : le texte s'obstinait à écrire des deux côtés d'une image large
- * plutôt que de choisir le sien.
+ * `dynamic` and `biggest` are the two forms of Writer's "wider side", and both are read back as `ideal`
+ * (`SURROUND_IDEAL`), which is exactly its rule. Bringing them down to `parallel`, as was done, lost the
+ * arbitration: the text insisted on writing on both sides of a wide image rather than choosing its own.
  */
 function readSurround(value: string | null): FlySurround | null {
   switch (value) {
@@ -127,11 +122,10 @@ function readSurround(value: string | null): FlySurround | null {
 }
 
 /**
- * `style:run-through` d'ODF vers le calque de Writer.
+ * ODF's `style:run-through` to Writer's layer.
  *
- * `foreground` est le calque `heaven` — le cadre couvre le texte —, tout le
- * reste est `hell`. C'est un booléen dans le modèle (`imageInFront`) parce que
- * c'en est un dans `RES_OPAQUE`.
+ * `foreground` is the `heaven` layer (the frame covers the text), everything else is `hell`. It is a boolean
+ * in the model (`imageInFront`) because it is one in `RES_OPAQUE`.
  */
 function readRunThrough(value: string | null): boolean | null {
   if (value === 'foreground') return true;
@@ -139,7 +133,7 @@ function readRunThrough(value: string | null): boolean | null {
   return null;
 }
 
-/** `style:horizontal-pos` d'ODF vers `text::HoriOrientation`. */
+/** ODF's `style:horizontal-pos` to `text::HoriOrientation`. */
 function readHoriOrient(value: string | null): FlyHoriOrient | null {
   switch (value) {
     case 'left':
@@ -159,11 +153,10 @@ function readHoriOrient(value: string | null): FlyHoriOrient | null {
 }
 
 /**
- * `style:horizontal-rel` d'ODF vers `text::RelOrientation`.
+ * ODF's `style:horizontal-rel` to `text::RelOrientation`.
  *
- * ODF en connaît une dizaine ; seule la feuille entière se distingue ici de la
- * colonne de texte, et tout ce qui n'est pas explicitement la feuille s'y
- * ramène — mieux vaut un cadre dans la colonne qu'un cadre dans la marge.
+ * ODF knows about ten; here only the whole sheet is distinguished from the text column, and anything that is
+ * not explicitly the sheet falls back to the column: better a frame in the column than a frame in the margin.
  */
 function readHoriRelation(value: string | null): FlyHoriRelation | null {
   switch (value) {
@@ -185,11 +178,11 @@ function readHoriRelation(value: string | null): FlyHoriRelation | null {
   }
 }
 
-/** `fo:text-align` d'ODF vers l'alignement du modèle. */
+/** ODF's `fo:text-align` to the model's alignment. */
 function readAlignment(value: string | null): Alignment | null {
   switch (value) {
-    // `start` / `end` sont relatifs à la direction d'écriture ; le modèle les
-    // exprime en gauche/droite, la direction étant fixée au niveau du document.
+    // `start` / `end` are relative to the writing direction; the model expresses them as left/right, the direction
+    // being set at document level.
     case 'start':
     case 'left':
       return 'left';
@@ -210,7 +203,7 @@ function readTextProperties(element: Element): RunFormatting {
   const out: RunFormatting = {};
 
   const weight = attr(element, NS.fo, 'font-weight');
-  // ODF admet aussi les poids numériques : au-delà de 600, c'est du gras.
+  // ODF also allows numeric weights: above 600, it is bold.
   if (weight && (weight === 'bold' || Number(weight) >= 600)) out.bold = true;
 
   const style = attr(element, NS.fo, 'font-style');
@@ -246,9 +239,8 @@ function readParagraphProperties(element: Element): ParagraphAttributes {
   const alignment = readAlignment(attr(element, NS.fo, 'text-align'));
   if (alignment) out.alignment = alignment;
 
-  // `fo:line-height` s'exprime en pourcentage (interligne proportionnelle) ou
-  // en longueur (interligne fixe). Le modèle ne connaît que le facteur : une
-  // longueur est donc convertie par rapport au corps de 12 pt de référence.
+  // `fo:line-height` is expressed as a percentage (proportional spacing) or as a length (fixed spacing). The
+  // model only knows the factor: a length is therefore converted against the reference 12 pt font size.
   const lineHeight = attr(element, NS.fo, 'line-height');
   const percent = parsePercent(lineHeight);
   if (percent !== null) out.lineSpacing = percent;
@@ -280,12 +272,11 @@ function readParagraphProperties(element: Element): ParagraphAttributes {
 }
 
 /**
- * Attributs d'une cellule.
+ * Attributes of a cell.
  *
- * `fo:border` s'écrit « épaisseur style couleur » (« 0.5pt solid #000000 ») :
- * seule la couleur nous intéresse, le modèle portant l'épaisseur au niveau du
- * tableau. On lit aussi les quatre bordures séparées, qu'écrivent certains
- * producteurs à la place de la forme groupée.
+ * `fo:border` is written "thickness style color" ("0.5pt solid #000000"): only the color interests us, the
+ * model carrying the thickness at table level. We also read the four separate borders, which some producers
+ * write instead of the grouped form.
  */
 function readCellProperties(element: Element): CellAttributes {
   const out: CellAttributes = {};
@@ -309,8 +300,8 @@ function readCellProperties(element: Element): CellAttributes {
 }
 
 /**
- * Rassemble tous les `<style:style>` d'un document, styles automatiques et
- * styles nommés confondus : à la lecture, seule compte la table finale.
+ * Gathers every `<style:style>` of a document, automatic and named styles together: when reading, only the
+ * final table counts.
  */
 export function collectStyles(root: Element | Document): StyleTable {
   const table: StyleTable = new Map();
@@ -377,14 +368,14 @@ export function collectStyles(root: Element | Document): StyleTable {
   return table;
 }
 
-/** Profondeur maximale de la chaîne de styles — garde contre un cycle. */
+/** Maximum depth of the style chain: a guard against a cycle. */
 const MAX_STYLE_DEPTH = 16;
 
 /**
- * Résout un style en remontant ses parents.
+ * Resolves a style by climbing its parents.
  *
- * L'enfant l'emporte sur le parent (`SvXMLStyleContext::GetParentStyle`), donc
- * on part du parent le plus lointain et on écrase en redescendant.
+ * The child wins over the parent (`SvXMLStyleContext::GetParentStyle`), so we start from the most distant
+ * parent and overwrite on the way back down.
  */
 export function resolveStyle(
   table: StyleTable,
@@ -421,47 +412,45 @@ export function resolveStyle(
   return { text, paragraph, cell, graphic, column };
 }
 
-/* ----------------------------------------------------------------- écriture */
+/* ----------------------------------------------------------------- writing */
 
 /**
- * Fabrique de styles automatiques.
+ * Factory of automatic styles.
  *
- * Deux runs de même formatage doivent partager **un** style : sans cette
- * déduplication, un document de mille mots en gras produirait mille styles, ce
- * que Writer refuse d'ouvrir passé un certain volume.
+ * Two runs with the same formatting must share **one** style: without this deduplication, a document of a
+ * thousand bold words would produce a thousand styles, which Writer refuses to open past a certain volume.
  */
-/** Profondeur déclarée dans un style de liste — `MAXLEVEL` de `swtypes.hxx`. */
+/** Depth declared in a list style: `MAXLEVEL` of `swtypes.hxx`. */
 const MAX_ODF_LIST_LEVEL = 10;
 
-/** Puces par niveau, celles du style « List Bullet » de Writer. */
+/** Bullets per level, those of Writer's "List Bullet" style. */
 const ODF_BULLETS = ['\u2022', '\u25E6', '\u25AA'] as const;
 
-/** Géométrie d'habillage à graver dans le style d'un cadre flottant. */
+/** Wrapping geometry to write into the style of a floating frame. */
 export interface FrameFlyStyle {
   anchor: FlyAnchor;
   surround: FlySurround;
   marginPt?: number;
-  /** `text::HoriOrientation` du cadre. Absent = `from-left`. */
+  /** `text::HoriOrientation` of the frame. Absent = `from-left`. */
   horiOrient?: FlyHoriOrient;
-  /** `text::RelOrientation` du cadre. Absent = la colonne de texte. */
+  /** `text::RelOrientation` of the frame. Absent = the text column. */
   horiRelation?: FlyHoriRelation;
-  /** `RES_OPAQUE` : le cadre passe devant le texte. */
+  /** `RES_OPAQUE`: the frame goes in front of the text. */
   inFront?: boolean;
 }
 
 /**
- * `SwSurround` → `style:wrap` d'ODF.
+ * `SwSurround` → ODF's `style:wrap`.
  *
- * Les noms diffèrent sur deux valeurs et l'inversion est silencieuse : ODF dit
- * `run-through` là où Writer dit `THROUGHT`, et `parallel` recouvre le
- * `SURROUND_PARALLEL` du C++. Le reste se traduit mot pour mot.
+ * The names differ on two values and the swap is silent: ODF says `run-through` where Writer says `THROUGHT`,
+ * and `parallel` covers the C++ `SURROUND_PARALLEL`. The rest translates word for word.
  */
 const ODF_WRAP: Record<FlySurround, string> = {
   none: 'none',
   through: 'run-through',
   parallel: 'parallel',
-  // `SURROUND_IDEAL` s'écrit `dynamic` : c'est le nom qu'ODF donne au « côté le
-  // plus large », et celui que `readSurround` relit.
+  // `SURROUND_IDEAL` is written `dynamic`: this is the name ODF gives to the "wider side", and the one
+  // `readSurround` reads back.
   ideal: 'dynamic',
   left: 'left',
   right: 'right',
@@ -490,7 +479,7 @@ export class AutomaticStyles {
   private readonly declarations: string[] = [];
   private readonly frameStyles = new Map<string, string>();
 
-  /** Nom du style de texte pour ce formatage, ou `null` s'il est vide. */
+  /** Name of the text style for this formatting, or `null` if it is empty. */
   text(formatting: RunFormatting): string | null {
     const properties = textProperties(formatting);
     if (properties.length === 0) return null;
@@ -510,20 +499,18 @@ export class AutomaticStyles {
   }
 
   /**
-   * Style du cadre d'une image ancrée « comme caractère ».
+   * Style of the frame of an image anchored "as a character".
    *
-   * Un seul suffit pour tout le document : la géométrie propre à chaque image
-   * est portée par `svg:width`/`svg:height` sur le cadre lui-même, et ce style
-   * ne dit que le reste — pas d'habillage (`run-through` sans `wrap`), aligné
-   * sur la ligne de base, sans bordure.
+   * One is enough for the whole document: the geometry specific to each image is carried by
+   * `svg:width`/`svg:height` on the frame itself, and this style says only the rest: no wrapping (`run-through`
+   * without `wrap`), aligned on the baseline, no border.
    */
   private readonly listStyles = new Map<ListKind, string>();
 
   frame(clip?: string, fly?: FrameFlyStyle): string {
-    // Un style par valeur de rognage **et** par mode d'habillage : `fo:clip` et
-    // `style:wrap` sont tous deux portés par le style et non par le cadre, donc
-    // deux images qui en diffèrent ne peuvent pas partager le leur. Les images
-    // simples, elles, se partagent toujours `Fr1`.
+    // One style per crop value **and** per wrapping mode: `fo:clip` and `style:wrap` are both carried by the style
+    // and not by the frame, so two images that differ in them cannot share theirs. Simple images always share
+    // `Fr1`.
     const key = `${clip ?? ''}|${
       fly
         ? [
@@ -542,13 +529,11 @@ export class AutomaticStyles {
     const name = `Fr${this.frameStyles.size + 1}`;
     this.frameStyles.set(key, name);
 
-    // Un cadre « comme caractère » s'aligne sur la ligne de base du texte ; un
-    // cadre flottant se positionne dans son ancre. Confondre les deux fait
-    // rouvrir le document avec les images empilées en haut de page.
-    // Le repère « colonne de texte » n'a pas le même nom des deux côtés : ODF
-    // l'appelle `paragraph` sous une ancre de paragraphe et `page-content` sous
-    // une ancre de page. Écrire `paragraph` sur un cadre ancré à la page rend
-    // le style invalide, et Writer replace alors l'image en haut à gauche.
+    // An "as a character" frame aligns on the baseline of the text; a floating frame is positioned within its
+    // anchor. Mixing the two makes the document reopen with the images stacked at the top of the page.
+    // The "text column" reference does not have the same name on both sides: ODF calls it `paragraph` under a
+    // paragraph anchor and `page-content` under a page anchor. Writing `paragraph` on a frame anchored to the
+    // page makes the style invalid, and Writer then puts the image back at the top left.
     const relColonne = fly?.anchor === 'to-page' ? 'page-content' : 'paragraph';
     const position = fly
       ? `style:vertical-pos="from-top" style:vertical-rel="${relColonne}" ` +
@@ -559,8 +544,8 @@ export class AutomaticStyles {
       : `style:vertical-pos="baseline" style:vertical-rel="baseline"`;
 
     const wrap = `style:wrap="${fly ? ODF_WRAP[fly.surround] : 'none'}"`;
-    // `style:run-through` n'est écrit que sur un cadre flottant : un cadre dans
-    // la ligne n'a pas de calque, il est le texte.
+    // `style:run-through` is only written on a floating frame: a frame inside the line has no layer, it is the
+    // text.
     const runThrough = fly
       ? ` style:run-through="${fly.inFront ? 'foreground' : 'background'}"`
       : '';
@@ -585,15 +570,13 @@ export class AutomaticStyles {
   }
 
   /**
-   * Nom d'un style de liste, déclaré à la demande.
+   * Name of a list style, declared on demand.
    *
-   * ODF décrit une liste par un `<text:list-style>` portant **un élément par
-   * niveau** : c'est la seule chose qui distingue une puce d'un numéro, la
-   * balise `<text:list>` étant identique dans les deux cas. Sans ce style, une
-   * liste numérotée se rouvre en liste à puces.
+   * ODF describes a list with a `<text:list-style>` carrying **one element per level**: it is the only thing
+   * that tells a bullet from a number, the `<text:list>` tag being identical in both cases. Without this style,
+   * a numbered list reopens as a bulleted list.
    *
-   * Un style par nature suffit — tous les niveaux d'une même liste partagent
-   * la sienne, comme dans le style « List Number » de Writer.
+   * One style per kind is enough: all the levels of a list share theirs, as in Writer's "List Number" style.
    */
   list(kind: ListKind): string {
     const existing = this.listStyles.get(kind);
@@ -604,7 +587,7 @@ export class AutomaticStyles {
 
     const niveaux: string[] = [];
     for (let level = 1; level <= MAX_ODF_LIST_LEVEL; level += 1) {
-      // Le retrait croît d'un cran par niveau, comme `SwNumRule` par défaut.
+      // The indent grows by one step per level, like the default `SwNumRule`.
       const indent = `<style:list-level-properties text:space-before="${(level - 1) * 0.635}cm" text:min-label-width="0.635cm"/>`;
 
       if (kind === 'ordered') {
@@ -613,9 +596,8 @@ export class AutomaticStyles {
             `style:num-suffix="." style:num-format="1">${indent}</text:list-level-style-number>`,
         );
       } else {
-        // Une liste de tâches s'exporte en puces : ODF 1.2 ne connaît pas la
-        // case à cocher, et une puce reste lisible partout. L'état coché
-        // voyage dans le texte du paragraphe.
+        // A task list is exported as bullets: ODF 1.2 has no checkbox, and a bullet stays readable everywhere. The
+        // checked state travels in the paragraph's text.
         const puce = ODF_BULLETS[(level - 1) % ODF_BULLETS.length];
         niveaux.push(
           `<text:list-level-style-bullet text:level="${level}" ` +
@@ -628,7 +610,7 @@ export class AutomaticStyles {
     return name;
   }
 
-  /** Nom du style de paragraphe, ou `null` si le nœud n'a aucun attribut. */
+  /** Name of the paragraph style, or `null` if the node has no attribute. */
   paragraph(node: ParagraphNode): string | null {
     const properties = paragraphProperties(node);
     if (properties.length === 0) return null;
@@ -649,10 +631,10 @@ export class AutomaticStyles {
   }
 
   /**
-   * Style d'un tableau — largeur et alignement.
+   * Style of a table: width and alignment.
    *
-   * Writer exige un `table:style-name` sur chaque `<table:table>` : sans lui, le
-   * tableau s'ouvre à la largeur d'une colonne au lieu de la pleine justification.
+   * Writer requires a `table:style-name` on every `<table:table>`: without it, the table opens at the width of a
+   * single column instead of fully justified.
    */
   table(node: TableNode): string {
     const properties = [
@@ -674,7 +656,7 @@ export class AutomaticStyles {
     return name;
   }
 
-  /** Style d'une cellule — fond, bordure et marge intérieure. */
+  /** Style of a cell: background, border and inner margin. */
   cell(node: TableCellNode): string {
     const couleur = node.borderColor ?? '#c4c8ce';
     const properties = [
@@ -696,7 +678,7 @@ export class AutomaticStyles {
     return name;
   }
 
-  /** Style d'une colonne de tableau — largeur relative. */
+  /** Style of a table column: relative width. */
   column(relWidth: number): string {
     const rounded = Math.round(relWidth * 100) / 100;
     const existing = this.columnStyles.get(rounded);
@@ -748,8 +730,8 @@ function paragraphProperties(node: ParagraphNode): string[] {
   const out: string[] = [];
 
   if (node.alignment) {
-    // On réécrit en `start` / `end` : la forme logique d'ODF, qui suit la
-    // direction d'écriture au lieu de la figer.
+    // We write back as `start` / `end`: ODF's logical form, which follows the writing direction instead of fixing
+    // it.
     const value =
       node.alignment === 'left' ? 'start' : node.alignment === 'right' ? 'end' : node.alignment;
     out.push(`fo:text-align="${value}"`, 'style:justify-single-word="false"');

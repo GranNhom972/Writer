@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Suivi des modifications — `SwRangeRedline` / `SwRedlineTbl`
- * (`sw/source/core/doc/docredln.cxx`) et mode `REDLINE_ON`.
+ * Change tracking: `SwRangeRedline` / `SwRedlineTbl` (`sw/source/core/doc/docredln.cxx`) and the `REDLINE_ON` mode.
  *
- * L'invariant central : **en mode révision, on ne détruit rien**. Ces tests
- * vérifient les quatre issues d'`AcceptRedline`/`RejectRedline`, qui sont ce
- * qui distingue une révision d'une simple coloration du texte.
+ * The central invariant: **in review mode, nothing is destroyed**. These tests check the four outcomes of `AcceptRedline`/`RejectRedline`, which are what sets a revision apart from a simple coloring of the text.
  */
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, createParagraph, paragraphText } from '../src/domain/document/document';
@@ -66,14 +63,14 @@ describe('Pose des marques de révision', () => {
     const p = createParagraph('abcdef');
     const { doc } = markDeleted(docOf([p]), p.id, 1, 3, ALICE);
 
-    // Le texte est toujours là — c'est tout l'enjeu du mode révision.
+    // The text is still there: that is the whole point of review mode.
     expect(texteDu(doc)).toBe('abcdef');
     expect(listRedlineRanges(doc)[0]?.redline.type).toBe('delete');
     expect(listRedlineRanges(doc)[0]?.text).toBe('bc');
   });
 
   it('retire réellement le texte que le même auteur venait d\'insérer', () => {
-    // Corriger sa propre frappe ne doit pas laisser de traînée barrée.
+    // Correcting your own typing must not leave a struck-through trail.
     const p = createParagraph('abcdef');
     const inserted = markInserted(docOf([p]), p.id, 2, 4, ALICE);
     const { doc, removedRanges } = markDeleted(inserted, p.id, 2, 4, ALICE);
@@ -173,8 +170,7 @@ describe('Acceptation et rejet (SwDoc::AcceptRedline / RejectRedline)', () => {
     doc = markDeleted(doc, p.id, 5, 7, BOB).doc;
 
     const after = rejectAllRedlines(doc);
-    // L'ajout part, la coupe est annulée : on revient au texte d'origine
-    // moins ce qui n'y était pas.
+    // The insertion goes away, the deletion is cancelled: we are back to the original text minus what was not in it.
     expect(texteDu(after)).toBe('cdefghij');
     expect(hasRedlines(after)).toBe(false);
   });
@@ -219,7 +215,7 @@ describe('Mode révision dans l\'éditeur (REDLINE_ON)', () => {
 
     expect(texteDu(after.doc)).toBe('abcdef');
     expect(listRedlineRanges(after.doc)[0]?.text).toBe('bcd');
-    // Le curseur reste en fin de plage : le texte est toujours visible.
+    // The cursor stays at the end of the range: the text is still visible.
     expect(after.selection.focus.offset).toBe(4);
   });
 
@@ -237,8 +233,7 @@ describe('Mode révision dans l\'éditeur (REDLINE_ON)', () => {
       },
     });
 
-    // Les deux paragraphes existent toujours : la coupure survit jusqu'à
-    // l'acceptation, seule façon pour le rejet de tout restaurer.
+    // Both paragraphs still exist: the break survives until acceptance, the only way for a rejection to restore everything.
     expect(after.doc.blocks).toHaveLength(2);
     const ranges = listRedlineRanges(after.doc);
     expect(ranges).toHaveLength(2);
@@ -273,7 +268,7 @@ describe('Auteurs, couleurs et nettoyage', () => {
     expect(redlineAuthors(doc)).toEqual(['Alice', 'Bob']);
     expect(redlineAuthorColor(doc, 'Alice')).toBe(REDLINE_AUTHOR_COLORS[0]);
     expect(redlineAuthorColor(doc, 'Bob')).toBe(REDLINE_AUTHOR_COLORS[1]);
-    // Auteur inconnu : première couleur, jamais `undefined`.
+    // Unknown author: first color, never `undefined`.
     expect(redlineAuthorColor(doc, 'Carol')).toBe(REDLINE_AUTHOR_COLORS[0]);
   });
 

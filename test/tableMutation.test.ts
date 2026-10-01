@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Tests des mutations structurelles de tableaux (SwTable / SwTableLine / SwTableBox).
+ * Tests of the structural mutations of tables (SwTable / SwTableLine / SwTableBox).
  *
  * @vitest-environment jsdom
  */
@@ -37,12 +37,12 @@ describe('Mutations structurelles de tableaux', () => {
     expect(doc.blocks[0]?.type).toBe('table');
     if (doc.blocks[0]?.type !== 'table') return;
 
-    // Insertion au-dessous de la première ligne (index 0)
+    // Insertion below the first row (index 0)
     doc = insertTableRow(doc, table.id, 0, 'below');
     const table1 = doc.blocks[0] as typeof table;
     expect(table1.rows).toHaveLength(3);
 
-    // Insertion au-dessus de la première ligne
+    // Insertion above the first row
     doc = insertTableRow(doc, table.id, 0, 'above');
     const table2 = doc.blocks[0] as typeof table;
     expect(table2.rows).toHaveLength(4);
@@ -56,13 +56,13 @@ describe('Mutations structurelles de tableaux', () => {
     const table1 = doc.blocks[0] as typeof table;
     expect(table1.rows).toHaveLength(1);
 
-    // Supprimer la dernière ligne supprime le tableau
+    // Deleting the last row deletes the table
     doc = deleteTableRow(doc, table.id, 0);
     expect(doc.blocks.some((b) => b.type === 'table')).toBe(false);
   });
 
   it('insère une colonne et ajuste les pourcentages de largeur', () => {
-    const table = createTable(2, 2); // 2 colonnes à 50%
+    const table = createTable(2, 2); // 2 columns at 50%
     let doc = docOf([table]);
 
     doc = insertTableColumn(doc, table.id, 0, 'right');
@@ -74,7 +74,7 @@ describe('Mutations structurelles de tableaux', () => {
   });
 
   it('supprime une colonne et réajuste les largeurs', () => {
-    const table = createTable(2, 3); // 3 colonnes
+    const table = createTable(2, 3); // 3 columns
     let doc = docOf([table]);
 
     doc = deleteTableColumn(doc, table.id, 1);
@@ -98,22 +98,22 @@ describe('Mutations structurelles de tableaux', () => {
       },
     };
 
-    // Insérer ligne au-dessous
+    // Insert row below
     state = insertTableRowBelow(state);
     let currentTable = state.doc.blocks[0] as typeof table;
     expect(currentTable.rows).toHaveLength(3);
 
-    // Insérer colonne à droite
+    // Insert column to the right
     state = insertTableColumnRight(state);
     currentTable = state.doc.blocks[0] as typeof table;
     expect(currentTable.rows[0]?.cells).toHaveLength(3);
 
-    // Supprimer colonne
+    // Delete column
     state = deleteCurrentTableColumn(state);
     currentTable = state.doc.blocks[0] as typeof table;
     expect(currentTable.rows[0]?.cells).toHaveLength(2);
 
-    // Supprimer ligne
+    // Delete row
     state = deleteCurrentTableRow(state);
     currentTable = state.doc.blocks[0] as typeof table;
     expect(currentTable.rows).toHaveLength(2);
@@ -121,7 +121,7 @@ describe('Mutations structurelles de tableaux', () => {
 
   it('préserve les largeurs relatives de colonnes à l’export / import ODF', () => {
     const table = createTable(2, 2);
-    // Affecter des largeurs personnalisées (ex: 30% et 70%)
+    // Set custom widths (e.g. 30% and 70%)
     table.rows[0]!.cells[0]!.widthPercent = 30;
     table.rows[0]!.cells[1]!.widthPercent = 70;
     table.rows[1]!.cells[0]!.widthPercent = 30;

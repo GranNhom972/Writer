@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Commentaires marginaux (`SwPostItField` / `SwPostItMgr`) et signets
- * (`SwBookmark` / `IDocumentMarkAccess`).
+ * Margin comments (`SwPostItField` / `SwPostItMgr`) and bookmarks (`SwBookmark` / `IDocumentMarkAccess`).
  *
- * Les deux sous-systèmes partagent le même choix d'ancrage : le repère est un
- * **attribut de run**, il suit donc son texte par construction. Ces tests
- * vérifient surtout cette propriété-là — qu'une édition du texte commenté ou
- * marqué déplace le repère sans qu'aucun code de maintenance n'intervienne.
+ * Both subsystems share the same anchoring choice: the marker is a **run attribute**, so it follows its text by construction. These tests mostly check that property: that editing the commented or marked text moves
+ * the marker without any maintenance code being involved.
  */
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, createParagraph } from '../src/domain/document/document';
@@ -153,7 +150,7 @@ describe('Commentaires — ancrage et fils (SwPostItMgr)', () => {
     expect(after.comments ?? []).toHaveLength(0);
     expect(commentAnchors(after)).toHaveLength(0);
 
-    // L'ancre retirée, les runs voisins redeviennent fusionnables.
+    // With the anchor removed, the neighboring runs can be merged again.
     const paragraph = after.blocks[0];
     if (paragraph?.type !== 'paragraph') throw new Error('paragraphe attendu');
     expect(normalizeRuns(paragraph.runs)).toHaveLength(1);
@@ -186,7 +183,7 @@ describe('Commentaires — ancrage et fils (SwPostItMgr)', () => {
 
     const anchors = commentAnchors(state.doc);
     expect(anchors[0]?.threadId).toBe(threadId);
-    // La plage a glissé de deux caractères, sans code de maintenance.
+    // The range slid by two characters, with no maintenance code.
     expect(anchors[0]?.startOffset).toBe(5);
     expect(anchors[0]?.text).toBe('def');
   });
@@ -210,15 +207,13 @@ describe('Commentaires — ancrage et fils (SwPostItMgr)', () => {
     });
 
     expect(commentAnchors(state.doc)).toHaveLength(0);
-    // Le contenu survit tant qu'on n'a pas nettoyé — c'est le comportement de
-    // `SwPostItMgr`, qui laisse une chance de récupération.
+    // The content survives as long as nothing has been cleaned up: this is the behavior of `SwPostItMgr`, which leaves a chance of recovery.
     expect(state.doc.comments ?? []).toHaveLength(1);
     expect(pruneOrphanComments(state.doc).comments ?? []).toHaveLength(0);
   });
 
   it('trie les identifiants d\'ancre pour que deux runs voisins restent fusionnables', () => {
-    // C'est l'invariant `sameFormatting` : la clé est scalaire et doit être
-    // canonique, faute de quoi « a,b » et « b,a » ne seraient jamais égaux.
+    // This is the `sameFormatting` invariant: the key is scalar and must be canonical, otherwise "a,b" and "b,a" would never be equal.
     expect(joinCommentIds(['b', 'a'])).toBe('a,b');
     expect(joinCommentIds(['a', 'b'])).toBe('a,b');
     expect(joinCommentIds([])).toBeUndefined();
@@ -245,7 +240,7 @@ describe('Commentaires — ancrage et fils (SwPostItMgr)', () => {
     expect(anchors).toHaveLength(2);
     expect(commentThreads(second.doc)).toHaveLength(2);
 
-    // Le run central porte bien les deux identifiants.
+    // The middle run does carry both ids.
     const paragraph = second.doc.blocks[0];
     if (paragraph?.type !== 'paragraph') throw new Error('paragraphe attendu');
     const central = paragraph.runs.find((run) => run.text === 'de');
@@ -338,7 +333,7 @@ describe('Signets et renvois internes (SwBookmark)', () => {
       blockId: titre.id,
       offset: 0,
     });
-    // Adresse externe : ce n'est pas au résolveur interne de s'en occuper.
+    // External address: it is not the internal resolver's business.
     expect(resolveInternalLink(doc, 'https://exemple.fr')).toBeNull();
     expect(resolveInternalLink(doc, '#inexistant')).toBeNull();
   });

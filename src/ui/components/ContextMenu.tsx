@@ -1,32 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Menu contextuel du document — le clic droit.
+ * Context menu of the document: the right click.
  *
- * Les commandes de tableau ne vivaient que dans le menu « Tableau » de la barre
- * supérieure. Or c'est au clic droit **sur la grille** qu'on les cherche : c'est
- * là que Word, Google Docs et Writer les placent, et c'est le seul endroit où
- * elles désignent sans ambiguïté la ligne et la colonne visées. Un utilisateur
- * qui ne trouve pas « supprimer la ligne » sous son curseur conclut qu'elle
- * n'existe pas.
+ * The table commands only lived in the "Table" menu of the top bar. Yet people look for them on a right click **on the grid**: that is where
+ * Word, Google Docs and Writer put them, and it is the only place where they unambiguously designate the targeted row and column. A user who
+ * does not find "delete the row" under their cursor concludes that it does not exist.
  *
- * Le panneau est celui de la barre de menus, réutilisé tel quel : mêmes
- * entrées, mêmes séparateurs, même navigation au clavier.
+ * The panel is that of the menu bar, reused as it is: same entries, same separators, same keyboard navigation.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
 import { MenuPanel, type MenuDefinition } from './MenuBar';
 
 export interface ContextMenuProps {
-  /** Position du clic, en coordonnées de fenêtre. */
+  /** Position of the click, in window coordinates. */
   x: number;
   y: number;
   menu: MenuDefinition;
   onClose: () => void;
 }
 
-/** Marge minimale entre le panneau et le bord de la fenêtre. */
+/** Minimum margin between the panel and the edge of the window. */
 const EDGE_PX = 8;
 
 export function ContextMenu({ x, y, menu, onClose }: ContextMenuProps): JSX.Element {
@@ -34,10 +30,9 @@ export function ContextMenu({ x, y, menu, onClose }: ContextMenuProps): JSX.Elem
   const [position, setPosition] = useState({ left: x, top: y });
 
   /*
-   * Le panneau se replie sur le bord opposé plutôt que de déborder : un menu
-   * ouvert près du bas de l'écran doit rester entièrement lisible, sans faire
-   * défiler la page. La mesure a lieu en `useLayoutEffect`, avant la peinture,
-   * pour qu'aucune image ne montre le panneau à sa position naïve.
+   * The panel folds back on the opposite edge rather than overflow: a menu opened near the bottom of the screen must stay fully readable,
+   * without scrolling the page. The measurement happens in `useLayoutEffect`, before painting, so that no frame shows the panel at its naive
+   * position.
    */
   useLayoutEffect(() => {
     const panel = hostRef.current?.firstElementChild;
@@ -57,13 +52,11 @@ export function ContextMenu({ x, y, menu, onClose }: ContextMenuProps): JSX.Elem
   }, [x, y]);
 
   useEffect(() => {
-    // Un clic ailleurs ferme, comme la barre de menus. `pointerdown` plutôt que
-    // `click` : le menu doit disparaître dès l'appui, pas au relâchement.
+    // A click elsewhere closes it, like the menu bar. `pointerdown` rather than `click`: the menu must disappear on press, not on release.
     const onPointerDown = (event: PointerEvent): void => {
       if (!hostRef.current?.contains(event.target as Node)) onClose();
     };
-    // Un défilement ou un redimensionnement laisserait le panneau orphelin,
-    // ancré à un point qui n'a plus de rapport avec ce qu'il désigne.
+    // Scrolling or resizing would leave the panel orphaned, anchored to a point that no longer has anything to do with what it designates.
     document.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('resize', onClose);
     window.addEventListener('wheel', onClose, { passive: true });

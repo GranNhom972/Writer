@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Unités de mise en page.
+ * Layout units.
  *
- * Writer calcule en **twips** (1/1440 pouce) parce qu'il vise l'impression.
- * Ici la cible est l'écran : on calcule en **pixels CSS**, dont la définition
- * est justement métrique (96 px = 1 pouce), donc la conversion reste exacte et
- * le rendu à l'impression suit sans facteur d'échelle supplémentaire.
+ * Writer computes in **twips** (1/1440 inch) because it targets printing. Here the
+ * target is the screen: we compute in **CSS pixels**, whose definition is precisely
+ * metric (96 px = 1 inch), so the conversion stays exact and printing follows with no
+ * extra scale factor.
  */
 
 export const PX_PER_INCH = 96;
 export const MM_PER_INCH = 25.4;
 export const PT_PER_INCH = 72;
-/** 1 twip = 1/1440 pouce — l'unité interne de Writer, utile aux imports ODF. */
+/** 1 twip = 1/1440 inch: Writer's internal unit, useful for ODF imports. */
 export const TWIPS_PER_INCH = 1440;
 
 export function mmToPx(mm: number): number {

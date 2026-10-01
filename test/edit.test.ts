@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Édition atomique et historique (`SwUndo`).
+ * Atomic editing and history (`SwUndo`).
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -51,7 +51,7 @@ function textOf(state: EditorState, index = 0): string {
   return paragraphText(paragraphIndex(state.doc).byId.get(id)!.paragraph);
 }
 
-/** Sélectionne `[from, to)` dans le paragraphe de rang `index`. */
+/** Selects `[from, to)` in the paragraph of rank `index`. */
 function select(state: EditorState, from: number, to: number, index = 0): EditorState {
   const id = paragraphIndex(state.doc).order[index]!;
   return setSelection(state, makeSelection({ blockId: id, offset: from }, { blockId: id, offset: to }));
@@ -81,7 +81,7 @@ describe('insertion de texte', () => {
     let state = stateOf([createParagraph('')]);
     const before = state.doc;
     state = toggleRunFormat(state, 'bold');
-    // Rien n'est encore écrit dans le document : le gras est seulement armé.
+    // Nothing has been written into the document yet: the bold is only armed.
     expect(state.doc).toBe(before);
     expect(state.pendingFormat).toEqual({ bold: true });
 
@@ -104,7 +104,7 @@ describe('suppression', () => {
     const length = textOf(state).length;
     state = select(state, length - 1, length - 1);
     state = deleteBackward(state);
-    // L'emoji entier disparaît, pas une moitié de paire de substitution.
+    // The whole emoji disappears, not one half of a surrogate pair.
     expect(textOf(state)).toBe('ab');
   });
 
@@ -145,8 +145,7 @@ describe('suppression', () => {
       { blockId: order[2]!, offset: 1 },
     ));
     const after = deleteSelection(state);
-    // Comportement de Writer : ce qui est couvert par la sélection disparaît,
-    // tableau compris. Laisser une grille vidée de son texte n'aurait aucun sens.
+    // Writer's behavior: what the selection covers disappears, table included. Leaving a grid emptied of its text would make no sense.
     expect(after.doc.blocks.some((block) => block.type === 'table')).toBe(false);
     expect(paragraphIndex(after.doc).order).toHaveLength(1);
     expect(paragraphText(paragraphIndex(after.doc).byId.get(order[0]!)!.paragraph)).toBe('après');
@@ -160,8 +159,7 @@ describe('suppression', () => {
       { blockId: order[1]!, offset: 0 },
     ));
     const after = deleteSelection(state);
-    // Chaque cellule garde son nœud de texte : `SwNodes::_MoveNodes` refuse de
-    // traverser la frontière d'une cellule.
+    // Each cell keeps its text node: `SwNodes::_MoveNodes` refuses to cross the boundary of a cell.
     expect(paragraphIndex(after.doc).order).toHaveLength(2);
   });
 });
@@ -213,7 +211,7 @@ describe('formatage', () => {
 
     state = toggleRunFormat(state, 'bold');
     paragraph = paragraphIndex(state.doc).byId.get(state.selection.focus.blockId)!.paragraph;
-    // Le retrait refusionne : on revient à un seul run, sans trace du passage.
+    // The removal merges again: we are back to a single run, with no trace of the passage.
     expect(paragraph.runs).toHaveLength(1);
   });
 
@@ -338,7 +336,7 @@ describe('historique — SwUndoManager', () => {
         typingGroup(before.blockId, before.offset, next.selection.focus.offset, char),
       );
     }
-    // « ab », puis l'espace, puis « c » : trois entrées.
+    // "ab", then the space, then "c": three entries.
     expect(session.history.past).toHaveLength(3);
   });
 

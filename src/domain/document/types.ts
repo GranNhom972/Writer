@@ -1,35 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Couche 1 — modèle du document.
+ * Layer 1: the document model.
  *
- * Transposition directe du modèle StarWriter (`aoo-4.1.16/main/sw`) :
+ * A document is an ordered list of blocks (paragraphs, headings, tables, tables
+ * of contents). Each paragraph holds its text as a list of "runs": stretches of
+ * text that share the same character formatting. The cursor and the selection are
+ * expressed as positions in those paragraphs.
  *
- *   SwDoc        → WriterDocumentState  (tableau ordonné de nœuds de contenu)
+ * This is a direct transposition of the StarWriter model (`aoo-4.1.16/main/sw`).
+ * Names on the left are the OpenOffice classes, on the right what they became here:
+ *
+ *   SwDoc        → WriterDocumentState  (ordered array of content nodes)
  *   SwNodes      → WriterDocumentState.blocks
- *   SwTxtNode    → ParagraphNode        (chaîne brute + liste d'attributs)
- *   SwpHints     → ParagraphNode.runs   (plages de formatage de caractère)
- *   SwAttrSet    → attributs de paragraphe (alignment, lineSpacing, retraits)
+ *   SwTxtNode    → ParagraphNode        (raw string + list of attributes)
+ *   SwpHints     → ParagraphNode.runs   (character-formatting ranges)
+ *   SwAttrSet    → paragraph attributes (alignment, lineSpacing, indents)
  *   SwTable*     → TableNode / TableCellNode
  *   SwPaM        → DocumentSelection    (Point and Mark)
  *   SwPageDesc   → PageSetup
  *
- * Différence assumée avec le C++ : là où `SwpHints` conserve des plages
- * *chevauchantes* (`[start,end)` par attribut), on stocke des **runs disjoints**
- * déjà aplatis. Les deux représentations sont équivalentes ; la seconde se rend
- * directement en DOM sans étape d'aplatissement, ce qui est le seul usage ici.
- * L'invariant correspondant (`SwpHints::MergePortions`, thints.cxx:2684) est
- * conservé : **deux runs adjacents de formatage identique sont toujours fusionnés**.
+ * A deliberate difference from the C++: where `SwpHints` keeps *overlapping*
+ * ranges (`[start,end)` per attribute), we store **disjoint runs** that are
+ * already flattened. The two representations are equivalent; the second renders
+ * straight into the DOM with no flattening step, which is its only use here. The
+ * matching invariant (`SwpHints::MergePortions`, thints.cxx:2684) is kept:
+ * **two adjacent runs with identical formatting are always merged**.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
-/** Plage de texte homogène. Inspiré de `SwTxtAttr` / `SwpHints`. */
+/**
+ * A run: a stretch of text that has the same formatting all the way through.
+ * (Counterpart of OpenOffice's `SwTxtAttr` / `SwpHints`.)
+ */
 export interface TextRun {
   text: string;
   bold?: boolean;
@@ -41,57 +50,56 @@ export interface TextRun {
   color?: string;
   backgroundColor?: string;
   linkHref?: string;
-  /** Code LaTeX de la formule mathématique si ce run représente un objet mathématique. */
+  /** LaTeX source of the formula, when this run stands for a math object. */
   mathLatex?: string;
-  /** Vrai si la formule est affichée centrée sur sa propre ligne (display mode). */
+  /** True if the formula is shown centered on its own line (display mode). */
   mathDisplay?: boolean;
 
-  /** Texte de la note de bas de page si ce run représente un appel de note (SwFtnFrm). */
+  /** Text of the footnote, when this run is a footnote call (OpenOffice: `SwFtnFrm`). */
   footnoteText?: string;
-  /** Identifiant unique de la note. */
+  /** Unique id of the footnote. */
   footnoteId?: string;
 
-  /* -- Image ancrée « comme caractère » ------------------------------------
+  /*
+   * -- Image anchored "as a character" -----------------------------------
    *
-   * Writer range une image dans un cadre (`SwFlyFrm`, layout/fly.cxx). Quatre
-   * ancrages existent ; un seul coule **dans** la ligne : `FLY_AS_CHAR`, dont
-   * le cadre est un `SwFlyCntFrm` (layout/flycnt.cxx) traité par le formateur
-   * de texte comme une portion de largeur et de hauteur fixes.
+   * Writer keeps an image inside a frame (`SwFlyFrm`, layout/fly.cxx). Four anchoring
+   * modes exist, and only one flows **inside** the line: `FLY_AS_CHAR`, whose frame is
+   * a `SwFlyCntFrm` (layout/flycnt.cxx) that the text formatter treats as a portion
+   * of fixed width and height.
    *
-   * C'est cet ancrage-là qui est porté ici, et il l'est donc comme un attribut
-   * de run — pas comme un nœud à part. La conséquence est celle du C++ : une
-   * image se sélectionne, se copie, se supprime et se justifie exactement comme
-   * un caractère, sans que le curseur ni la pagination aient un cas de plus à
-   * connaître. Les trois autres ancrages (à la page, au paragraphe, au
-   * caractère avec habillage) demandent un cadre flottant hors flux : ils ne
-   * sont pas portés, cf. README.
+   * That is the mode supported here, and so it is stored as an attribute of the run,
+   * not as a separate node. The consequence is the same as in the C++: an image is
+   * selected, copied, deleted and justified exactly like a character, so neither the
+   * cursor nor the pagination needs one more special case. The other three anchoring
+   * modes (to the page, to the paragraph, to a character with text wrapping) need a
+   * floating frame outside the text flow: they are not supported, see the README.
    */
 
-  /** Source de l'image : `data:` en local, adresse relative une fois déposée. */
+  /** Source of the image: a `data:` URL while local, a relative address once uploaded. */
   imageSrc?: string;
-  /** Largeur du cadre, en points typographiques (`SwFmtFrmSize`). */
+  /** Width of the frame, in typographic points (`SwFmtFrmSize`). */
   imageWidthPt?: number;
   imageHeightPt?: number;
-  /** Texte alternatif (`SdrObject::SetTitle`), lu par les technologies d'assistance. */
+  /** Alternative text (`SdrObject::SetTitle`), read by assistive technologies. */
   imageAlt?: string;
 
-  /* -- Rognage (`SvxGrfCrop`, svx/inc/svx/grfcrop.hxx) ----------------------
+  /*
+   * -- Cropping (`SvxGrfCrop`, svx/inc/svx/grfcrop.hxx) --------------------
    *
-   * Writer conserve quatre **retraits**, un par bord, retranchés de l'image
-   * d'origine — et non un rectangle de découpe. La différence compte : rogner
-   * deux fois se compose alors naturellement, et l'image reste intacte, seul
-   * son cadrage change. On peut donc toujours revenir en arrière.
+   * Writer keeps four **insets**, one per edge, that are cut from the original image
+   * (not a crop rectangle). The difference matters: cropping twice then composes
+   * naturally, and the image stays intact, only its framing changes. So it is always
+   * possible to go back.
    *
-   * Là où le C++ compte en 1/100 mm, on compte en **fraction de l'original**
-   * (0 à 1). La couche 1 ne connaît pas la taille en pixels de l'image — elle
-   * n'en connaît que l'adresse — et une fraction reste juste quelle que soit
-   * cette taille. La conversion en longueurs absolues n'a lieu qu'à l'export
-   * ODF, où `fo:clip` les exige.
+   * Where the C++ counts in 1/100 mm, we count as a **fraction of the original**
+   * (0 to 1). Layer 1 does not know the image's size in pixels (only its address),
+   * and a fraction stays correct whatever that size is. The conversion to absolute
+   * lengths only happens in the ODF export, where `fo:clip` requires them.
    *
-   * Les quatre valeurs sont des clés **distinctes** et non un objet : la
-   * comparaison de formatage (`sameFormatting`) se fait par `!==`, et deux
-   * objets de contenu identique n'y seraient jamais égaux — deux runs voisins
-   * cesseraient alors de fusionner.
+   * The four values are **separate** keys and not an object: formatting comparison
+   * (`sameFormatting`) uses `!==`, and two objects with identical content would never
+   * be equal there, so two neighboring runs would stop merging.
    */
 
   imageCropTopPct?: number;
@@ -99,172 +107,189 @@ export interface TextRun {
   imageCropBottomPct?: number;
   imageCropLeftPct?: number;
 
-  /* -- Cadre flottant (`SwFlyFrm` libre, layout/fly.cxx) --------------------
+  /*
+   * -- Floating frame (free `SwFlyFrm`, layout/fly.cxx) --------------------
    *
-   * `FLY_AS_CHAR` ci-dessus coule dans la ligne. Les trois autres ancrages de
-   * Writer (`RndStdIds`, fmtanchr.hxx) sortent le cadre du flux : il se pose à
-   * une coordonnée, et le texte s'écoule *autour*. C'est `SwFlyFreeFrm`, dont
-   * la géométrie est calculée par `SwFlyFrm::MakeAll` puis retranchée de la
-   * largeur utile de chaque ligne traversée.
+   * `FLY_AS_CHAR` above flows inside the line. The three other Writer anchoring modes
+   * (`RndStdIds`, fmtanchr.hxx) take the frame out of the flow: it sits at a
+   * coordinate and the text flows *around* it. This is `SwFlyFreeFrm`, whose geometry
+   * is computed by `SwFlyFrm::MakeAll` and then subtracted from the usable width of
+   * every line it crosses.
    *
-   * Le mode d'habillage est celui de `SwFmtSurround` (fmtsrndenum.hxx:27) :
-   * `none` réserve toute la bande, `through` n'en réserve rien (le texte passe
-   * dessous), `parallel` évite le cadre des deux côtés, `left`/`right` ne
-   * gardent le texte que du côté nommé.
+   * The wrapping mode is the one of `SwFmtSurround` (fmtsrndenum.hxx:27): `none`
+   * reserves the whole band, `through` reserves nothing (the text passes underneath),
+   * `parallel` avoids the frame on both sides, and `left`/`right` only keep the text
+   * on the named side.
    *
-   * Un run porteur d'`imageAnchor` autre que `as-char` reste un caractère
-   * U+FFFC dans la chaîne : c'est son **point d'ancrage**. Il ne consomme
-   * aucune largeur dans la ligne — sa géométrie est donnée par imageX/imageY.
+   * A run carrying an `imageAnchor` other than `as-char` stays a U+FFFC character in
+   * the string: it is its **anchor point**. It takes no width in the line, because
+   * its geometry is given by imageX/imageY.
    */
 
-  /** `RndStdIds` : `as-char` coule dans la ligne, les autres flottent. */
-  /* -- Légende de figure --------------------------------------------------
-   *
-   * Le **numéro n'est pas stocké**, seulement le texte et le mode.
-   *
-   * C'est le choix qu'a fait Writer pour ses champs de séquence
-   * (`SwSetExpField` de type `SwGetSetExpType::Sequence`) : la valeur est
-   * recalculée à l'affichage, jamais conservée. Un numéro écrit dans le
-   * document serait faux dès la première insertion au-dessus, et il faudrait
-   * renuméroter tout le reste à chaque édition — c'est précisément par là que
-   * les doublons arrivent. Ici, `figureNumbering` le dérive de l'ordre du
-   * document, et la question ne se pose plus.
+  /**
+   * How the image is anchored (`RndStdIds`): `as-char` flows inside the line, the
+   * others float.
    */
-  /** Texte saisi par l'utilisateur, sans le préfixe « Figure n°X : ». */
+  /*
+   * -- Figure caption ----------------------------------------------------
+   *
+   * The **number is not stored**, only the text and the mode.
+   *
+   * This is the choice Writer made for its sequence fields (`SwSetExpField` of type
+   * `SwGetSetExpType::Sequence`): the value is recomputed when displayed and never
+   * kept. A number written into the document would be wrong as soon as something is
+   * inserted above it, and everything after it would have to be renumbered on every
+   * edit, which is precisely how duplicates appear. Here, `figureNumbering` derives
+   * it from the document order, and the question goes away.
+   */
+  /** Text typed by the user, without the "Figure n°X:" prefix. */
   imageCaption?: string;
-  /** Au-dessus ou au-dessous de l'image. Par défaut au-dessous. */
+  /** Above or below the image. Below by default. */
   imageCaptionPosition?: 'above' | 'below';
   imageCaptionAlign?: 'left' | 'center' | 'right';
   /**
-   * Numérotation automatique. `undefined` vaut **activée** : c'est le mode par
-   * défaut demandé, et il s'applique donc aussi aux images déjà présentes.
+   * Automatic numbering. `undefined` means **on**: it is the requested default mode,
+   * so it also applies to images that are already in the document.
    */
   imageCaptionManual?: boolean;
 
   /**
-   * Marge autour du cadre — image et légende comprises —, en points.
+   * Margin around the frame (image and caption included), in points.
    *
-   * Le moteur l'ajoute aux quatre côtés de la boîte mesurée : elle repousse
-   * donc réellement le texte, au lieu d'être un simple retrait décoratif que
-   * les lignes viendraient recouvrir.
+   * The engine adds it to the four sides of the measured box, so it really pushes the
+   * text away, instead of being a decorative indent that lines would simply run over.
    */
   imageMarginPt?: number;
-  /** Blanc entre l'image et sa légende, en points. */
+  /** Space between the image and its caption, in points. */
   imageCaptionGapPt?: number;
 
   imageAnchor?: FlyAnchor;
-  /** `SwFmtSurround` : mode d'habillage du texte autour du cadre flottant. */
+  /** How the text wraps around the floating frame (`SwFmtSurround`). */
   imageSurround?: FlySurround;
-  /** Abscisse du cadre, en points, relative à son ancre (`SwFmtHoriOrient`). */
+  /**
+   * Horizontal position of the frame, in points, relative to its anchor
+   * (`SwFmtHoriOrient`).
+   */
   imageXPt?: number;
-  /** Ordonnée du cadre, en points, relative à son ancre (`SwFmtVertOrient`). */
+  /**
+   * Vertical position of the frame, in points, relative to its anchor
+   * (`SwFmtVertOrient`).
+   */
   imageYPt?: number;
-  /** Marge d'habillage autour du cadre (`SvxLRSpaceItem` du cadre), en points. */
+  /** Wrapping margin around the frame (the frame's `SvxLRSpaceItem`), in points. */
   imageWrapMarginPt?: number;
 
-  /* -- Position du cadre (`SwFmtHoriOrient`, sw/inc/fmtornt.hxx) ------------
+  /*
+   * -- Position of the frame (`SwFmtHoriOrient`, sw/inc/fmtornt.hxx) -------
    *
-   * `imageXPt` seul ne suffit pas à poser un cadre : une abscisse figée en
-   * points cesse d'être juste dès que la marge de page change, et « collé au
-   * bord droit » redevient alors « à 12,3 cm du bord gauche ».
+   * `imageXPt` alone is not enough to place a frame: an x coordinate frozen in points
+   * stops being right as soon as the page margin changes, and "stuck to the right
+   * edge" turns into "12.3 cm from the left edge".
    *
-   * Writer sépare donc l'**orientation** de son **repère** — `SwFmtHoriOrient`
-   * porte `text::HoriOrientation` (LEFT, CENTER, RIGHT, NONE) et
-   * `text::RelOrientation` (PRINT_AREA, PAGE_FRAME, PAGE_PRINT_AREA). Seule
-   * `NONE`, ici `from-left`, consulte l'abscisse ; les trois autres la
-   * recalculent à chaque mise en page.
+   * So Writer separates the **orientation** from its **reference**: `SwFmtHoriOrient`
+   * carries `text::HoriOrientation` (LEFT, CENTER, RIGHT, NONE) and
+   * `text::RelOrientation` (PRINT_AREA, PAGE_FRAME, PAGE_PRINT_AREA). Only `NONE`
+   * (here `from-left`) looks at the x coordinate; the other three recompute it at
+   * every layout.
    */
 
-  /** `text::HoriOrientation` : alignement horizontal, ou `from-left` pour un décalage libre. */
+  /** `text::HoriOrientation`: horizontal alignment, or `from-left` for a free offset. */
   imageHoriOrient?: FlyHoriOrient;
-  /** `text::RelOrientation` : ce par rapport à quoi cet alignement se mesure. */
+  /** `text::RelOrientation`: what that alignment is measured against. */
   imageHoriRelation?: FlyHoriRelation;
 
   /**
-   * `RES_OPAQUE` (`SvxOpaqueItem`) : le cadre passe **devant** le texte.
+   * `RES_OPAQUE` (`SvxOpaqueItem`): the frame goes **in front of** the text.
    *
-   * Dans Writer, c'est le calque qui décide — `hell` sous le texte, `heaven`
-   * au-dessus (`SwDrawView`, `SdrLayerID`) —, et c'est ce que le format ODF
-   * écrit en `style:run-through="foreground"`. La distinction n'a de sens
-   * qu'avec l'habillage `through`, seul cas où cadre et texte se superposent.
+   * In Writer it is the layer that decides: `hell` below the text, `heaven` above it
+   * (`SwDrawView`, `SdrLayerID`), and this is what the ODF format writes as
+   * `style:run-through="foreground"`. The distinction only means something with
+   * `through` wrapping, the only case where frame and text overlap.
    */
   imageInFront?: boolean;
 
-  /* -- Ancres de commentaire, de signet et de révision ----------------------
+  /*
+   * -- Comment, bookmark and tracked-change anchors -----------------------
    *
-   * Ces trois-là suivent la même règle que le rognage plus haut : **une clé
-   * scalaire, jamais un objet ni un tableau**. `sameFormatting` compare par
-   * `!==`, et deux tableaux de contenu identique n'y seraient jamais égaux :
-   * deux runs voisins cesseraient de fusionner, et l'invariant `MergePortions`
-   * tomberait. Quand plusieurs commentaires couvrent le même run, leurs
-   * identifiants sont donc joints en une chaîne **triée** (cf. `commentIdsOf`).
+   * These three follow the same rule as the cropping above: **a scalar key, never an
+   * object or an array**. `sameFormatting` compares with `!==`, and two arrays with
+   * identical content would never be equal there: neighboring runs would stop
+   * merging, and the `MergePortions` invariant would fall. When several comments cover
+   * the same run, their ids are therefore joined into one **sorted** string (see
+   * `commentIdsOf`).
    */
 
-  /** `SwPostItField` : identifiants de commentaires, triés et joints par `,`. */
+  /**
+   * Ids of the comments covering this run, sorted and joined by `,`
+   * (`SwPostItField`).
+   */
   commentIds?: string;
-  /** `SwBookmark` : nom du signet dont la plage couvre ce run. */
+  /** Name of the bookmark whose range covers this run (`SwBookmark`). */
   bookmarkName?: string;
-  /** `SwRangeRedline` : identifiant de la modification suivie couvrant ce run. */
+  /** Id of the tracked change covering this run (`SwRangeRedline`). */
   redlineId?: string;
-  /** `RedlineType_t` (IDocumentRedlineAccess.hxx:73) : nature de la modification. */
+  /**
+   * Kind of tracked change: insertion, deletion or formatting
+   * (`RedlineType_t`, IDocumentRedlineAccess.hxx:73).
+   */
   redlineType?: RedlineType;
 }
 
 /**
- * Ancrage d'un cadre. Transposition de `RndStdIds` (`sw/inc/fmtanchr.hxx`).
+ * How a frame is anchored (OpenOffice: `RndStdIds`, `sw/inc/fmtanchr.hxx`).
  *
- * `as-char` (`FLY_AS_CHAR`) est le seul qui coule dans la ligne ; les autres
- * font du cadre un `SwFlyFreeFrm` positionné hors flux.
+ * `as-char` (`FLY_AS_CHAR`) is the only one that flows inside the line; the others
+ * make the frame a `SwFlyFreeFrm` placed outside the flow.
  */
 export type FlyAnchor = 'as-char' | 'to-para' | 'to-page';
 
 /**
- * Mode d'habillage. Transposition de `SwSurround` (`sw/inc/fmtsrndenum.hxx:27`).
+ * How text wraps around a frame (OpenOffice: `SwSurround`,
+ * `sw/inc/fmtsrndenum.hxx:27`).
  *
- * `ideal` est `SURROUND_IDEAL`, l'habillage « optimal » : il ne décrit pas une
- * géométrie mais une **règle de choix**, résolue ligne à ligne par
- * `SwTxtFly::GetSurroundForTextWrap` d'après la place restant de chaque côté du
- * cadre (cf. `resolveIdealSurround`). Les cinq autres se lisent tels quels.
+ * `ideal` is `SURROUND_IDEAL`, the "optimal" wrapping: it does not describe a
+ * geometry but a **rule for choosing**, resolved line by line by
+ * `SwTxtFly::GetSurroundForTextWrap` from the room left on each side of the frame
+ * (see `resolveIdealSurround`). The other five mean what they say.
  */
 export type FlySurround = 'none' | 'through' | 'parallel' | 'ideal' | 'left' | 'right';
 
 /**
- * Alignement horizontal d'un cadre. Transposition de `text::HoriOrientation`
- * (`offapi/com/sun/star/text/HoriOrientation.idl`).
+ * Horizontal alignment of a frame (OpenOffice: `text::HoriOrientation`,
+ * `offapi/com/sun/star/text/HoriOrientation.idl`).
  *
- * `from-left` est `HoriOrientation::NONE` : pas d'alignement, la position vient
- * du décalage `imageXPt`. C'est le mode dans lequel tombe un cadre qu'on
- * déplace à la souris.
+ * `from-left` is `HoriOrientation::NONE`: no alignment, the position comes from the
+ * `imageXPt` offset. It is the mode a frame falls into when it is dragged with the
+ * mouse.
  */
 export type FlyHoriOrient = 'left' | 'center' | 'right' | 'from-left';
 
 /**
- * Repère d'un alignement horizontal. Transposition de `text::RelOrientation`
- * (`offapi/com/sun/star/text/RelOrientation.idl`).
+ * What a horizontal alignment is measured against (OpenOffice:
+ * `text::RelOrientation`, `offapi/com/sun/star/text/RelOrientation.idl`).
  *
- * OpenOffice en distingue dix ; deux suffisent à une mise en page à colonne
- * unique, et les nommer d'après ce qu'elles mesurent vaut mieux que d'en
- * recopier dix dont huit coïncideraient :
+ * OpenOffice has ten; two are enough for a single-column layout, and naming them
+ * after what they measure is better than copying ten of which eight would coincide:
  *
- *  - `text` recouvre `PRINT_AREA` et `PAGE_PRINT_AREA` — la colonne de texte,
- *    marges de page déduites. Les deux donnent ici la même bande ;
- *  - `page` est `PAGE_FRAME` : la feuille entière, marges comprises. C'est le
- *    seul repère qui permette à un cadre de déborder dans la marge.
+ *  - `text` covers `PRINT_AREA` and `PAGE_PRINT_AREA`: the text column, with the page
+ *    margins taken off. Both give the same band here;
+ *  - `page` is `PAGE_FRAME`: the whole sheet, margins included. It is the only
+ *    reference that lets a frame overflow into the margin.
  */
 export type FlyHoriRelation = 'text' | 'page';
 
-/** Nature d'une modification suivie (`IDocumentRedlineAccess.hxx:73-75`). */
+/** Kind of a tracked change (`IDocumentRedlineAccess.hxx:73-75`). */
 export type RedlineType = 'insert' | 'delete' | 'format';
 
 /**
- * Attributs de caractère d'un run, sans son texte.
+ * The character attributes of a run, without its text.
  *
- * `SwAttrSet` distingue de la même façon le contenu et son jeu d'attributs :
- * c'est ce qui permet de comparer deux plages et de les fusionner.
+ * `SwAttrSet` separates content from its attribute set in the same way: that is
+ * what makes it possible to compare two ranges and merge them.
  */
 export type RunFormatting = Omit<TextRun, 'text'>;
 
-/** Les clés de formatage de caractère, dans l'ordre de comparaison. */
+/** The character-formatting keys, in comparison order. */
 export const RUN_FORMAT_KEYS = [
   'bold',
   'italic',
@@ -313,18 +338,18 @@ export type Alignment = 'left' | 'center' | 'right' | 'justify';
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
-/** Nature d'une liste. `task` ajoute une case à cocher, comme dans Write. */
+/** Kind of list. `task` adds a checkbox, as in Write. */
 export type ListKind = 'bullet' | 'ordered' | 'task';
 
-/** Profondeur maximale d'imbrication — `MAXLEVEL` de `sw/inc/swtypes.hxx`. */
+/** Maximum nesting depth (`MAXLEVEL` in `sw/inc/swtypes.hxx`). */
 export const MAX_LIST_LEVEL = 10;
 
 /**
- * Nœud paragraphe ou titre. Inspiré de `SwTxtNode`.
+ * A paragraph or heading node (OpenOffice: `SwTxtNode`).
  *
- * `runs` porte le texte ; la concaténation des `text` est la chaîne brute du
- * nœud, et un offset de curseur s'exprime dans cette chaîne (jamais dans un run
- * particulier), exactement comme `SwIndex` indexe `SwTxtNode::m_Text`.
+ * `runs` holds the text; the concatenation of the `text` fields is the node's raw
+ * string, and a cursor offset is expressed in that string (never inside one
+ * particular run), exactly as `SwIndex` indexes `SwTxtNode::m_Text`.
  */
 export interface ParagraphNode {
   id: string;
@@ -333,69 +358,81 @@ export interface ParagraphNode {
   styleName?: string;
   runs: TextRun[];
   alignment?: Alignment;
-  /** Facteur d'interligne : 1.0, 1.15, 1.5, 2.0. */
+  /** Line spacing factor: 1.0, 1.15, 1.5, 2.0. */
   lineSpacing?: number;
   marginTopPt?: number;
   marginBottomPt?: number;
   indentLeftPt?: number;
   indentRightPt?: number;
   firstLineIndentPt?: number;
-  /** Saut de page explicite **avant** ce bloc (`SwFmtPageDesc` / `SVX_BREAK_PAGE_BEFORE`). */
+  /**
+   * Explicit page break **before** this block (`SwFmtPageDesc` /
+   * `SVX_BREAK_PAGE_BEFORE`).
+   */
   pageBreakBefore?: boolean;
   /**
-   * Nombre minimal de lignes conservées en bas de page lors d'une coupure
-   * (`SvxOrphansItem`, widorp.cxx). 0 ou 1 désactive la règle.
+   * Minimum number of lines kept at the bottom of a page when a paragraph is split
+   * (orphan control; `SvxOrphansItem`, widorp.cxx). 0 or 1 turns the rule off.
    */
   orphans?: number;
-  /** Nombre minimal de lignes reportées en haut de page (`SvxWidowsItem`). */
+  /**
+   * Minimum number of lines carried over to the top of the next page (widow control;
+   * `SvxWidowsItem`).
+   */
   widows?: number;
-  /** Interdit la coupure du paragraphe entre deux pages (`SvxFmtSplitItem`). */
+  /** Forbids splitting the paragraph between two pages (`SvxFmtSplitItem`). */
   keepTogether?: boolean;
 
-  /* -- Numérotation -------------------------------------------------------
+  /*
+   * -- Numbering ---------------------------------------------------------
    *
-   * Writer ne connaît pas de nœud « liste » : une liste est un **attribut de
-   * paragraphe** (`RES_PARATR_LIST_*`, hintids.hxx:178), et c'est la règle de
-   * numérotation qui décide de la puce ou du numéro. On transpose tel quel —
-   * ce qui a un avantage concret sur une structure imbriquée : changer le
-   * niveau d'un élément ne déplace aucun nœud, ce n'est qu'un attribut de plus.
+   * Writer has no "list" node: a list is a **paragraph attribute**
+   * (`RES_PARATR_LIST_*`, hintids.hxx:178), and it is the numbering rule that decides
+   * the bullet or the number. We transpose it as is, which has a concrete advantage
+   * over a nested structure: changing an item's level moves no node, it is just one
+   * more attribute.
    */
 
-  /** `SwTxtNode::GetNumRule()` : la nature de la liste, absente hors liste. */
+  /**
+   * The kind of list the paragraph belongs to (`SwTxtNode::GetNumRule()`), absent
+   * outside a list.
+   */
   listKind?: ListKind;
   /**
-   * `RES_PARATR_LIST_ID` : deux listes séparées par du texte ne partagent pas
-   * leur compteur. Sans cet identifiant, la seconde reprendrait à 4 après une
-   * première qui s'arrêtait à 3.
+   * Id of the list (`RES_PARATR_LIST_ID`): two lists separated by text do not share
+   * their counter. Without this id, the second one would resume at 4 after a first
+   * one that stopped at 3.
    */
   listId?: string;
-  /** `RES_PARATR_LIST_LEVEL`, de 0 à `MAX_LIST_LEVEL - 1`. */
+  /** Nesting level, from 0 to `MAX_LIST_LEVEL - 1` (`RES_PARATR_LIST_LEVEL`). */
   listLevel?: number;
-  /** `RES_PARATR_LIST_ISRESTART` : redémarre le compteur à cet élément. */
+  /** Restarts the counter at this item (`RES_PARATR_LIST_ISRESTART`). */
   listRestart?: boolean;
-  /** `RES_PARATR_LIST_RESTARTVALUE` : la valeur à laquelle repartir. */
+  /** The value to restart from (`RES_PARATR_LIST_RESTARTVALUE`). */
   listStartValue?: number;
-  /** État de la case, pour une liste à cocher. */
+  /** Whether the box is ticked, for a checklist. */
   listChecked?: boolean;
 }
 
-/** Cellule de tableau. Inspiré de `SwTableBox`. */
+/** A table cell (OpenOffice: `SwTableBox`). */
 export interface TableCellNode {
   id: string;
   blocks: ParagraphNode[];
-  /** Nombre de colonnes couvertes (`SwTableBox::getRowSpan` côté horizontal). */
+  /**
+   * Number of columns covered, to the right (`SwTableBox::getRowSpan`, horizontal
+   * side).
+   */
   colSpan?: number;
-  /** Nombre de lignes couvertes vers le bas. */
+  /** Number of rows covered, downwards. */
   rowSpan?: number;
   /**
-   * Cellule **recouverte** par la fusion d'une voisine.
+   * A cell that is **covered** by the merge of a neighbor.
    *
-   * Writer ne supprime pas les cellules absorbées par un `SwDoc::MergeTbl` : il
-   * leur donne un `RowSpan` négatif (`swtable.hxx:475`, « covered cell ») et les
-   * garde dans la ligne. La grille reste ainsi rectangulaire, ce dont dépendent
-   * la navigation au curseur, l'insertion de colonne et la scission ultérieure.
-   * On transpose ce choix : une cellule couverte reste présente, mais n'est ni
-   * mesurée ni peinte.
+   * Writer does not delete the cells swallowed by a `SwDoc::MergeTbl`: it gives them
+   * a negative `RowSpan` (`swtable.hxx:475`, "covered cell") and keeps them in the
+   * row. The grid therefore stays rectangular, which cursor navigation, column
+   * insertion and later splitting all depend on. We transpose that choice: a covered
+   * cell stays present, but is neither measured nor painted.
    */
   covered?: boolean;
   widthPercent?: number;
@@ -404,15 +441,15 @@ export interface TableCellNode {
   paddingPt?: number;
 }
 
-/** Ligne de tableau. Inspiré de `SwTableLine`. */
+/** A table row (OpenOffice: `SwTableLine`). */
 export interface TableRowNode {
   id: string;
   cells: TableCellNode[];
-  /** Ligne d'en-tête répétée en haut de chaque page (`SwTable::SetRowsToRepeat`). */
+  /** Header row repeated at the top of every page (`SwTable::SetRowsToRepeat`). */
   isHeader?: boolean;
 }
 
-/** Tableau. Inspiré de `SwTable`. */
+/** A table (OpenOffice: `SwTable`). */
 export interface TableNode {
   id: string;
   type: 'table';
@@ -423,32 +460,32 @@ export interface TableNode {
 }
 
 /**
- * Bloc « table des matières ». Transposition de `SwTOXBase` (`sw/inc/tox.hxx`).
+ * A "table of contents" block (OpenOffice: `SwTOXBase`, `sw/inc/tox.hxx`).
  *
- * Writer ne stocke pas les entrées : il conserve la **définition** de la table
- * (quels niveaux de titre retenir, avec ou sans numéros de page) et régénère
- * son contenu à la demande (`SwDoc::UpdateTOX`). On transpose ce choix, pour la
- * même raison : des entrées figées se désynchroniseraient du corps du document
- * dès la première frappe. Les entrées sont donc dérivées à la pagination, seul
- * moment où le numéro de page d'un titre est connu.
+ * Writer does not store the entries: it keeps the table's **definition** (which
+ * heading levels to include, with or without page numbers) and regenerates its
+ * content on demand (`SwDoc::UpdateTOX`). We transpose this choice for the same
+ * reason: frozen entries would drift out of sync with the body of the document at
+ * the first keystroke. The entries are therefore derived at pagination time, the
+ * only moment when the page number of a heading is known.
  */
 export interface TocNode {
   id: string;
   type: 'toc';
-  /** Titre imprimé au-dessus de la table. */
+  /** Title printed above the table. */
   title: string;
-  /** Niveaux de titre retenus, de 1 à `maxLevel` (`SwTOXBase::GetLevel`). */
+  /** Heading levels included, from 1 to `maxLevel` (`SwTOXBase::GetLevel`). */
   maxLevel: HeadingLevel;
-  /** Afficher le numéro de page en fin de ligne (`SwForm` avec `TOKEN_PAGE_NUMS`). */
+  /** Show the page number at the end of the line (`SwForm` with `TOKEN_PAGE_NUMS`). */
   showPageNumbers: boolean;
-  /** Points de suite entre le titre et le numéro (`TOKEN_TAB_STOP` à points). */
+  /** Dot leader between the title and the number (dotted `TOKEN_TAB_STOP`). */
   useDotLeader: boolean;
   pageBreakBefore?: boolean;
 }
 
 export type DocumentBlock = ParagraphNode | TableNode | TocNode;
 
-/** Discriminant sûr : un bloc est un tableau ou un nœud de texte. */
+/** Safe discriminant: a block is either a table or a text node. */
 export function isTable(block: DocumentBlock): block is TableNode {
   return block.type === 'table';
 }
@@ -462,35 +499,35 @@ export function isParagraph(block: DocumentBlock): block is ParagraphNode {
 }
 
 /**
- * Position dans le document. Inspiré de `SwPosition` (nNode + nContent).
+ * A position in the document (OpenOffice: `SwPosition`, i.e. nNode + nContent).
  *
- * `offset` compte les **unités de code UTF-16** dans la chaîne brute du
- * paragraphe, comme `SwIndex` compte les `sal_Unicode`. Les fonctions de
- * navigation, elles, se déplacent par **grappe de graphèmes** pour ne jamais
- * couper un emoji ou une lettre accentuée décomposée.
+ * `offset` counts **UTF-16 code units** in the paragraph's raw string, as
+ * `SwIndex` counts `sal_Unicode`. The navigation functions, however, move by
+ * **grapheme cluster** so that they never cut an emoji or a decomposed accented
+ * letter in half.
  */
 export interface DocumentPosition {
   blockId: string;
   offset: number;
-  /** Chemin vers la cellule quand la position est à l'intérieur d'un tableau. */
+  /** Path to the cell when the position is inside a table. */
   cell?: { rowIndex: number; cellIndex: number };
 }
 
-/** Curseur et sélection. Inspiré de `SwPaM` : Mark = ancre, Point = tête. */
+/** Cursor and selection (OpenOffice: `SwPaM`). Mark = anchor, Point = head. */
 export interface DocumentSelection {
-  /** Mark — l'extrémité fixe, posée au début du geste. */
+  /** Mark: the fixed end, set at the start of the gesture. */
   anchor: DocumentPosition;
-  /** Point — l'extrémité mobile, celle que déplacent les flèches. */
+  /** Point: the moving end, the one the arrow keys move. */
   focus: DocumentPosition;
   isCollapsed: boolean;
   /**
-   * Abscisse mémorisée pour les déplacements verticaux successifs
-   * (`SwCrsrShell::m_aCharRect` / « sticky x »). En pixels CSS, ou null.
+   * Remembered x coordinate for successive vertical moves
+   * (`SwCrsrShell::m_aCharRect`, the "sticky x"). In CSS pixels, or null.
    */
   desiredX?: number | null;
 }
 
-/** Géométrie de la page physique. Inspiré de `SwPageDesc` / `SwPageFrm`. */
+/** Geometry of the physical page (OpenOffice: `SwPageDesc` / `SwPageFrm`). */
 export interface PageSetup {
   format: 'A4' | 'Letter';
   widthMm: number;
@@ -504,7 +541,7 @@ export interface PageSetup {
   footerHeightMm?: number;
 }
 
-/** Style par défaut du document, appliqué à tout run qui ne le surcharge pas. */
+/** Default style of the document, applied to every run that does not override it. */
 export interface DocumentDefaults {
   fontFamily: string;
   fontSizePt: number;
@@ -516,7 +553,7 @@ import type { PageFurniture } from './pageFurniture';
 import type { DocumentComment } from './comments';
 import type { Redline } from './redline';
 
-/** État racine complet. Inspiré de `SwDoc`. */
+/** The complete root state of a document (OpenOffice: `SwDoc`). */
 export interface WriterDocumentState {
   id: string;
   meta: {
@@ -530,20 +567,20 @@ export interface WriterDocumentState {
   furniture?: PageFurniture;
   blocks: DocumentBlock[];
 
-  /* -- Tables annexes -------------------------------------------------------
+  /*
+   * -- Side tables --------------------------------------------------------
    *
-   * Trois sous-systèmes ancrent leur *repère* dans les runs et rangent leur
-   * *contenu* ici. La règle qui décide de quel côté va quoi est constante :
-   * ce qui doit suivre le texte quand on l'édite est un attribut de run ; ce
-   * qui n'a pas de position — un auteur, une date, un fil de discussion — vit
-   * dans une table indexée par identifiant.
+   * Three subsystems anchor their *marker* in the runs and keep their *content* here.
+   * The rule that decides which goes where is constant: whatever must follow the text
+   * when it is edited is a run attribute; whatever has no position (an author, a
+   * date, a discussion thread) lives in a table indexed by id.
    *
-   * Les signets font exception et n'ont pas de table : un signet n'est *que*
-   * sa position, il se lit donc entièrement depuis les runs (cf. bookmarks.ts).
+   * Bookmarks are the exception and have no table: a bookmark is *only* its position,
+   * so it can be read entirely from the runs (see bookmarks.ts).
    */
 
-  /** `SwPostItField` : contenu des commentaires, ancrés par `TextRun.commentIds`. */
+  /** Content of the comments (`SwPostItField`), anchored by `TextRun.commentIds`. */
   comments?: DocumentComment[];
-  /** `SwRedlineTbl` : métadonnées des révisions, ancrées par `TextRun.redlineId`. */
+  /** Metadata of the tracked changes (`SwRedlineTbl`), anchored by `TextRun.redlineId`. */
   redlines?: Redline[];
 }

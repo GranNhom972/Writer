@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Pagination A4 — `SwLayAction`, `SwFlowFrm::MoveFwd`, `WidowsAndOrphans`.
+ * A4 pagination: `SwLayAction`, `SwFlowFrm::MoveFwd`, `WidowsAndOrphans`.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -31,7 +31,7 @@ function paginate(doc: WriterDocumentState) {
   return paginateDocument(doc, { measurer });
 }
 
-/** Paragraphe d'une seule ligne, sans espacement, pour compter en lignes exactes. */
+/** A one-line paragraph with no spacing, to count in exact lines. */
 function line(text: string, extra: Partial<ParagraphNode> = {}): ParagraphNode {
   return { ...createParagraph(text), marginTopPt: 0, marginBottomPt: 0, ...extra };
 }
@@ -95,15 +95,14 @@ describe('répartition en pages', () => {
 });
 
 describe('veuves et orphelines — WidowsAndOrphans', () => {
-  /** Un paragraphe assez long pour être coupé, avec des seuils choisis. */
+  /** A paragraph long enough to be split, with chosen thresholds. */
   function longParagraph(lines: number, options: Partial<ParagraphNode>): ParagraphNode {
     const words = Array.from({ length: lines * 12 }, (_, i) => `mot${i}`).join(' ');
     return { ...createParagraph(words), marginTopPt: 0, marginBottomPt: 0, ...options };
   }
 
   it('reporte tout le paragraphe plutôt que d’y laisser moins d’orphelines', () => {
-    // Une page presque pleine, puis un paragraphe qui ne pourrait y poser
-    // qu'une seule ligne : la règle des orphelines (2) le fait basculer entier.
+    // An almost full page, then a paragraph that could only place a single line there: the orphan rule (2) moves it over whole.
     const filler = Array.from({ length: 45 }, (_, i) => line(`remplissage ${i}`));
     const doc = documentOf([...filler, longParagraph(6, { orphans: 2, widows: 2 })]);
     const layout = paginate(doc);
@@ -139,8 +138,7 @@ describe('veuves et orphelines — WidowsAndOrphans', () => {
   it('coupe malgré tout un paragraphe plus haut qu’une page entière', () => {
     const doc = documentOf([longParagraph(120, { orphans: 5, widows: 5 })]);
     const layout = paginate(doc);
-    // La garde `bHasToFit` : sur une page vide, on pose ce qui tient plutôt que
-    // de boucler sans fin.
+    // The `bHasToFit` guard: on an empty page, we place what fits rather than loop forever.
     expect(layout.pages.length).toBeGreaterThan(1);
     expect(layout.placements.get(doc.blocks[0]!.id)!.length).toBeGreaterThan(1);
   });

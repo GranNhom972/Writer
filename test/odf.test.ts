@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Moteur XML OpenDocument — `XMLTextImportHelper` / `XMLTextParagraphExport`.
+ * OpenDocument XML engine: `XMLTextImportHelper` / `XMLTextParagraphExport`.
  *
  * @vitest-environment jsdom
  */
@@ -185,15 +185,12 @@ describe('import — styles', () => {
     const { document } = importOdfContent(
       content('<text:p><text:a xlink:href="https://exemple.fr">lien</text:a></text:p>'),
     );
-    // `normalizeUrl` rend une URL canonique : l'hôte nu reçoit sa barre
-    // finale, exactement comme un lien saisi dans l'éditeur.
+    // `normalizeUrl` returns a canonical URL: a bare host gets its trailing slash, exactly like a link typed in the editor.
     expect(paragraphs(document)[0]!.runs[0]!.linkHref).toBe('https://exemple.fr/');
   });
 
   it('refuse un schéma exécutable dans un lien importé', () => {
-    // Un `.odt` est un fichier fourni par l'usager. Sans normalisation à
-    // l'import, ce `javascript:` ressortait tel quel dans le `<a href>` du
-    // rendu — XSS stocké, rediffusé à tous les collaborateurs par le CRDT.
+    // An `.odt` is a file supplied by the user. Without normalization at import, this `javascript:` came out as is in the rendered `<a href>`: a stored XSS, re-broadcast to every collaborator through the CRDT.
     for (const hostile of [
       'javascript:alert(1)',
       'JaVaScRiPt:alert(1)',
@@ -206,7 +203,7 @@ describe('import — styles', () => {
       );
       const run = paragraphs(document)[0]!.runs[0]!;
       expect(run.linkHref, `schéma accepté à tort : ${hostile}`).toBeUndefined();
-      // Le texte, lui, reste : on retire le lien, pas le contenu.
+      // The text, for its part, stays: we remove the link, not the content.
       expect(run.text).toBe('clique');
     }
   });
@@ -245,7 +242,7 @@ describe('export', () => {
       createParagraph('', { runs: [makeRun('c', { bold: true })] }),
     ]);
     const xml = buildContentXml(doc);
-    // Un seul style de texte pour les deux passages en gras.
+    // A single text style for the two bold passages.
     expect(xml.match(/style:family="text"/g)).toHaveLength(1);
     expect(xml.match(/text:style-name="T1"/g)).toHaveLength(2);
   });
@@ -372,7 +369,7 @@ describe('aller-retour', () => {
 
 describe('conteneur .odt', () => {
   it('calcule un CRC-32 conforme', () => {
-    // Vecteur de reference du format ZIP pour la chaine 123456789.
+    // Reference vector of the ZIP format for the string 123456789.
     expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926);
   });
 

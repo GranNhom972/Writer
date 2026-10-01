@@ -1,29 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Choix de l'intégration d'une image au texte.
+ * Choice of how an image fits into the text.
  *
- * Équivalent du menu « Format ▸ Adaptation du texte » de Writer
- * (`sw/source/ui/shells/frmsh.cxx`, `FN_FRAME_WRAP*`) : cinq entrées, une seule
- * cochée, et l'effet est immédiat sur la page.
+ * Equivalent of Writer's "Format ▸ Wrap" menu (`sw/source/ui/shells/frmsh.cxx`, `FN_FRAME_WRAP*`): five entries, only one ticked, and the effect
+ * is immediate on the page.
  *
- * ## Pourquoi un menu et non cinq boutons
+ * ## Why a menu and not five buttons
  *
- * Les cinq modes sont **exclusifs** et rarement changés. Une rangée de cinq
- * boutons demanderait autant de place en permanence pour un réglage qu'on
- * touche une fois par image ; un menu montre l'état courant en un pictogramme
- * et ne déploie les autres que si on le demande. C'est le choix de Writer, et
- * la raison en est la même.
+ * The five modes are **exclusive** and rarely changed. A row of five buttons would take that much space permanently for a setting that is touched
+ * once per image; a menu shows the current state as one pictogram and only unfolds the others on request. It is Writer's choice, and for the same
+ * reason.
  *
- * Le composant est **contrôlé** : il ne connaît pas le document, seulement le
- * mode courant et ce qu'il faut appeler pour en changer. Il sert donc tel quel
- * à la barre de l'image sélectionnée comme à la fenêtre de retouche, sans que
- * l'une ait à connaître l'autre.
+ * The component is **controlled**: it does not know the document, only the current mode and what to call to change it. It therefore serves as it is
+ * for the toolbar of the selected image as well as for the editing window, without either having to know about the other.
  */
 
 import { useRef, useState, type JSX } from 'react';
@@ -31,7 +26,7 @@ import { Popover } from '../../design/components/Popover';
 import { Icon, type IconName } from '../../design/icons/Icon';
 import { IMAGE_WRAP_MODES, type ImageWrapMode } from '../../domain/document/images';
 
-/** Pictogramme de chaque mode. */
+/** Pictogram of each mode. */
 const WRAP_ICONS: Record<ImageWrapMode, IconName> = {
   inline: 'wrap-inline',
   wrap: 'wrap-around',
@@ -45,9 +40,8 @@ export interface ImageWrapPickerProps {
   onChange: (mode: ImageWrapMode) => void;
   disabled?: boolean;
   /**
-   * Disposition. `menu` est le déclencheur compact des barres flottantes ;
-   * `inline` déplie les cinq choix, pour une fenêtre où la place ne manque pas
-   * et où voir les options côte à côte aide à choisir.
+   * Layout. `menu` is the compact trigger of the floating toolbars; `inline` unfolds the five choices, for a window where there is no lack of room and
+   * where seeing the options side by side helps to choose.
    */
   variant?: 'menu' | 'inline';
 }
@@ -130,11 +124,7 @@ export function ImageWrapPicker({
               >
                 <Icon name={WRAP_ICONS[entry.mode]} size={20} />
                 <span className="wrap-picker__item-label">{entry.label}</span>
-                {/*
-                  La coche occupe sa place même quand elle est absente : sans
-                  cela, les libellés glisseraient d'un cran à chaque changement
-                  de mode et le menu paraîtrait sauter.
-                */}
+                {/* The tick takes its place even when absent: without that, the labels would slide by one notch on every change of mode and the menu would seem to jump. */}
                 <span className="wrap-picker__check" aria-hidden="true">
                   {entry.mode === value ? '✓' : ''}
                 </span>

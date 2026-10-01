@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useState, type JSX } from 'react';
 import type { PageSetup, DocumentDefaults } from '../../domain/document/types';
@@ -113,7 +113,7 @@ export function StylesAndMarginsDialog({
   return (
     <Modal title="Paramètres du document (Mise en page et Styles)" onClose={onClose} width={740}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-        {/* Onglets */}
+        {/* Tabs */}
         <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '4px' }}>
           <button
             type="button"
@@ -179,7 +179,7 @@ export function StylesAndMarginsDialog({
                 </div>
               </div>
 
-              {/* Marges personnalisées */}
+              {/* Custom margins */}
               <div
                 style={{
                   padding: 'var(--space-4)',
@@ -308,7 +308,7 @@ export function StylesAndMarginsDialog({
               </div>
             </div>
 
-            {/* Représentation visuelle de la page */}
+            {/* Visual representation of the page */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <div
                 style={{

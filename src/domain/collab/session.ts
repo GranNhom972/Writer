@@ -1,34 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Session de partage — document répliqué Yjs, WebSocket, présence.
+ * Sharing session: replicated Yjs document, WebSocket, presence.
  *
- * Reprise de la couche de collaboration de l'application Write
- * (`write/client/src/collab/session.ts`), avec son principe fondateur :
+ * Taken over from the collaboration layer of the Write application (`write/client/src/collab/session.ts`), with its founding
+ * principle:
  *
- * > **le document répliqué est la source de vérité, le serveur n'est qu'un
- * > relais.**
+ * > **the replicated document is the source of truth, the server is only a relay.**
  *
- * Trois propriétés en découlent, et ce sont exactement celles qui manquaient à
- * la synchronisation par diff de blocs qu'il remplace :
+ * Three properties follow, and they are exactly those that the block-diff synchronization it replaces lacked:
  *
- *  1. **deux frappes concurrentes fusionnent**, y compris dans la même phrase.
- *     Aucune ne peut effacer l'autre : il n'y a plus de « dernier arrivé
- *     gagne » ;
- *  2. **l'édition hors ligne est le cas nominal.** Rien n'est perdu à la
- *     coupure ; au retour, le rattrapage est un simple différentiel calculé à
- *     partir du vecteur d'état ;
- *  3. **le serveur n'a pas à ordonner quoi que ce soit.** Plus de révision, plus
- *     de filigrane, plus de rétention d'opérations en attente d'accusé : ce sont
- *     autant d'invariants délicats qui disparaissent avec le séquenceur.
+ *  1. **two concurrent keystrokes merge**, even in the same sentence. Neither can erase the other: there is no more "last one to
+ *     arrive wins";
+ *  2. **offline editing is the normal case.** Nothing is lost when the connection drops; on return, catching up is a simple
+ *     difference computed from the state vector;
+ *  3. **the server does not have to order anything.** No more revisions, no more watermark, no more holding operations until they
+ *     are acknowledged: all of these delicate invariants disappear along with the sequencer.
  *
- * La correspondance entre `WriterDocumentState` et les types répliqués vit dans
- * [`crdt.ts`](./crdt.ts) ; ce module-ci ne s'occupe que du transport.
+ * The mapping between `WriterDocumentState` and the replicated types lives in [`crdt.ts`](./crdt.ts); this module only deals with
+ * transport.
  */
 
 import * as Y from 'yjs';
@@ -37,18 +32,18 @@ import type { Awareness } from 'y-protocols/awareness';
 
 export type ConnectionStatus = 'local' | 'connecting' | 'connected' | 'offline';
 
-/** Position d'un curseur distant, telle qu'elle voyage dans la présence. */
+/** Position of a remote cursor, as it travels in the presence. */
 export interface RemoteCursor {
   blockId: string;
   offset: number;
 }
 
 export interface PeerPresence {
-  /** Identifiant de connexion Yjs — unique par onglet, y compris pour une même personne. */
+  /** Yjs connection id: unique per tab, even for the same person. */
   connectionId: number;
   userId: string;
   displayName: string;
-  /** Variable CSS de présence, dérivée du hachage de `userId` — jamais aléatoire. */
+  /** Presence CSS variable, derived from the hash of `userId`, never random. */
   color: string;
   cursor?: RemoteCursor | undefined;
 }
@@ -62,31 +57,29 @@ export interface SessionEvents {
   onStatus: (status: ConnectionStatus) => void;
   onPeers: (peers: PeerPresence[]) => void;
   /**
-   * Le premier échange avec le serveur est terminé : le document local contient
-   * tout ce que le serveur connaît. Avant cela, il peut être vide — c'est ce
-   * qui distingue « document vide » de « pas encore reçu », et amorcer un
-   * partage sur cette confusion dupliquerait tout le contenu.
+   * The first exchange with the server is over: the local document holds everything the server knows. Before that it may be empty,
+   * which is what separates "empty document" from "not received yet", and seeding a share on that confusion would duplicate all the
+   * content.
    */
   onSynced: (synced: boolean) => void;
-  /** Nombre de modifications produites hors ligne, pas encore transmises. */
+  /** Number of changes made offline and not sent yet. */
   onPending: (pending: number) => void;
 }
 
 export interface SessionOptions {
   docId: string;
-  /** Jeton d'accès — transmis par sous-protocole WebSocket, jamais en query string. */
+  /** Access token, sent through the WebSocket sub-protocol, never in a query string. */
   token: string;
   user: SessionUser;
-  /** Origine du serveur ; par défaut celle de la page (proxy Vite en développement). */
+  /** Origin of the server; by default that of the page (Vite proxy in development). */
   serverOrigin?: string;
 }
 
 /**
- * Couleur de présence, dérivée du hachage de l'identifiant.
+ * Presence color, derived from the hash of the id.
  *
- * Déterministe et non aléatoire : la couleur d'une personne doit être la même
- * chez tous les participants, sinon deux personnes discutent d'un « curseur
- * bleu » qui n'est pas le même.
+ * Deterministic and not random: a person's color must be the same for all participants, otherwise two people discuss a "blue
+ * cursor" that is not the same one.
  */
 export function presenceColor(userId: string): string {
   let hash = 0;
@@ -97,9 +90,8 @@ export function presenceColor(userId: string): string {
 }
 
 /**
- * Resynchronisation périodique : filet de sécurité si une trame s'est perdue.
- * Sans elle, une perte silencieuse ne se rattraperait qu'à la reconnexion
- * suivante — c'est-à-dire peut-être jamais.
+ * Periodic resynchronization: a safety net if a frame was lost. Without it, a silent loss would only be caught up at the next
+ * reconnection, which may mean never.
  */
 const RESYNC_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 10_000;
@@ -112,12 +104,10 @@ export class CollabSession {
   private status: ConnectionStatus = 'connecting';
   private synced = false;
   /**
-   * Modifications produites alors que le lien était rompu.
+   * Changes made while the link was down.
    *
-   * Elles ne sont pas *en attente* au sens de l'ancienne rétention : le document
-   * répliqué les porte déjà et les transmettra au retour du réseau. Ce compteur
-   * ne sert qu'à le dire à l'usager, qui a le droit de savoir que son travail
-   * n'est pas encore parti.
+   * They are not *pending* in the sense of the old retention: the replicated document already holds them and will send them when the
+   * network returns. This counter only exists to tell the user, who has the right to know that their work has not left yet.
    */
   private pending = 0;
   private ferme = false;
@@ -132,9 +122,8 @@ export class CollabSession {
     const wsOrigin = origin.replace(/^http/, 'ws');
 
     this.provider = new WebsocketProvider(`${wsOrigin}/api/v1/sync`, options.docId, this.doc, {
-      // Le jeton voyage dans le sous-protocole : il ne fuite ni dans les journaux
-      // d'accès, ni dans le `Referer`, ni dans l'historique du navigateur — ce
-      // qu'une query string ferait dans les trois.
+      // The token travels in the sub-protocol: it does not leak into access logs, into the `Referer`, or into the browser history, which a
+      // query string would do in all three.
       protocols: [`bearer.${options.token}`],
       resyncInterval: RESYNC_INTERVAL_MS,
       maxBackoffTime: MAX_BACKOFF_MS,
@@ -157,7 +146,7 @@ export class CollabSession {
     return this.status;
   }
 
-  /** Le premier échange est-il terminé ? Voir `SessionEvents.onSynced`. */
+  /** Is the first exchange over? See `SessionEvents.onSynced`. */
   get isSynced(): boolean {
     return this.synced;
   }
@@ -177,12 +166,11 @@ export class CollabSession {
         this.setStatus('connecting');
         break;
       default:
-        // Le lien est rompu : l'édition continue, elle ne fait que ne plus
-        // partir. C'est le cas nominal du travail hors ligne, pas une panne.
+        // The link is broken: editing continues, it just no longer leaves. This is the normal case of offline work, not a failure.
         this.synced = false;
         this.events.onSynced(false);
         this.setStatus('offline');
-        // Les curseurs des autres ne veulent plus rien dire une fois coupé.
+        // Other people's cursors mean nothing once disconnected.
         this.events.onPeers([]);
         break;
     }
@@ -198,11 +186,10 @@ export class CollabSession {
   };
 
   /**
-   * Compte ce qui n'est pas encore parti.
+   * Counts what has not left yet.
    *
-   * `transaction.local` distingue nos modifications de celles qui arrivent du
-   * réseau : rediffuser les secondes n'aurait aucun sens, et les compter en
-   * afficherait « 12 en attente » sur un document où l'on n'a rien écrit.
+   * `transaction.local` tells our changes from those arriving from the network: re-broadcasting the latter would make no sense, and
+   * counting them would show "12 pending" on a document where we wrote nothing.
    */
   private readonly onLocalUpdate = (
     _update: Uint8Array,
@@ -222,18 +209,18 @@ export class CollabSession {
     this.events.onStatus(status);
   }
 
-  /* --------------------------------------------------------------- présence */
+  /* --------------------------------------------------------------- presence */
 
   private readonly onAwarenessChange = (): void => {
     this.events.onPeers(readPeers(this.awareness));
   };
 
-  /** Annonce la position du curseur aux autres participants. */
+  /** Announces the cursor position to the other participants. */
   setCursor(cursor: RemoteCursor | null): void {
     if (this.ferme) return;
     const courant = this.awareness.getLocalState()?.['cursor'] as RemoteCursor | null | undefined;
-    // Ne rien annoncer quand rien n'a bougé : la présence part sur le réseau à
-    // chaque appel, et le curseur est recalculé à chaque rendu de l'éditeur.
+    // Announce nothing when nothing has moved: presence goes out on the network at every call, and the cursor is recomputed at every
+    // render of the editor.
     if (
       (courant ?? null) === (cursor ?? null) ||
       (courant && cursor && courant.blockId === cursor.blockId && courant.offset === cursor.offset)
@@ -243,9 +230,9 @@ export class CollabSession {
     this.awareness.setLocalStateField('cursor', cursor);
   }
 
-  /* ------------------------------------------------------------------ fin */
+  /* ------------------------------------------------------------------ end */
 
-  /** Ferme la session pour de bon : plus aucune reconnexion. */
+  /** Closes the session for good: no further reconnection. */
   destroy(): void {
     if (this.ferme) return;
     this.ferme = true;
@@ -255,15 +242,15 @@ export class CollabSession {
     this.awareness.off('change', this.onAwarenessChange);
     this.doc.off('update', this.onLocalUpdate);
 
-    // Retirer sa présence **avant** de fermer : les pairs effacent l'avatar et
-    // le curseur tout de suite, sans attendre l'expiration de leur minuterie.
+    // Remove your presence **before** closing: the peers clear the avatar and the cursor at once, without waiting for their timer to
+    // expire.
     this.awareness.setLocalState(null);
     this.provider.destroy();
     this.doc.destroy();
   }
 }
 
-/** Les pairs distants annoncés par la présence, soi-même exclu. */
+/** The remote peers announced by presence, ourselves excluded. */
 export function readPeers(awareness: Awareness): PeerPresence[] {
   const peers: PeerPresence[] = [];
   awareness.getStates().forEach((state, clientId) => {
@@ -286,7 +273,7 @@ export function readPeers(awareness: Awareness): PeerPresence[] {
   return peers;
 }
 
-/** Paramètres de partage lus dans l'adresse : `?session=…&email=…`. */
+/** Sharing parameters read from the address: `?session=…&email=…`. */
 export function readShareLink(search: string): { tokenSession: string; email: string } | null {
   const params = new URLSearchParams(search);
   const tokenSession = params.get('session');
@@ -295,20 +282,17 @@ export function readShareLink(search: string): { tokenSession: string; email: st
   return { tokenSession, email };
 }
 
-/* ------------------------------------------------------- ouverture CloudServ */
+/* ------------------------------------------------------- opening from CloudServ */
 
 /**
- * Ouverture depuis CloudServ : `/doc/<uuid>#token=<billet>` ou `#doc=<uuid>&token=<billet>`.
+ * Opening from CloudServ: `/doc/<uuid>#token=<ticket>` or `#doc=<uuid>&token=<ticket>`.
  *
- * Le billet voyage dans le **fragment**, jamais dans la query string. Un
- * fragment n'est pas transmis au serveur : il n'apparaît donc ni dans les
- * journaux d'accès, ni dans l'en-tête `Referer` envoyé aux ressources tierces.
- * C'est la même raison qui fait passer le jeton par le sous-protocole WebSocket
- * plutôt que par l'URL de connexion.
+ * The ticket travels in the **fragment**, never in the query string. A fragment is not sent to the server: it therefore appears
+ * neither in the access logs nor in the `Referer` header sent to third-party resources. This is the same reason why the token goes
+ * through the WebSocket sub-protocol rather than through the connection URL.
  *
- * L'identifiant de document est porté par la route `/doc/:docId` pour isoler
- * proprement chaque onglet et fenêtre. Le jeton est sauvegardé dans `sessionStorage`
- * pour permettre le rechargement de page (F5) sans interruption.
+ * The document id is carried by the `/doc/:docId` route to cleanly isolate each tab and window. The token is saved in
+ * `sessionStorage` to allow a page reload (F5) without interruption.
  */
 export function readCloudServLink(
   hash: string = typeof window !== 'undefined' ? window.location.hash : '',
@@ -318,7 +302,7 @@ export function readCloudServLink(
   const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
   const searchParams = new URLSearchParams(search.replace(/^\?/, ''));
 
-  // 1. Extraire le docId : soit depuis le chemin d'URL /doc/:docId, soit depuis hash/query
+  // 1. Extract the docId: either from the URL path /doc/:docId, or from the hash/query
   const pathMatch = pathname.match(/^\/(?:doc|documents|d)\/([a-zA-Z0-9_-]+)/i);
   let docId = pathMatch ? pathMatch[1] : null;
 
@@ -326,19 +310,19 @@ export function readCloudServLink(
     docId = hashParams.get('doc') || searchParams.get('doc');
   }
 
-  // 2. Extraire le token : soit depuis le hash/query, soit depuis sessionStorage
+  // 2. Extract the token: either from the hash/query, or from sessionStorage
   let token = hashParams.get('token') || searchParams.get('token');
   if (!token && docId && typeof sessionStorage !== 'undefined') {
     try {
       token = sessionStorage.getItem(`writer_token_${docId}`);
     } catch {
-      // sessionStorage non accessible
+      // sessionStorage not accessible
     }
   }
 
   if (!docId || !token) return null;
 
-  // Persister le jeton pour les rechargements F5 de cet onglet
+  // Persist the token for F5 reloads of this tab
   if (typeof sessionStorage !== 'undefined') {
     try {
       sessionStorage.setItem(`writer_token_${docId}`, token);
@@ -350,7 +334,7 @@ export function readCloudServLink(
   return { docId, token };
 }
 
-/** Ce qu'un billet annonce. Décodé pour l'affichage seul — c'est le serveur qui vérifie. */
+/** What a ticket announces. Decoded for display only: it is the server that verifies. */
 export interface TicketClaims {
   userId: string;
   displayName: string;
@@ -358,13 +342,11 @@ export interface TicketClaims {
 }
 
 /**
- * Lit la charge utile d'un billet, **sans vérifier sa signature**.
+ * Reads the payload of a ticket, **without verifying its signature**.
  *
- * Ce n'est pas un oubli : le client n'a pas le secret, et n'a pas à l'avoir. Ce
- * qui est lu ici ne sert qu'à afficher un nom et à griser la barre d'outils en
- * lecture seule. La permission qui compte est celle que le serveur applique —
- * mentir dans son propre billet ne donne donc aucun droit, cela ne fait
- * qu'afficher des boutons dont le serveur refusera les effets.
+ * This is not an oversight: the client does not have the secret, and must not have it. What is read here only serves to display a
+ * name and to grey out the toolbar in read-only mode. The permission that counts is the one the server applies: lying in your own
+ * ticket therefore gives no right, it only shows buttons whose effects the server will refuse.
  */
 export function readTicketClaims(token: string): TicketClaims | null {
   const charge = token.split('.')[1];

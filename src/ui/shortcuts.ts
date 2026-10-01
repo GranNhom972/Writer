@@ -1,24 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Affichage des raccourcis clavier.
+ * Display of keyboard shortcuts.
  *
- * Un raccourci non découvrable n'existe pas : chaque bouton du ruban et chaque
- * entrée de menu affiche le sien (directive UX §5.1). D'où une notation unique,
- * écrite ici, et traduite selon la plateforme au moment de l'affichage.
+ * A shortcut that cannot be discovered does not exist: every ribbon button and every menu entry shows its own (UX directive §5.1). Hence
+ * a single notation, written here, and translated according to the platform when it is displayed.
  */
 
 const isMac =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent ?? '');
 
-/** `Mod-Shift-x` devient « Ctrl+Maj+X », ou « ⌘+Maj+X » sur Mac. */
+/** `Mod-Shift-x` becomes "Ctrl+Maj+X" (shown with the localized key name), or "⌘+Maj+X" on Mac. */
 export function shortcutLabel(binding: string): string {
   return binding
     .replace('Mod', isMac ? '⌘' : 'Ctrl')
     .replace('Shift', 'Maj')
     .split('-')
-    // Les touches s'écrivent en capitale : « Ctrl+B », jamais « Ctrl+b ».
+    // Keys are written in capitals: "Ctrl+B", never "Ctrl+b".
     .map((touche) => (touche.length === 1 ? touche.toUpperCase() : touche))
     .join('+');
 }

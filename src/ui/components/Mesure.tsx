@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 
@@ -13,9 +13,7 @@ export interface MesureProps {
 }
 
 /**
- * Champ de mesure avec état local :
- * Permet de taper, effacer et corriger des valeurs au clavier librement sans que la
- * valeur soit écrasée ou réinitialisée à chaque frappe de touche.
+ * Measurement field with local state: it lets you type, erase and correct values with the keyboard freely, without the value being overwritten or reset on every keypress.
  */
 export function Mesure({ label, valeur, bornes, unite = 'mm', step, onChange }: MesureProps): JSX.Element {
   const [texte, setTexte] = useState(String(valeur));

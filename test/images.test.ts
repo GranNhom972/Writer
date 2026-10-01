@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Images ancrées « comme caractère » (`SwFlyCntFrm`).
+ * Images anchored "as a character" (`SwFlyCntFrm`).
  *
- * Ce que ces tests garantissent, et pourquoi :
+ * What these tests guarantee, and why:
  *
- *  - le cadre occupe **une** position dans la chaîne du paragraphe, sinon le
- *    curseur se poserait au milieu de l'image ;
- *  - le moteur lui donne sa largeur et sa hauteur, et **ne coupe jamais dedans** ;
- *  - taper à côté d'une image ne produit pas une seconde image ;
- *  - l'aller-retour ODF conserve l'image, ses dimensions et son texte alternatif.
+ *  - the frame takes **one** position in the paragraph's string, otherwise the cursor would land in the middle of the image;
+ *  - the engine gives it its width and height, and **never cuts through it**;
+ *  - typing next to an image does not produce a second image;
+ *  - the ODF round trip keeps the image, its dimensions and its alternative text.
  *
  * @vitest-environment jsdom
  */
@@ -65,11 +64,11 @@ import {
   type WriterDocumentState,
 } from '../src/domain/document/types';
 
-/** Un GIF 1×1 transparent — la plus petite image valide qui soit. */
+/** A 1×1 transparent GIF: the smallest valid image there is. */
 const GIF_1PX =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-/** Le premier cadre image d'un bloc, en tant que run. */
+/** The first image frame of a block, as a run. */
 function cadreDe(block: DocumentBlock | undefined): TextRun | undefined {
   if (!block || !isParagraph(block)) return undefined;
   return block.runs.find(isImageRun);
@@ -97,12 +96,12 @@ describe('modèle : le cadre image', () => {
   });
 
   it('réduit à la largeur imprimable sans jamais agrandir', () => {
-    // 96 px = 1 pouce = 72 pt, largeur imprimable 200 pt : rien à réduire.
+    // 96 px = 1 inch = 72 pt, printable width 200 pt: nothing to reduce.
     const petite = fitToContentWidth(96, 48, 200);
     expect(petite.widthPt).toBeCloseTo(72, 5);
     expect(petite.heightPt).toBeCloseTo(36, 5);
 
-    // Deux fois trop large : ramenée à la limite, rapport conservé.
+    // Twice too wide: brought down to the limit, ratio kept.
     const grande = fitToContentWidth(960, 480, 200);
     expect(grande.widthPt).toBeCloseTo(200, 5);
     expect(grande.heightPt).toBeCloseTo(100, 5);
@@ -165,7 +164,7 @@ describe('moteur : mise en page du cadre', () => {
     const layout = layoutParagraph(paragraphe, ctx());
 
     expect(layout.lines).toHaveLength(1);
-    // La hauteur de ligne suit celle du cadre, à l'interligne près.
+    // The line height follows that of the frame, give or take the line spacing.
     expect(layout.lines[0]!.heightPx).toBeGreaterThanOrEqual(ptToPx(200));
   });
 
@@ -179,7 +178,7 @@ describe('moteur : mise en page du cadre', () => {
   });
 
   it('reporte l’image sur la ligne suivante plutôt que de couper dedans', () => {
-    // La zone fait 200 px ; le texte remplit presque tout, l'image ne tient plus.
+    // The area is 200 px; the text fills almost all of it, the image no longer fits.
     const paragraphe = createParagraph('', {
       runs: [
         makeRun('Un texte assez long pour occuper la ligne '),
@@ -188,7 +187,7 @@ describe('moteur : mise en page du cadre', () => {
     });
     const layout = layoutParagraph(paragraphe, ctx(200));
 
-    // Le cadre se retrouve entier sur une seule ligne : jamais deux morceaux.
+    // The frame ends up whole on a single line: never two pieces.
     const lignesAvecImage = layout.lines.filter((line) =>
       line.segments.some((segment) => segment.formatting.imageSrc),
     );
@@ -233,7 +232,7 @@ describe('ODF : aller-retour d’une image', () => {
     expect(xml).toContain('text:anchor-type="as-char"');
     expect(xml).toContain('xlink:href="Pictures/image1.gif"');
     expect(xml).toContain('<svg:title>Un logo</svg:title>');
-    // Dimensions écrites : sans elles, Writer dessine un cadre de taille nulle.
+    // Dimensions written: without them, Writer draws a frame of zero size.
     expect(xml).toMatch(/svg:width="[\d.]+pt"/);
     expect(xml).toMatch(/svg:height="[\d.]+pt"/);
   });
@@ -335,7 +334,7 @@ describe('base64 maison', () => {
   it('décode une data: d’image et refuse les autres', () => {
     const decode = parseDataUrl(GIF_1PX);
     expect(decode?.mediaType).toBe('image/gif');
-    // GIF87a/GIF89a : la signature doit être intacte après décodage.
+    // GIF87a/GIF89a: the signature must be intact after decoding.
     expect(String.fromCharCode(...decode!.bytes.subarray(0, 6))).toBe('GIF89a');
 
     expect(parseDataUrl('data:text/html;base64,PHA+')).toBeNull();
@@ -355,7 +354,7 @@ describe('PDF : le cadre image', () => {
     };
     const layout = paginateDocument(doc, { measurer });
 
-    // Un « JPEG » minimal : ce module place les octets, il ne les décode pas.
+    // A minimal "JPEG": this module places the bytes, it does not decode them.
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
     const bytes = exportToPdfBytes(doc, layout, {
       images: new Map([[GIF_1PX, { jpegBytes: jpeg, widthPx: 2, heightPx: 1 }]]),
@@ -366,8 +365,7 @@ describe('PDF : le cadre image', () => {
     expect(texte).toContain('/Filter /DCTDecode');
     expect(texte).toContain('/XObject <<');
     expect(texte).toMatch(/\/I\d+ Do/);
-    // Les octets du JPEG doivent traverser le flux **intacts** : c'est tout
-    // l'intérêt de /DCTDecode, et une conversion en UTF-8 les détruirait.
+    // The JPEG bytes must cross the stream **intact**: that is the whole point of /DCTDecode, and a conversion to UTF-8 would destroy them.
     expect(texte).toContain(String.fromCharCode(0xff, 0xd8, 0xff, 0xe0));
   });
 
@@ -384,13 +382,12 @@ describe('PDF : le cadre image', () => {
 
     expect(texte.startsWith('%PDF-1.4')).toBe(true);
     expect(texte).not.toContain('/DCTDecode');
-    // Le rectangle réservé est tout de même tracé, à la taille du cadre.
+    // The reserved rectangle is still drawn, at the size of the frame.
     expect(texte).toContain('72.00 36.00 re S');
   });
 
   it('annonce des décalages xref comptés en octets', () => {
-    // L'entête binaire du PDF porte quatre octets ≥ 0x80 : compter en caractères
-    // décalerait toute la table et rendrait le fichier illisible aux lecteurs stricts.
+    // The PDF's binary header carries four bytes ≥ 0x80: counting in characters would shift the whole table and make the file unreadable for strict readers.
     const doc = createEmptyDocument('Décalages');
     const layout = paginateDocument(doc, { measurer });
     const bytes = exportToPdfBytes(doc, layout);
@@ -425,8 +422,7 @@ describe('rognage : l’algèbre de SvxGrfCrop', () => {
   });
 
   it('réduit proportionnellement deux bords opposés qui se recouvrent', () => {
-    // Écrêter un seul des deux déplacerait le centre de la partie visible : ce
-    // qu'on garde ne serait plus ce qu'on a désigné.
+    // Clamping only one of the two would shift the center of the visible part: what we keep would no longer be what we designated.
     const normalise = normalizeCrop(crop(0, 0.8, 0, 0.4));
     expect(normalise.leftPct / normalise.rightPct).toBeCloseTo(0.5, 6);
     expect(1 - normalise.leftPct - normalise.rightPct).toBeCloseTo(MIN_VISIBLE_FRACTION, 6);
@@ -441,9 +437,7 @@ describe('rognage : l’algèbre de SvxGrfCrop', () => {
   });
 
   it('compose un second rognage dans le repère du visible, pas de l’original', () => {
-    // C'est le cœur du sujet : après avoir gardé la moitié gauche, retirer
-    // encore la moitié gauche de ce qui reste doit laisser un quart de
-    // l'original — pas la moitié moins la moitié, qui ne laisserait rien.
+    // This is the heart of the matter: after keeping the left half, removing the left half again of what is left must leave a quarter of the original, not half minus half, which would leave nothing.
     const premier = crop(0, 0.5, 0, 0);
     const second = crop(0, 0.5, 0, 0);
     const total = composeCrop(premier, second);
@@ -453,8 +447,8 @@ describe('rognage : l’algèbre de SvxGrfCrop', () => {
   });
 
   it('compose sur les quatre bords à la fois', () => {
-    const premier = crop(0.1, 0.1, 0.1, 0.1);   // reste 80 % × 80 %
-    const second = crop(0.5, 0, 0, 0.5);        // moitié de ce qui reste
+    const premier = crop(0.1, 0.1, 0.1, 0.1);   // 80 % × 80 % remain
+    const second = crop(0.5, 0, 0, 0.5);        // half of what remains
     const total = composeCrop(premier, second);
 
     expect(total.topPct).toBeCloseTo(0.1 + 0.5 * 0.8, 6);
@@ -473,8 +467,7 @@ describe('rognage : l’algèbre de SvxGrfCrop', () => {
   });
 
   it('agrandit et décale l’image pour que la part gardée remplisse le cadre', () => {
-    // Garder la moitié droite d'une image dans un cadre de 100 px : l'image doit
-    // faire 200 px et reculer de 100 px, pour que sa moitié droite tombe dedans.
+    // Keeping the right half of an image in a 100 px frame: the image must be 200 px wide and shifted back by 100 px, so that its right half falls inside.
     const geometrie = cropGeometry(crop(0, 0, 0, 0.5), 100, 60);
     expect(geometrie.widthPx).toBeCloseTo(200, 6);
     expect(geometrie.offsetXPx).toBeCloseTo(-100, 6);
@@ -491,8 +484,7 @@ describe('rognage : l’algèbre de SvxGrfCrop', () => {
     });
     expect(cadre.imageCropTopPct).toBeCloseTo(0.25, 6);
     expect(cadre.imageCropLeftPct).toBeCloseTo(0.25, 6);
-    // Les bords non rognés restent **absents**, jamais posés à zéro : la forme
-    // canonique du formatage veut qu'un attribut non posé n'existe pas.
+    // Uncropped edges stay **absent**, never set to zero: the canonical form of formatting says that an attribute that is not set does not exist.
     expect(cadre.imageCropRightPct).toBeUndefined();
     expect(hasCrop(imageCrop(cadre))).toBe(true);
   });
@@ -504,8 +496,7 @@ describe('rognage : l’algèbre de SvxGrfCrop', () => {
   });
 
   it('laisse deux runs rognés pareil fusionner, et pas les autres', () => {
-    // Les quatre valeurs sont des clés plates justement pour cela : un objet ne
-    // serait jamais `===` à un autre, et deux runs voisins cesseraient de fusionner.
+    // The four values are flat keys precisely for this reason: an object would never be `===` to another, and two neighboring runs would stop merging.
     const a = makeImageRun({ src: GIF_1PX, widthPt: 20, heightPt: 20, crop: crop(0.1, 0, 0, 0) });
     const b = makeImageRun({ src: GIF_1PX, widthPt: 20, heightPt: 20, crop: crop(0.1, 0, 0, 0) });
     const c = makeImageRun({ src: GIF_1PX, widthPt: 20, heightPt: 20, crop: crop(0.2, 0, 0, 0) });
@@ -535,8 +526,7 @@ describe('rognage : ODF fo:clip', () => {
   }
 
   it('écrit fo:clip dans l’ordre haut, droite, bas, gauche', () => {
-    // On garde la moitié droite : le cadre fait 72 pt, l'original en ferait 144,
-    // et c'est donc 72 pt qui sont retranchés à gauche.
+    // We keep the right half: the frame is 72 pt, the original would be 144, so 72 pt are cut on the left.
     const doc = docRogne(crop(0, 0, 0, 0.5));
     const xml = buildContentXml(doc, collectPictures(doc).hrefBySrc);
 
@@ -544,10 +534,10 @@ describe('rognage : ODF fo:clip', () => {
     expect(clip).not.toBeNull();
     const valeurs = clip![1]!.trim().split(/\s+/);
     expect(valeurs).toHaveLength(4);
-    expect(parseFloat(valeurs[0]!)).toBeCloseTo(0, 1);    // haut
-    expect(parseFloat(valeurs[1]!)).toBeCloseTo(0, 1);    // droite
-    expect(parseFloat(valeurs[2]!)).toBeCloseTo(0, 1);    // bas
-    expect(parseFloat(valeurs[3]!)).toBeCloseTo(72, 1);   // gauche
+    expect(parseFloat(valeurs[0]!)).toBeCloseTo(0, 1);    // top
+    expect(parseFloat(valeurs[1]!)).toBeCloseTo(0, 1);    // right
+    expect(parseFloat(valeurs[2]!)).toBeCloseTo(0, 1);    // bottom
+    expect(parseFloat(valeurs[3]!)).toBeCloseTo(72, 1);   // left
   });
 
   it('n’écrit pas fo:clip pour une image entière', () => {
@@ -556,8 +546,7 @@ describe('rognage : ODF fo:clip', () => {
   });
 
   it('donne des styles distincts à deux rognages différents', () => {
-    // `fo:clip` vit dans le style, pas dans le cadre : le partager rognerait les
-    // deux images de la même façon.
+    // `fo:clip` lives in the style, not in the frame: sharing it would crop the two images the same way.
     const base = createEmptyDocument('Deux rognages');
     const doc: WriterDocumentState = {
       ...base,
@@ -642,19 +631,17 @@ describe('rognage : PDF', () => {
       }),
     );
 
-    // `re W n` : rectangle, puis chemin de rognage non peint.
+    // `re W n`: a rectangle, then a clipping path that is not painted.
     expect(texte).toMatch(/72\.00 36\.00 re W n/);
-    // L'image est posée à sa taille **entière** — 144 pt pour une moitié gardée.
+    // The image is placed at its **full** size: 144 pt for a half that is kept.
     expect(texte).toContain('144.00 0 0 36.00');
   });
 });
 
 /**
- * Déplacement d'un cadre — `SwFEShell::SetAnchor` (`fefly1.cxx`).
+ * Moving a frame: `SwFEShell::SetAnchor` (`fefly1.cxx`).
  *
- * Un glissement ne corrige pas seulement des coordonnées : il **change
- * l'ancre**. C'est elle qui décide de la page d'un cadre, et un cadre traîné
- * loin de son paragraphe mais resté ancré à lui sortait de la feuille.
+ * A drag does not only correct coordinates: it **changes the anchor**. It is the anchor that decides a frame's page, and a frame dragged far from its paragraph but still anchored to it left the sheet.
  */
 describe('déplacement d’un cadre image', () => {
   const IMAGE = { imageSrc: GIF_1PX, imageWidthPt: 40, imageHeightPt: 30 };
@@ -667,7 +654,7 @@ describe('déplacement d’un cadre image', () => {
     return { doc: { ...createEmptyDocument(), blocks: [porteur, voisin] }, porteur, voisin };
   }
 
-  /** Le cadre d'un paragraphe, et l'offset où il se trouve. */
+  /** The frame of a paragraph, and the offset where it is. */
   function cadreDans(doc: ReturnType<typeof createEmptyDocument>, blockId: string) {
     const bloc = doc.blocks.find((b) => b.id === blockId);
     if (!bloc || bloc.type === undefined || !('runs' in bloc)) return null;
@@ -707,9 +694,8 @@ describe('déplacement d’un cadre image', () => {
 
   it('corrige l’offset visé quand on déplace vers la droite dans le même paragraphe', () => {
     /*
-     * « avant ￼après » : le cadre est à l'offset 6. Le déposer à l'offset 9
-     * désigne un point situé après lui ; une fois le cadre retiré, ce même
-     * caractère est à 8. Sans la correction, l'image reculait au lieu d'avancer.
+     * "avant ￼après": the frame is at offset 6. Dropping it at offset 9 designates a point located after it; once the frame is removed, that same character is at 8. Without the correction, the image moved back instead of
+     * forward.
      */
     const { doc, porteur } = docAvecCadre();
     const apres = moveImageRun(doc, porteur.id, 6, { blockId: porteur.id, offset: 9 }, {
@@ -732,8 +718,7 @@ describe('déplacement d’un cadre image', () => {
     const { doc, porteur, voisin } = docAvecCadre({
       imageAnchor: 'to-para',
       imageSurround: 'ideal',
-      // Un alignement à droite : le glissement doit le remplacer, sinon le
-      // cadre reviendrait à sa place au prochain calcul.
+      // A right alignment: the drag must replace it, otherwise the frame would go back to its place at the next computation.
       imageHoriOrient: 'right',
     });
     const apres = moveImageRun(doc, porteur.id, 6, { blockId: voisin.id, offset: 0 }, {

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Une feuille physique A4/Letter. Transposition visuelle de `SwPageFrm`.
+ * A physical A4/Letter sheet. A visual transposition of `SwPageFrm`.
  *
- * Supporte :
- *  - En-têtes (`SwHeaderFrm`) et pieds de page (`SwFooterFrm`) physiques avec rendu véridique ;
- *  - Double-clic direct pour ouvrir l'atelier ergonomique de mise en page ;
- *  - Affichage précis des marges, tableaux et sélections multi-lignes.
+ * Supports:
+ *  - physical headers (`SwHeaderFrm`) and footers (`SwFooterFrm`) with a truthful rendering;
+ *  - a direct double click to open the ergonomic page layout workshop;
+ *  - precise display of margins, tables and multi-line selections.
  */
 
 import { memo, type JSX } from 'react';
@@ -24,24 +24,21 @@ import { ImageFrame } from './ImageFrame';
 import { imageKey } from '../../domain/document/images';
 import { mmToPx, ptToPx, pxToMm } from '../../domain/document/units';
 
-/** Repli de hauteur de bande quand le document n'a pas de mobilier de page. */
+/** Fallback band height when the document has no page furniture. */
 const DEFAULT_BAND_PX = 40;
 import { TableHandles, TableTint, type TableFocus } from './TableOverlay';
 
-/** Une occurrence de recherche posée sur la page. */
+/** A search match placed on the page. */
 export interface SearchRect {
   rect: SelectionRect;
   current: boolean;
 }
 
 /**
- * Tableaux vides partagés, gelés.
+ * Shared, frozen empty arrays.
  *
- * `A4Page` est mémoïsé, donc comparé prop à prop par identité. Un `?? []`
- * écrit sur le site d'appel rendrait un tableau neuf à chaque rendu et
- * suffirait à faire échouer la comparaison — la mémoïsation ne servirait plus
- * à rien pour toute page sans sélection ni occurrence, c'est-à-dire presque
- * toutes. Ces constantes sont la valeur de repli à utiliser à leur place.
+ * `A4Page` is memoized, so it is compared prop by prop by identity. A `?? []` written at the call site would hand back a new array on every render and be enough to make the comparison fail: memoization
+ * would be useless for every page with no selection or match, which is almost all of them. These constants are the fallback value to use in their place.
  */
 export const AUCUN_RECT: readonly SelectionRect[] = Object.freeze([]);
 export const AUCUNE_OCCURRENCE: readonly SearchRect[] = Object.freeze([]);
@@ -57,22 +54,22 @@ export interface A4PageProps {
   paragraphLayouts: ReadonlyMap<string, ParagraphLayout>;
   placements: readonly { blockId: string; placed: PlacedParagraph }[];
   selectionRects: readonly SelectionRect[];
-  /** Occurrences de la recherche à peindre sur cette page. */
+  /** Search matches to paint on this page. */
   searchRects: readonly SearchRect[];
   caret: { pageIndex: number; xPx: number; topPx: number; heightPx: number } | null;
   caretIdle: boolean;
   showMargins: boolean;
-  /** Zoom courant — les poignées de tableau convertissent les gestes avec. */
+  /** Current zoom: the table handles convert gestures with it. */
   zoom: number;
-  /** Tableau et cellule sous le curseur, pour peindre les poignées. */
+  /** Table and cell under the cursor, to paint the handles. */
   activeTable: ({ tableId: string } & TableFocus) | null;
   onResizeColumn: (tableId: string, boundaryIndex: number, deltaPercent: number) => void;
   onSelectRow: (tableId: string, rowIndex: number) => void;
   onSelectColumn: (tableId: string, columnIndex: number) => void;
   onSelectTable: (tableId: string) => void;
-  /** Document non modifiable : les poignées de largeur ne s'affichent pas. */
+  /** Document that cannot be modified: the width handles are not shown. */
   readOnly?: boolean;
-  /** Contexte des cadres image : légendes, sélection, poignées. */
+  /** Context of the image frames: captions, selection, handles. */
   images?: ImageContext | undefined;
   onToggleTask: (blockId: string) => void;
   onOpenFurniture?: (band: FurnitureBand) => void;
@@ -84,9 +81,9 @@ export interface A4PageProps {
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>, pageIndex: number) => void;
 }
 
-/** Cadres des cellules d'un tableau posé sur cette page. */
+/** Frames of the cells of a table placed on this page. */
 function TableFrames({ table }: { table: PlacedTable }): JSX.Element {
-  // Jeton « papier » : la grille est imprimée, elle ne suit pas le thème.
+  // "Paper" token: the grid is printed, it does not follow the theme.
   const color = table.table.borderColor ?? 'var(--paper-border)';
   const widthPx = table.table.borderWidthPt ? `${ptToPx(table.table.borderWidthPt)}px` : '1px';
 
@@ -95,13 +92,10 @@ function TableFrames({ table }: { table: PlacedTable }): JSX.Element {
       {table.rows.flatMap((row, rowPos) =>
         row.cells.map((cell) =>
           /*
-           * Une cellule recouverte par une fusion ne se peint pas.
+           * A cell covered by a merge is not painted.
            *
-           * Le moteur lui donne une largeur nulle, ce qui n'annule pas son
-           * cadre : `border-box` réduit le contenu à zéro mais garde les deux
-           * bordures d'un pixel, et il restait un trait de 2 px au milieu de
-           * chaque cellule fusionnée, exactement là où la frontière effacée
-           * passait. C'est la maîtresse qui porte le cadre de la zone entière.
+           * The engine gives it a zero width, which does not cancel its frame: `border-box` shrinks the content to zero but keeps the two one-pixel borders, and a 2 px line was left in the middle of every merged cell,
+           * exactly where the erased boundary ran. It is the master that carries the frame of the whole area.
            */
           cell.covered ? null : (
           <div
@@ -158,11 +152,9 @@ export const A4Page = memo(function A4Page({
   const pageNumber = page.index + 1;
 
   /**
-   * Un cadre flottant, peint à sa place sur la feuille.
+   * A floating frame, painted in its place on the sheet.
    *
-   * Le même rendu sert aux **deux calques** : `SwRootFrm::Paint` peint `hell`
-   * avant le texte et `heaven` après, mais c'est le même cadre — seul l'ordre
-   * de passage change, et avec lui ce qui recouvre quoi.
+   * The same rendering serves the **two layers**: `SwRootFrm::Paint` paints `hell` before the text and `heaven` after it, but it is the same frame, and only the order of passes changes, and with it what covers what.
    */
   const peindreCadre = (laid: LaidOutFly, index: number): JSX.Element => (
     <div
@@ -175,31 +167,22 @@ export const A4Page = memo(function A4Page({
         width: `${laid.widthPx}px`,
         height: `${laid.heightPx}px`,
         /*
-         * Le cadre reste saisissable, y compris en `through`.
+         * The frame stays grabbable, even in `through` mode.
          *
-         * Le laisser traverser les clics rendait le texte du dessous plus
-         * commode à sélectionner, mais fermait la porte : une image posée
-         * « derrière le texte » n'était plus jamais atteignable, donc plus
-         * jamais réglable ni supprimable. Le texte, lui, se sélectionne
-         * toujours — il suffit de commencer le geste hors du cadre.
+         * Letting clicks pass through it made the text underneath easier to select, but closed the door: an image placed "behind the text" could never be reached again, so never adjusted or deleted again. The text, for its
+         * part, can always be selected: you just have to start the gesture outside the frame.
          */
         pointerEvents: 'auto',
       }}
     >
-      {/*
-        Même cadre que dans le fil : c'est ici, et ici seulement, qu'une
-        image flottante est peinte. Elle gagne du même coup la légende et
-        les poignées de redimensionnement, au lieu d'être une simple
-        vignette inerte.
-      */}
+      {/* Same frame as in the flow: it is here, and only here, that a floating image is painted. It also gets the caption and the resize handles, instead of being a simple inert thumbnail. */}
       {images ? (
         <ImageFrame
           formatting={laid.fly.run}
           blockId={laid.fly.anchorBlockId}
           offset={laid.fly.anchorOffset}
           widthPx={laid.widthPx}
-          // La hauteur posée par `flyLayout` comprend la légende : c'est
-          // celle du cadre entier. L'image en occupe le reste.
+          // The height set by `flyLayout` includes the caption: it is that of the whole frame. The image takes up the rest.
           imageHeightPx={laid.heightPx - (laid.fly.captionHeightPx ?? 0)}
           captionHeightPx={laid.fly.captionHeightPx ?? 0}
           figureNumber={
@@ -240,22 +223,16 @@ export const A4Page = memo(function A4Page({
   const pageWidthMm = pxToMm(geometry.pageWidthPx);
 
   /*
-   * Hauteurs des bandes d'en-tête et de pied.
+   * Heights of the header and footer bands.
    *
-   * Bornées à la zone **hors texte**, et c'est tout l'enjeu : la bande est
-   * posée en `zIndex: 4` au-dessus de `.writer-page__content`, qui n'a pas de
-   * `z-index` propre, et elle arrête la propagation de `pointerdown` pour que
-   * le clic ouvre l'atelier plutôt que de poser le curseur. Une bande plus
-   * haute que la marge recouvre donc les premières lignes du texte et y rend
-   * le curseur impossible à placer — le clic ouvre l'en-tête à la place.
+   * Bounded to the area **outside the text**, and that is the whole point: the band is placed at `zIndex: 4` above `.writer-page__content`, which has no `z-index` of its own, and it stops the propagation of
+   * `pointerdown` so that the click opens the workshop instead of placing the cursor. A band taller than the margin therefore covers the first lines of the text and makes it impossible to place the cursor there:
+   * the click opens the header instead.
    *
-   * Le cas n'était pas théorique : `resolveGeometry` plancher le contenu d'une
-   * bande à 16 mm, bande vide comprise, alors que la marge, elle, suit le
-   * réglage de l'utilisateur. Sous 16 mm de marge haute la bande débordait —
-   * 22,7 px de texte inaccessibles à 10 mm de marge. Le gabarit A4 par défaut
-   * (20 mm) masquait le défaut.
+   * The case was not theoretical: `resolveGeometry` floored the content of a band at 16 mm, empty band included, while the margin follows the user's setting. Under 16 mm of top margin the band overflowed: 22.7 px
+   * of text unreachable at a 10 mm margin. The default A4 template (20 mm) hid the defect.
    *
-   * `geom` ne sert donc plus qu'à réclamer **moins** que la marge, jamais plus.
+   * `geom` is therefore only used to claim **less** than the margin, never more.
    */
   const headerBandPx = Math.min(
     geometry.contentTopPx,
@@ -273,9 +250,7 @@ export const A4Page = memo(function A4Page({
   return (
     <div
       className="writer-page"
-      // Index de la feuille, lu au dépôt d'une image : le glissement écoute la
-      // fenêtre et n'a donc pas le `pageIndex` que reçoivent les gestionnaires
-      // de pointage de ce composant.
+      // Index of the sheet, read when an image is dropped: the drag listens on the window and so does not have the `pageIndex` that this component's pointer handlers receive.
       data-page-index={page.index}
       style={{ width: `${geometry.pageWidthPx}px`, height: `${geometry.pageHeightPx}px` }}
       onPointerDown={(event) => onPointerDown(event, page.index)}
@@ -283,7 +258,7 @@ export const A4Page = memo(function A4Page({
       onPointerUp={(event) => onPointerUp(event, page.index)}
       onContextMenu={(event) => onContextMenu(event, page.index)}
     >
-      {/* En-tête de page physique interactif */}
+      {/* Interactive physical page header */}
       <div
         className="writer-page__furniture-header"
         style={{
@@ -331,7 +306,7 @@ export const A4Page = memo(function A4Page({
         </button>
       </div>
 
-      {/* Guide des marges */}
+      {/* Margin guide */}
       {showMargins ? (
         <div
           className="writer-page__margins"
@@ -344,7 +319,7 @@ export const A4Page = memo(function A4Page({
         />
       ) : null}
 
-      {/* Contenu textuel et tableaux */}
+      {/* Text content and tables */}
       <div
         className="writer-page__content"
         style={{
@@ -354,19 +329,14 @@ export const A4Page = memo(function A4Page({
           height: `${geometry.contentHeightPx}px`,
         }}
       >
-        {/*
-          Cadres flottants du calque `hell` (`SwFlyFreeFrm`). Peints **avant**
-          le texte, donc dessous : c'est l'ordre de `SwRootFrm::Paint`, et il
-          n'a de conséquence visible que pour l'habillage `through`, où le
-          texte doit passer par-dessus l'image.
-        */}
+        {/* Floating frames of the `hell` layer (`SwFlyFreeFrm`). Painted **before** the text, so underneath: it is the order of `SwRootFrm::Paint`, and it only has a visible consequence for `through` wrapping, where the text has to pass over the image. */}
         {page.fliesHell.map(peindreCadre)}
 
         {page.tables.map((table) => (
           <TableFrames key={`${table.blockId}-${table.topPx}`} table={table} />
         ))}
 
-        {/* Teinte de sélection — sous le texte, pour ne pas le délaver. */}
+        {/* Selection tint: under the text, so as not to wash it out. */}
         {page.tables.map((table) => (
           <TableTint
             key={`tint-${table.blockId}-${table.topPx}`}
@@ -395,43 +365,10 @@ export const A4Page = memo(function A4Page({
           );
         })}
 
-        {/*
-          Teinte de sélection et occurrences de recherche.
-
-          Peintes **par-dessus** le contenu, et c'est ce qui les rend fiables :
-          sous le contenu, tout aplat opaque posé plus haut dans la pile les
-          effaçait. Le défaut se voyait à `Ctrl+A` — la ligne d'en-tête d'un
-          tableau (`--paper-sunken`), un caractère à fond coloré
-          (`RES_CHRATR_BACKGROUND`) ou une image ancrée comme caractère
-          restaient blancs au milieu d'un document entièrement surligné, alors
-          que le moteur avait bien produit leurs rectangles.
-
-          C'est l'ordre du C++ : la sélection n'est pas un calque du document
-          mais un **habillage de vue**, peint après lui — `SwRootFrm::Paint`
-          dessine le contenu, puis le gestionnaire d'habillages
-          (`sdr::overlay::OverlaySelection`) pose la teinte translucide sur ce
-          qu'il a produit, cadres et graphiques compris.
-
-          La fusion `multiply` protège la lisibilité : elle ne peut
-          qu'assombrir. Sur le blanc du papier — le cas de presque toute la
-          page — multiplier par la teinte revient exactement au rendu
-          précédent ; sur un glyphe noir, le noir l'emporte et le texte garde
-          son contraste ; sur un aplat gris ou une image, la teinte se voit
-          enfin. Les rectangles se composent d'abord entre eux (`isolation`),
-          pour que le chevauchement d'une occurrence et de la sélection ne
-          double pas l'assombrissement.
-
-          Restent au-dessus, et donc intacts : les poignées de tableau, le
-          curseur, les notes de bas de page — que `Ctrl+A` ne sélectionne pas,
-          pas plus que dans Writer — et le calque `heaven`.
-        */}
+        {/* Selection tint and search matches.  Painted **over** the content, and that is what makes them reliable: under the content, any opaque flat color placed higher in the stack erased them. The defect showed at `Ctrl+A`: the header row of a table (`--paper-sunken`), a character with a colored background (`RES_CHRATR_BACKGROUND`) or an image anchored as a character stayed white in the middle of an entirely highlighted document, although the engine had produced their rectangles.  That is the C++ order: the selection is not a layer of the document but a **view overlay**, painted after it. `SwRootFrm::Paint` draws the content, then the overlay manager (`sdr::overlay::OverlaySelection`) lays the translucent tint over what it produced, frames and graphics included.  The `multiply` blend protects readability: it can only darken. On the white of the paper, which is the case of almost the whole page, multiplying by the tint is exactly the previous rendering; on a black glyph, black wins and the text keeps its contrast; on a grey flat color or an image, the tint finally shows. The rectangles first compose among themselves (`isolation`), so that the overlap of a match and the selection does not double the darkening.  Left above, and so untouched: the table handles, the cursor, the footnotes (which `Ctrl+A` does not select, any more than in Writer), and the `heaven` layer. */}
         {searchRects.length > 0 || selectionRects.length > 0 ? (
           <div className="writer-selection-layer" aria-hidden="true">
-            {/*
-              Les occurrences trouvées se peignent **sous** la sélection : les
-              deux se superposent sur l'occurrence courante, qui est aussi
-              sélectionnée, et c'est la sélection qui doit rester lisible.
-            */}
+            {/* The matches found are painted **under** the selection: the two overlap on the current match, which is also selected, and it is the selection that must stay readable. */}
             {searchRects.map(({ rect, current }, index) => (
               <div
                 key={`recherche-${index}`}
@@ -460,10 +397,7 @@ export const A4Page = memo(function A4Page({
           </div>
         ) : null}
 
-        {/*
-          Poignées de tableau — après le texte, donc au-dessus : une poignée
-          qu'un mot recouvrirait ne serait pas saisissable.
-        */}
+        {/* Table handles: after the text, so above it: a handle that a word would cover could not be grabbed. */}
         {page.tables.map((table) => (
           <TableHandles
             key={`poignees-${table.blockId}-${table.topPx}`}
@@ -490,15 +424,7 @@ export const A4Page = memo(function A4Page({
           />
         ) : null}
 
-        {/*
-          Zone des notes de bas de page (`SwFtnContFrm`).
-
-          Sa hauteur est **réservée par la pagination** (`PageBuilder`) : le
-          corps du texte s'arrête au-dessus, et le bandeau ne recouvre donc plus
-          rien. `height` reprend cette hauteur exacte plutôt que de laisser la
-          boîte se dimensionner sur son contenu — les deux doivent coïncider,
-          sinon la réserve et le rendu divergeraient.
-        */}
+        {/* Footnote area (`SwFtnContFrm`).  Its height is **reserved by pagination** (`PageBuilder`): the text body stops above it, so the banner no longer covers anything. `height` takes up that exact height rather than let the box size itself on its content: the two must coincide, otherwise the reserve and the rendering would diverge. */}
         {page.footnotes && page.footnotes.length > 0 && (
           <div
             className="writer-page__footnotes"
@@ -512,8 +438,7 @@ export const A4Page = memo(function A4Page({
               paddingTop: '8px',
               fontSize: '11px',
               lineHeight: '1.4',
-              // `--text-muted` n'existe dans aucune feuille : la règle tombait
-              // systématiquement sur sa valeur de repli.
+              // `--text-muted` does not exist in any stylesheet: the rule always fell back on its default value.
               color: 'var(--paper-secondary)',
               pointerEvents: 'auto',
             }}
@@ -527,27 +452,11 @@ export const A4Page = memo(function A4Page({
           </div>
         )}
 
-        {/*
-          Calque `heaven` : les cadres « devant le texte » (`RES_OPAQUE`).
-
-          Peints en **dernier**, après les poignées, le curseur et les notes :
-          c'est la fin de `SwRootFrm::Paint`, et c'est ce qui donne son sens à
-          « devant le texte ». Un cadre opaque recouvre donc tout ce que la page
-          porte, sans exception.
-
-          Ils étaient jusqu'ici insérés entre les poignées et le curseur, ce qui
-          les faisait passer *sous* le curseur et sous le bandeau de notes —
-          l'ordre des calques s'inversait sur ces deux éléments, et une image
-          posée devant le texte n'en cachait pourtant pas le curseur.
-
-          Conséquence assumée : un cadre opaque posé sur la zone de saisie
-          masque le curseur. C'est le comportement demandé d'un objet
-          « devant le texte » ; le geste de retour est de le renvoyer derrière.
-        */}
+        {/* `heaven` layer: the "in front of the text" frames (`RES_OPAQUE`).  Painted **last**, after the handles, the cursor and the notes: it is the end of `SwRootFrm::Paint`, and it is what gives "in front of the text" its meaning. An opaque frame therefore covers everything the page carries, without exception.  They used to be inserted between the handles and the cursor, which made them go *under* the cursor and under the notes banner: the order of the layers was inverted for those two elements, and an image placed in front of the text still did not hide its cursor.  An accepted consequence: an opaque frame placed over the typing area hides the cursor. It is the requested behavior for an object "in front of the text"; the way back is to send it behind. */}
         {page.fliesHeaven.map(peindreCadre)}
       </div>
 
-      {/* Pied de page physique interactif */}
+      {/* Interactive physical page footer */}
       <div
         className="writer-page__furniture-footer"
         style={{

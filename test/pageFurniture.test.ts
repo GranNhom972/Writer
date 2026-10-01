@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Tests unitaires du modèle et des calculs d'en-tête et pied de page
- * Transposition SwPageDesc / SwHeaderFrm / SwFooterFrm OpenOffice.
+ * Unit tests of the model and the computations for page headers and footers. A transposition of OpenOffice's SwPageDesc / SwHeaderFrm / SwFooterFrm.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -58,13 +57,13 @@ describe('Modèle de mobilier de page (PageFurniture)', () => {
       headerEvenRight: 'Société ACME',
     };
 
-    // Page impaire (page 1 ou 3)
+    // Odd page (page 1 or 3)
     const zonesImpaires = getThreeZones(furniture, 'header', 1);
     expect(zonesImpaires.left).toBe('Société ACME');
     expect(zonesImpaires.center).toBe('Confidentiel');
     expect(zonesImpaires.right).toBe('Page {page}');
 
-    // Page paire (page 2)
+    // Even page (page 2)
     const zonesPaires = getThreeZones(furniture, 'header', 2);
     expect(zonesPaires.left).toBe('Page {page}');
     expect(zonesPaires.center).toBe('Confidentiel');
@@ -112,12 +111,12 @@ describe('Modèle de mobilier de page (PageFurniture)', () => {
       { coordMm: 185, label: 'Marge droite' },
     ];
 
-    // Proche du centre (105.3 mm) -> aimantation à 105 mm
+    // Close to the center (105.3 mm) -> snaps to 105 mm
     const snap = snapAxis(105.3, 10, reperes, 1);
     expect(snap.valeurMm).toBe(105);
     expect(snap.reperes).toContain('Centre');
 
-    // Loin de tout repère (50 mm) -> pas d'aimantation
+    // Far from any guide (50 mm) -> no snapping
     const pasDeSnap = snapAxis(50, 10, reperes, 1);
     expect(pasDeSnap.valeurMm).toBe(50);
     expect(pasDeSnap.reperes).toHaveLength(0);
@@ -125,19 +124,16 @@ describe('Modèle de mobilier de page (PageFurniture)', () => {
 });
 
 /**
- * Zones et ligne simple décrivent la **même** bande.
+ * Zones and the single line describe the **same** band.
  *
- * La ligne simple n'est pas la valeur de repli d'une zone mais celle de la
- * bande entière : la reverser dans la zone que désigne l'alignement faisait
- * apparaître deux fois un texte écrit dans les deux représentations — ce que
- * font les préréglages et tout en-tête importé d'ODF. « CONFIDENTIEL » posé en
- * zone droite puis aligné à gauche s'affichait à gauche *et* à droite.
+ * The single line is not the fallback value of a zone but that of the whole band: pouring it into the zone designated by the alignment made a text written in both representations appear twice, which is what the presets and any
+ * header imported from ODF do. "CONFIDENTIEL" put in the right zone and then aligned to the left was displayed on the left *and* on the right.
  */
 describe('Zones et ligne simple d’une bande', () => {
   const confidentiel: PageFurniture = {
     ...DEFAULT_FURNITURE,
     headerRight: 'CONFIDENTIEL',
-    // La doublure : un document ancien, ou importé, porte les deux.
+    // The duplicate: an old or imported document carries both.
     header: 'CONFIDENTIEL',
   };
 
@@ -159,7 +155,7 @@ describe('Zones et ligne simple d’une bande', () => {
     expect(getThreeZones({ ...simple, headerAlign: 'center' }, 'header', 2).center).toBe('Mention');
     expect(getThreeZones({ ...simple, headerAlign: 'right' }, 'header', 2).right).toBe('Mention');
 
-    // Et une seule fois, quel que soit l'alignement.
+    // And only once, whatever the alignment.
     const zones = getThreeZones({ ...simple, headerAlign: 'center' }, 'header', 2);
     expect([zones.left, zones.center, zones.right].filter(Boolean)).toEqual(['Mention']);
   });
@@ -168,7 +164,7 @@ describe('Zones et ligne simple d’une bande', () => {
     const pied: PageFurniture = { ...DEFAULT_FURNITURE, pageNumber: true };
     expect(getThreeZones(pied, 'footer', 2).right).toBe('{page}');
 
-    // Mais il s'efface dès que le pied porte un contenu à lui.
+    // But it disappears as soon as the footer carries content of its own.
     const occupe: PageFurniture = { ...pied, footerCenter: 'Interne' };
     const zones = getThreeZones(occupe, 'footer', 2);
     expect(zones.center).toBe('Interne');
@@ -176,8 +172,7 @@ describe('Zones et ligne simple d’une bande', () => {
   });
 
   it('n’écrit jamais les deux représentations dans un préréglage', () => {
-    // L'invariant qui empêche la doublure de revenir : un préréglage remplit
-    // les zones ou la ligne simple, jamais les deux.
+    // The invariant that keeps the duplicate from coming back: a preset fills the zones or the single line, never both.
     for (const preset of FURNITURE_PRESETS) {
       const patch = preset.patch as Record<string, unknown>;
       const prefixe = preset.band;

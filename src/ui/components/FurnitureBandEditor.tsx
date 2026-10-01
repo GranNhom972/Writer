@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Atelier d'une bande d'en-tête ou pied : l'aperçu EST la surface de travail.
+ * Workshop for a header or footer band: the preview IS the work surface.
  *
- *  1. La bande montre la tranche de feuille réelle (papier, marges, fantôme du texte).
- *  2. Zoom ajustable au choix (Ajuster ou paliers 50% à 200%).
- *  3. Inspecteur fixe sur le côté avec calages magnétiques, 3 zones OpenOffice,
- *     différenciation paires/impaires, filets séparateurs, fonds, saisie des jetons, styles.
- *  4. Support complet des images locales (data URL) et distantes avec outil de rognage/recadrage.
+ *  1. The band shows the real slice of the sheet (paper, margins, ghost of the text).
+ *  2. Adjustable zoom (Fit, or steps from 50% to 200%).
+ *  3. Fixed inspector on the side with magnetic snapping, 3 OpenOffice zones, even/odd differentiation, separator lines, backgrounds, token entry, styles.
+ *  4. Full support for local images (data URL) and remote ones, with a crop/reframe tool.
  */
 
 import {
@@ -155,10 +154,10 @@ export function FurnitureBandEditor({
   const [lecture, setLecture] = useState<GestureReadout | null>(null);
   const [mesures, setMesures] = useState<Record<string, BlockMetrics>>({});
 
-  // Cible de page (odd/all, even, first)
+  // Page target (odd/all, even, first)
   const [pageCible, setPageCible] = useState<'odd' | 'even' | 'first'>('odd');
 
-  // Champ actif pour l'insertion de jeton
+  // Active field for token insertion
   const [champActif, setChampActif] = useState<'single' | 'left' | 'center' | 'right'>('single');
   const singleRef = useRef<HTMLInputElement | null>(null);
   const leftRef = useRef<HTMLInputElement | null>(null);
@@ -388,7 +387,7 @@ export function FurnitureBandEditor({
     setAdresseOuverte(false);
   };
 
-  // Insertion de jetons dans le champ actuellement ciblé
+  // Inserting tokens into the field that is currently targeted
   const insererJeton = (jeton: string): void => {
     let champ: HTMLInputElement | null = null;
     let nomProp = estHeader ? 'header' : 'footer';
@@ -507,7 +506,7 @@ export function FurnitureBandEditor({
     ? { top: `${Math.max(furniture.marginTopMm, bandeMm + 2)}mm`, bottom: 0 }
     : { top: 0, bottom: `${Math.max(furniture.marginBottomMm, bandeMm + 2)}mm` };
 
-  // Détermination des valeurs de texte selon la page cible
+  // Determining the text values according to the target page
   const valGauche =
     pageCible === 'even' && furniture.differentEvenOdd
       ? (estHeader ? furniture.headerEvenLeft : furniture.footerEvenLeft) ?? ''
@@ -536,7 +535,7 @@ export function FurnitureBandEditor({
         ? (estHeader ? furniture.firstPageHeader : furniture.firstPageFooter) ?? ''
         : (estHeader ? furniture.header : furniture.footer) ?? '';
 
-  /** Clé du modèle où vit un champ, selon la bande et la page visée. */
+  /** Key of the model where a field lives, depending on the band and the targeted page. */
   const cleDe = (champ: 'left' | 'center' | 'right' | 'single'): string => {
     if (pageCible === 'even' && furniture.differentEvenOdd) {
       if (champ === 'left') return estHeader ? 'headerEvenLeft' : 'footerEvenLeft';
@@ -562,8 +561,7 @@ export function FurnitureBandEditor({
   };
 
   /**
-   * Alignement de la bande — résolu comme le fait la composition des zones :
-   * une page paire a le sien, à défaut celui des pages impaires.
+   * Alignment of the band, resolved the way the zone composition does it: an even page has its own, otherwise that of the odd pages.
    */
   const cleAlign =
     pageCible === 'even' && furniture.differentEvenOdd
@@ -584,17 +582,13 @@ export function FurnitureBandEditor({
         : furniture.footerAlign;
 
   /**
-   * Changer l'alignement **déplace** le texte quand une seule zone est remplie.
+   * Changing the alignment **moves** the text when only one zone is filled.
    *
-   * Chaque zone porte déjà son propre alignement — c'est ce que disent leurs
-   * libellés —, si bien que ce réglage ne gouvernait que la ligne simple :
-   * demander « à gauche » un en-tête posé en zone droite ne déplaçait rien, et
-   * le texte restait à droite. Le déplacer est ce que le geste veut dire, et
-   * c'est sans ambiguïté tant qu'une seule zone est en jeu.
+   * Each zone already carries its own alignment (that is what their labels say), so this setting only governed the single line: asking for "left" on a header placed in
+   * the right zone moved nothing, and the text stayed on the right. Moving it is what the gesture means, and it is unambiguous as long as only one zone is involved.
    *
-   * Dès que deux zones portent du texte, la mise en page est délibérée — un
-   * titre à gauche et une date à droite ne doivent pas se retrouver empilés :
-   * le réglage ne touche alors qu'à lui-même, comme avant.
+   * As soon as two zones hold text, the layout is deliberate (a title on the left and a date on the right must not end up stacked): the setting then only affects itself,
+   * as before.
    */
   const alignerBande = (valeur: FurnitureAlign): void => {
     const remplies = (
@@ -670,7 +664,7 @@ export function FurnitureBandEditor({
 
         <span className="atelier__spacer" />
 
-        {/* Sélecteur de page cible si pages paires/impaires ou 1ère page actives */}
+        {/* Target page selector if even/odd pages or first page are active */}
         {(furniture.differentEvenOdd || furniture.differentFirstPage) && (
           <div className="segmente" role="group" aria-label="Page à configurer" style={{ marginRight: '8px' }}>
             <button
@@ -874,7 +868,7 @@ export function FurnitureBandEditor({
             )}
           </div>
 
-          {/* Saisie 3 zones OpenOffice (Gauche / Centre / Droite) */}
+          {/* Entry of the 3 OpenOffice zones (Left / Center / Right) */}
           <div className="atelier__zones-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
             <label className="field">
               <span className="field__label">Zone gauche (alignée gauche)</span>
@@ -916,7 +910,7 @@ export function FurnitureBandEditor({
             </label>
           </div>
 
-          {/* Ligne simple de secours si les 3 zones ne sont pas utilisées */}
+          {/* Fallback single line if the 3 zones are not used */}
           {!valGauche && !valCentre && !valDroite && (
             <label className="field atelier__ligne" style={{ marginTop: '8px' }}>
               <span className="field__label">Ou ligne simple unifiée</span>
@@ -933,7 +927,7 @@ export function FurnitureBandEditor({
             </label>
           )}
 
-          {/* Boutons d'insertion rapide de jetons */}
+          {/* Quick token insertion buttons */}
           <div className="furniture__token-row" style={{ marginTop: '8px' }}>
             <span className="atelier__legende">Insérer un champ&nbsp;:</span>
             {FURNITURE_TOKENS.map((jeton) => (
@@ -949,7 +943,7 @@ export function FurnitureBandEditor({
             ))}
           </div>
 
-          {/* Préréglages */}
+          {/* Presets */}
           {gabarits.length > 0 && (
             <div className="atelier__gabarits">
               <span className="atelier__legende">Dispositions prédéfinies&nbsp;:</span>
@@ -1060,8 +1054,7 @@ function ReglagesDeBande({
   furniture: PageFurniture;
   onChange: (maj: MajFurniture, fusion?: string) => void;
   /*
-   * L'alignement vient du parent : lui seul sait quelle page est à l'écran —
-   * paire, première ou courante — donc quelles zones le réglage gouverne.
+   * The alignment comes from the parent: only it knows which page is on screen (even, first or current), so which zones the setting governs.
    */
   alignement: FurnitureAlign;
   onAlignement: (valeur: FurnitureAlign) => void;
@@ -1101,7 +1094,7 @@ function ReglagesDeBande({
         onChange={(fontSizePt) => onChange({ fontSizePt }, 'corps')}
       />
 
-      {/* Filet séparateur (Bordure) */}
+      {/* Separator line (Border) */}
       <div className="inspecteur__section" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', marginTop: '10px' }}>
         <label className="furniture__check">
           <input
@@ -1183,7 +1176,7 @@ function ReglagesDeBande({
         )}
       </div>
 
-      {/* Fond coloré de la bande */}
+      {/* Colored background of the band */}
       <div className="inspecteur__section" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', marginTop: '10px' }}>
         <span className="field__label" style={{ fontWeight: 600, display: 'block', marginBottom: '6px' }}>Couleur d’arrière-plan</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1224,7 +1217,7 @@ function ReglagesDeBande({
         </div>
       </div>
 
-      {/* Numérotation des pages (pour le pied de page) */}
+      {/* Page numbering (for the footer) */}
       {!estHeader && (
         <div className="inspecteur__section" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', marginTop: '10px' }}>
           <label className="furniture__check">
@@ -1257,7 +1250,7 @@ function ReglagesDeBande({
         </div>
       )}
 
-      {/* Options de pages OpenOffice */}
+      {/* OpenOffice page options */}
       <div className="inspecteur__section" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <span className="field__label" style={{ fontWeight: 600 }}>Pages & pagination</span>
 

@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Curseur dans un tableau : désignation au clic et déplacement vertical.
+ * Cursor in a table: designation by click and vertical movement.
  *
- * Deux régressions distinctes, toutes deux « invisibles » au niveau du modèle
- * et pourtant les plus visibles à l'usage :
+ * Two distinct regressions, both "invisible" at the model level and yet the most visible in use:
  *
- *  - le clic cherchait la **ligne de texte** la plus proche, sans tenir compte
- *    des bords de cellule. Le texte d'une cellule étant court et cadré à
- *    gauche, cliquer dans la moitié droite d'une case posait le curseur dans la
- *    case suivante ;
- *  - le déplacement vertical suivait l'**ordre du document**. Comme
- *    `paragraphIndex` aplatit les cellules en ordre de lecture, `Bas` menait à
- *    la cellule de droite : les flèches déplaçaient le curseur de travers.
+ *  - the click looked for the closest **line of text**, ignoring cell edges. The text of a cell being short and left-aligned, clicking in the right half of a box put the cursor in the next box;
+ *  - vertical movement followed the **document order**. Since `paragraphIndex` flattens the cells in reading order, `Down` led to the cell on the right: the arrows moved the cursor sideways.
  *
- * Les deux se corrigent par la géométrie, et c'est elle que ces tests mesurent.
+ * Both are fixed through geometry, and that is what these tests measure.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -36,7 +30,7 @@ function docOf(blocks: DocumentBlock[]) {
   return { ...createEmptyDocument(), blocks };
 }
 
-/** Tableau 3×3 dont chaque cellule porte un texte court, et son document. */
+/** A 3×3 table whose every cell carries a short text, and its document. */
 function grille(before = 'avant', after = 'après') {
   const table = createTable(3, 3);
   table.rows.forEach((row, r) =>
@@ -55,7 +49,7 @@ function placedTable(layout: ReturnType<typeof paginateDocument>): PlacedTable {
   return found;
 }
 
-/** Chemin `ligne/colonne` d'un paragraphe, pour des assertions lisibles. */
+/** `row/column` path of a paragraph, for readable assertions. */
 function cellOf(doc: ReturnType<typeof docOf>, blockId: string): string {
   const location = paragraphIndex(doc).byId.get(blockId);
   if (!location?.cell) return 'hors tableau';
@@ -70,8 +64,7 @@ describe('Clic dans une cellule', () => {
     for (const row of placed.rows) {
       const top = placed.topPx + row.topPx;
       for (const cell of row.cells) {
-        // Cinq abscisses par cellule, du bord gauche au bord droit : c'est la
-        // partie droite qui basculait sur la voisine.
+        // Five x coordinates per cell, from the left edge to the right edge: it was the right part that tipped over to the neighbor.
         for (const part of [0.05, 0.3, 0.5, 0.75, 0.95]) {
           const x = cell.leftPx + cell.widthPx * part;
           const y = top + row.heightPx / 2;
@@ -90,7 +83,7 @@ describe('Clic dans une cellule', () => {
     const { doc, layout } = grille();
     const placed = placedTable(layout);
 
-    // Bien au-dessus de la grille : le paragraphe qui la précède.
+    // Well above the grid: the paragraph that precedes it.
     const above = positionFromPoint(layout, 0, 10, Math.max(0, placed.topPx - 6), measurer);
     expect(cellOf(doc, above!.blockId)).toBe('hors tableau');
   });
@@ -131,11 +124,11 @@ describe('Flèches Haut et Bas dans un tableau', () => {
     const { doc, layout } = grille();
     const first = paragraphIndex(doc).order[0]!;
 
-    // Entrée : depuis le paragraphe qui précède, on tombe dans la première ligne.
+    // Entering: from the paragraph that precedes, we land in the first row.
     const entering = moveVertical(layout, { blockId: first, offset: 0 }, 1, null, measurer);
     expect(cellOf(doc, entering!.position.blockId)).toBe('0/0');
 
-    // Sortie : trois descentes plus bas, on quitte la grille par le bas.
+    // Leaving: three steps down, we leave the grid through the bottom.
     let position = entering!.position;
     let desiredX: number | null = entering!.desiredX;
     for (let i = 0; i < 3; i += 1) {
@@ -154,14 +147,12 @@ describe('Flèches Haut et Bas dans un tableau', () => {
     const first = moveVertical(layout, { blockId: start.id, offset: 2 }, 1, null, measurer);
     const second = moveVertical(layout, first!.position, 1, first!.desiredX, measurer);
 
-    // `desiredX` est le contrat des déplacements verticaux successifs : sans lui
-    // le curseur dériverait vers la gauche à chaque ligne plus courte.
+    // `desiredX` is the contract of successive vertical moves: without it the cursor would drift to the left on every shorter line.
     expect(second!.desiredX).toBeCloseTo(first!.desiredX, 5);
   });
 
   it('franchit encore les pages hors tableau', () => {
-    // Assez de paragraphes pour déborder d'une page : la navigation verticale
-    // ne doit pas s'arrêter au bas de la feuille.
+    // Enough paragraphs to overflow a page: vertical navigation must not stop at the bottom of the sheet.
     const many = Array.from({ length: 90 }, (_, i) => createParagraph(`paragraphe ${i}`));
     const doc = docOf(many);
     const layout = paginateDocument(doc, { measurer });

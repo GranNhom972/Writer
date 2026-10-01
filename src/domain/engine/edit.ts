@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Édition atomique, transposée de `SwTxtNode` (`ndtxt.cxx`)
- * et `SwEditShell` (`sw/source/core/edit/`).
+ * Atomic editing, transposed from `SwTxtNode` (`ndtxt.cxx`) and `SwEditShell`
+ * (`sw/source/core/edit/`).
  *
- * Chaque opération suit la même séquence que Writer :
- *   1. localiser le nœud et l'offset visés ;
- *   2. scinder ou fusionner les plages de formatage en préservant le style local ;
- *   3. replacer le curseur ;
- *   4. produire l'action d'annulation correspondante.
+ * Each operation follows the same sequence as Writer:
+ *   1. locate the targeted node and offset;
+ *   2. split or merge the formatting ranges while keeping the local style;
+ *   3. put the cursor back;
+ *   4. produce the matching undo action.
  *
- * Les trois premiers points sont ici ; le quatrième est dans `history.ts`, qui
- * enveloppe ces opérations plutôt que de les instrumenter — une opération reste
- * ainsi une fonction pure de l'état vers l'état.
+ * The first three are here; the fourth is in `history.ts`, which wraps these operations rather
+ * than instrumenting them, so an operation stays a pure function from state to state.
  */
 
 import {
@@ -95,25 +94,23 @@ import { setBookmark } from '../document/bookmarks';
 import { createToc, type TocOptions } from '../document/tox';
 
 /**
- * État complet de l'éditeur.
+ * The complete state of the editor.
  *
- * `pendingFormat` porte le formatage armé sur un curseur replié : appuyer sur
- * `Ctrl+B` puis taper doit produire du gras, alors qu'aucun texte n'existe
- * encore à formater. Writer garde cet état hors du document lui aussi
- * (`SwEditShell::SetAttrItem` sur un PaM vide n'écrit rien dans le nœud).
+ * `pendingFormat` holds the formatting armed on a collapsed cursor: pressing `Ctrl+B` and then
+ * typing must produce bold, although there is no text yet to format. Writer also keeps this state
+ * outside the document (`SwEditShell::SetAttrItem` on an empty PaM writes nothing into the node).
  */
 export interface EditorState {
   doc: WriterDocumentState;
   selection: DocumentSelection;
   pendingFormat: RunFormatPatch | null;
   /**
-   * Mode révision. Transposition de `REDLINE_ON` d'`IDocumentRedlineAccess`.
+   * Review mode. (OpenOffice: `REDLINE_ON` of `IDocumentRedlineAccess`.)
    *
-   * Quand il est actif, aucune édition ne détruit : une frappe pose un
-   * `REDLINE_INSERT`, une suppression un `REDLINE_DELETE` sans retirer le
-   * texte. `null` — la valeur par défaut — rend à l'éditeur son comportement
-   * habituel, ce qui garantit qu'aucun document existant ne change de
-   * comportement du seul fait que ce champ existe.
+   * When it is on, no edit destroys anything: typing puts a `REDLINE_INSERT`, a deletion puts a
+   * `REDLINE_DELETE` without removing the text. `null`, the default, gives the editor its usual
+   * behavior back, which guarantees that no existing document changes behavior just because this
+   * field exists.
    */
   review?: RedlineAuthor | null;
 }
@@ -127,7 +124,7 @@ export function createEditorState(doc: WriterDocumentState): EditorState {
   };
 }
 
-/** Formatage effectif à appliquer à la prochaine frappe. */
+/** Effective formatting to apply to the next keystroke. */
 export function activeFormatting(state: EditorState): RunFormatting {
   const { selection, doc } = state;
   const { start, end } = normalizeSelection(doc, selection);
@@ -147,14 +144,14 @@ export function activeFormatting(state: EditorState): RunFormatting {
   return state.pendingFormat ? patchFormatting(cleaned, state.pendingFormat) : cleaned;
 }
 
-/* -------------------------------------------------------------- suppression */
+/* -------------------------------------------------------------- deletion */
 
-/** Supprime la sélection et replie le curseur sur son début. */
+/** Deletes the selection and collapses the cursor to its start. */
 export function deleteSelection(state: EditorState): EditorState {
   const { doc, selection } = state;
   if (selection.isCollapsed) return state;
 
-  // Mode révision : rien ne disparaît, on signe la demande de suppression.
+  // Review mode: nothing disappears, we sign the deletion request.
   if (state.review) return markSelectionDeleted(state, state.review);
 
   const { start, end } = normalizeSelection(doc, selection);
@@ -183,8 +180,8 @@ export function deleteSelection(state: EditorState): EditorState {
   const [, tail] = splitRunsAt(endNode.paragraph.runs, end.offset);
 
   if (!sameContainer) {
-    // Frontière de tableau : on vide ce qui est sélectionné dans chaque nœud,
-    // sans jamais souder deux conteneurs — même refus que `SwNodes::_MoveNodes`.
+    // Table boundary: we empty what is selected in each node, without ever welding two containers
+    // together, the same refusal as `SwNodes::_MoveNodes`.
     let next = replaceParagraph(doc, start.blockId, {
       ...startNode.paragraph,
       runs: normalizeRuns(head),
@@ -202,8 +199,8 @@ export function deleteSelection(state: EditorState): EditorState {
     return { doc: next, selection: collapsedSelection(start), pendingFormat: null };
   }
 
-  // Même conteneur : le premier nœud absorbe la fin du dernier, et tout ce qui
-  // se trouve entre les deux disparaît (`SwTxtNode::JoinNext`).
+  // Same container: the first node absorbs the end of the last one, and everything between them
+  // disappears (`SwTxtNode::JoinNext`).
   const merged: ParagraphNode = {
     ...startNode.paragraph,
     runs: normalizeRuns([...head, ...tail]),
@@ -212,9 +209,8 @@ export function deleteSelection(state: EditorState): EditorState {
 
   const removed = new Set<string>([...between, end.blockId]);
   if (containerKeyOf(doc, start.blockId) === ROOT_CONTAINER) {
-    // Au fil du document, la sélection peut enjamber un tableau entier : il est
-    // couvert, donc il part — sinon il resterait une grille vide au milieu du
-    // texte recollé.
+    // In the document flow, the selection can span a whole table: it is covered, so it goes; otherwise
+    // an empty grid would be left in the middle of the glued text.
     for (let i = startNode.blockIndex + 1; i < endNode.blockIndex; i += 1) {
       const block = doc.blocks[i];
       if (block) removed.add(block.id);
@@ -226,8 +222,8 @@ export function deleteSelection(state: EditorState): EditorState {
 }
 
 /**
- * Retour arrière. Sur un curseur replié en début de paragraphe, fusionne avec
- * le précédent — sauf si celui-ci est dans un autre conteneur.
+ * Backspace. On a collapsed cursor at the start of a paragraph, merges with the previous one, unless
+ * that one is in another container.
  */
 export function deleteBackward(
   state: EditorState,
@@ -251,7 +247,7 @@ export function deleteBackward(
   });
 }
 
-/** Touche `Suppr`. Symétrique de `deleteBackward`. */
+/** `Delete` key. Symmetric to `deleteBackward`. */
 export function deleteForward(
   state: EditorState,
   granularity: HorizontalGranularity = 'character',
@@ -276,7 +272,7 @@ export function deleteForward(
 
 /* ---------------------------------------------------------------- insertion */
 
-/** Insère du texte, en remplaçant la sélection s'il y en a une. */
+/** Inserts text, replacing the selection if there is one. */
 export function insertText(state: EditorState, text: string): EditorState {
   if (text.length === 0) return state;
 
@@ -297,9 +293,8 @@ export function insertText(state: EditorState, text: string): EditorState {
   const runs = insertTextInRuns(node.paragraph.runs, position.offset, text, formatting);
   let doc = replaceParagraph(base.doc, position.blockId, { ...node.paragraph, runs });
 
-  // Mode révision : la frappe est signée après coup. L'insertion elle-même ne
-  // change pas — c'est bien la propriété qu'on veut, une seule façon d'insérer
-  // du texte quel que soit le mode.
+  // Review mode: the typing is signed afterwards. The insertion itself does not change, which is the
+  // property we want: a single way to insert text whatever the mode.
   if (state.review) {
     doc = markInserted(
       doc,
@@ -316,23 +311,22 @@ export function insertText(state: EditorState, text: string): EditorState {
       blockId: position.blockId,
       offset: position.offset + text.length,
     }),
-    // Le formatage armé est consommé par la frappe : il ne survit pas au-delà.
+    // The armed formatting is consumed by the keystroke: it does not outlive it.
     pendingFormat: null,
     ...(state.review !== undefined ? { review: state.review } : {}),
   };
 }
 
 /**
- * Marque la sélection comme supprimée sans retirer le texte.
+ * Marks the selection as deleted without removing the text.
  *
- * Sur plusieurs paragraphes, chacun est marqué sur sa part et **aucun n'est
- * fusionné** : tant que la révision n'est pas acceptée, la coupure de
- * paragraphe existe encore. `SwDoc::DeleteAndJoin` sous `REDLINE_ON` fait le
- * même choix, et c'est le seul qui permette au rejet de tout restaurer.
+ * Over several paragraphs, each one is marked on its part and **none is merged**: as long as the
+ * revision is not accepted, the paragraph break still exists. `SwDoc::DeleteAndJoin` under
+ * `REDLINE_ON` makes the same choice, and it is the only one that lets a rejection restore
+ * everything.
  *
- * Le curseur se replie en **fin** de sélection et non au début : le texte est
- * toujours là, revenir à son début donnerait l'impression que rien ne s'est
- * passé.
+ * The cursor collapses to the **end** of the selection and not the start: the text is still there,
+ * going back to its start would give the impression that nothing happened.
  */
 function markSelectionDeleted(state: EditorState, who: RedlineAuthor): EditorState {
   const { doc, selection } = state;
@@ -360,8 +354,8 @@ function markSelectionDeleted(state: EditorState, who: RedlineAuthor): EditorSta
     const result = markDeleted(next, blockId, from, to, who);
     next = result.doc;
     if (rank === startRank) {
-      // Le texte que l'auteur venait lui-même d'insérer a bel et bien disparu :
-      // le curseur doit en tenir compte, sinon il se poserait au-delà de la fin.
+      // The text the author had just inserted themselves has really disappeared: the cursor must take that
+      // into account, otherwise it would land past the end.
       for (const range of result.removedRanges) removedInStart += range.end - range.start;
     }
   }
@@ -379,11 +373,11 @@ function markSelectionDeleted(state: EditorState, who: RedlineAuthor): EditorSta
 }
 
 /**
- * Coupe le paragraphe en deux (`SwTxtNode::SplitCntntNode`, touche `Entrée`).
+ * Splits the paragraph in two (`SwTxtNode::SplitCntntNode`, `Enter` key).
  *
- * Le second nœud hérite des attributs de paragraphe du premier, sauf le titre :
- * la ligne qui suit un titre est du texte courant, jamais un second titre —
- * c'est la règle de style suivant (`SwTxtFmtColl::GetNextTxtFmtColl`).
+ * The second node inherits the paragraph attributes of the first, except the heading: the line that
+ * follows a heading is ordinary text, never a second heading. This is the next-style rule
+ * (`SwTxtFmtColl::GetNextTxtFmtColl`).
  */
 export function splitParagraph(state: EditorState): EditorState {
   const base = state.selection.isCollapsed ? state : deleteSelection(state);
@@ -391,10 +385,9 @@ export function splitParagraph(state: EditorState): EditorState {
   const node = paragraphIndex(base.doc).byId.get(position.blockId);
   if (!node) return state;
 
-  // `Entrée` sur un élément de liste **vide** ne crée pas un second élément
-  // vide : il sort de la liste, en remontant d'abord d'un niveau s'il y en a
-  // un. C'est le geste par lequel on termine une liste, et le seul qui ne
-  // demande pas d'aller chercher un bouton.
+  // `Enter` on an **empty** list item does not create a second empty item: it leaves the list, first
+  // going up one level if there is one. It is the gesture that ends a list, and the only one that does
+  // not require reaching for a button.
   if (node.paragraph.listKind !== undefined && runsLength(node.paragraph.runs) === 0) {
     const level = node.paragraph.listLevel ?? 0;
     return level > 0
@@ -420,11 +413,10 @@ export function splitParagraph(state: EditorState): EditorState {
     follower.type = 'paragraph';
     delete follower.headingLevel;
   }
-  // Un saut de page explicite reste attaché au nœud qui l'a reçu.
+  // An explicit page break stays attached to the node that received it.
   delete follower.pageBreakBefore;
-  // Le nouvel élément de liste hérite du type et du niveau, jamais de l'état de
-  // la case ni d'une reprise de numérotation : ce sont des propriétés de
-  // l'élément qu'on quitte, pas de celui qu'on crée.
+  // The new list item inherits the type and level, never the state of the checkbox nor a numbering
+  // restart: those are properties of the item being left, not of the one being created.
   delete follower.listChecked;
   delete follower.listRestart;
   delete follower.listStartValue;
@@ -440,23 +432,23 @@ export function splitParagraph(state: EditorState): EditorState {
 }
 
 /**
- * Saut de ligne dans le paragraphe (`Maj+Entrée`, `SwBreakPortion`).
+ * Line break inside the paragraph (`Shift+Enter`, `SwBreakPortion`).
  *
- * Différent du saut de paragraphe : le nœud reste unique, donc son alignement,
- * ses retraits et sa puce de liste restent partagés par les deux lignes.
+ * Different from a paragraph break: the node stays single, so its alignment, its indents and its list
+ * bullet stay shared by the two lines.
  */
 export function insertLineBreak(state: EditorState): EditorState {
   return insertText(state, '\n');
 }
 
-/** Saut de page explicite (`Ctrl+Entrée`) : le texte reprend en haut de la page suivante. */
+/** Explicit page break (`Ctrl+Enter`): the text resumes at the top of the next page. */
 export function insertBlockPageBreak(state: EditorState): EditorState {
   const position = state.selection.focus;
   const node = paragraphIndex(state.doc).byId.get(position.blockId);
   if (!node) return state;
 
-  // Un saut de page se pose **sur** un nœud : c'est un attribut de paragraphe
-  // (`SvxFmtBreakItem`), pas un caractère inséré dans le texte.
+  // A page break is set **on** a node: it is a paragraph attribute (`SvxFmtBreakItem`), not a character
+  // inserted in the text.
   const split = splitParagraph(state);
   const target = split.selection.focus;
   const created = paragraphIndex(split.doc).byId.get(target.blockId);
@@ -471,13 +463,13 @@ export function insertBlockPageBreak(state: EditorState): EditorState {
   };
 }
 
-/* ---------------------------------------------------------------- formatage */
+/* ---------------------------------------------------------------- formatting */
 
 /**
- * Applique un correctif de formatage de caractère.
+ * Applies a character-formatting patch.
  *
- * Sur un curseur replié, rien n'est écrit dans le document : le correctif est
- * mémorisé et s'appliquera à la frappe suivante.
+ * On a collapsed cursor nothing is written into the document: the patch is remembered and will apply
+ * to the next keystroke.
  */
 export function applyRunFormat(state: EditorState, patch: RunFormatPatch): EditorState {
   const { doc, selection } = state;
@@ -513,7 +505,7 @@ export function applyRunFormat(state: EditorState, patch: RunFormatPatch): Edito
   return { doc: next, selection, pendingFormat: null };
 }
 
-/** Bascule un attribut booléen sur la sélection (`Ctrl+B`, `Ctrl+I`, …). */
+/** Toggles a boolean attribute on the selection (`Ctrl+B`, `Ctrl+I`, ...). */
 export function toggleRunFormat(
   state: EditorState,
   key: 'bold' | 'italic' | 'underline' | 'strikeThrough',
@@ -522,7 +514,7 @@ export function toggleRunFormat(
   return applyRunFormat(state, { [key]: active ? null : true } as RunFormatPatch);
 }
 
-/** Retire tout formatage de caractère de la sélection (`Ctrl+M` de Writer). */
+/** Removes all character formatting from the selection (Writer's `Ctrl+M`). */
 export function clearRunFormat(state: EditorState): EditorState {
   return applyRunFormat(state, {
     bold: null,
@@ -536,7 +528,7 @@ export function clearRunFormat(state: EditorState): EditorState {
   });
 }
 
-/** Clés de paragraphe qu'un correctif peut toucher. */
+/** Paragraph keys that a patch can touch. */
 type ParagraphPatchKey =
   | 'type'
   | 'headingLevel'
@@ -552,19 +544,18 @@ type ParagraphPatchKey =
   | 'styleName';
 
 /**
- * Correctif d'attributs de paragraphe.
+ * Paragraph attribute patch.
  *
- * `null` **retire** l'attribut, comme dans `RunFormatPatch` : « aligner à
- * gauche » n'est pas la même chose que « ne plus imposer d'alignement », et
- * seule la seconde laisse un style nommé reprendre la main.
+ * `null` **removes** the attribute, as in `RunFormatPatch`: "align left" is not the same as "stop
+ * forcing an alignment", and only the second lets a named style take over again.
  */
 export type ParagraphPatch = {
   [K in ParagraphPatchKey]?: ParagraphNode[K] | null;
 };
 
 /**
- * Applique un correctif de paragraphe à tous les nœuds touchés par la sélection
- * (`SwEditShell::SetAttrSet` sur un PaM couvrant plusieurs nœuds).
+ * Applies a paragraph patch to every node touched by the selection (`SwEditShell::SetAttrSet` on a
+ * PaM covering several nodes).
  */
 export function applyParagraphFormat(
   state: EditorState,
@@ -590,8 +581,8 @@ export function applyParagraphFormat(
 }
 
 /**
- * Applique un correctif à un nœud. Une valeur `null` **retire** l'attribut, qui
- * repasse alors au défaut du document — la distinction `SetAttr` / `ResetAttr`.
+ * Applies a patch to a node. A `null` value **removes** the attribute, which then goes back to the
+ * document default: the `SetAttr` / `ResetAttr` distinction.
  */
 function applyParagraphPatch(node: ParagraphNode, patch: ParagraphPatch): ParagraphNode {
   const updated: ParagraphNode = { ...node };
@@ -601,27 +592,26 @@ function applyParagraphPatch(node: ParagraphNode, patch: ParagraphPatch): Paragr
     if (value === undefined || value === null) delete fields[key];
     else fields[key] = value;
   }
-  // Un paragraphe redevenu courant ne garde pas son niveau de titre.
+  // A paragraph that becomes ordinary again does not keep its heading level.
   if (updated.type !== 'heading') delete updated.headingLevel;
   return updated;
 }
 
-/** Transforme la sélection en titre de niveau donné, ou en paragraphe courant. */
+/** Turns the selection into a heading of the given level, or into an ordinary paragraph. */
 export function setHeading(state: EditorState, level: 0 | 1 | 2 | 3 | 4 | 5 | 6): EditorState {
   return level === 0
     ? applyParagraphFormat(state, { type: 'paragraph' })
     : applyParagraphFormat(state, { type: 'heading', headingLevel: level });
 }
 
-/* ------------------------------------------------------------------ listes */
+/* ------------------------------------------------------------------ lists */
 
 /**
- * Bascule la sélection en liste du type donné, ou l'en sort.
+ * Turns the selection into a list of the given type, or takes it out of one.
  *
- * Une liste n'étant qu'un attribut de paragraphe (`RES_PARATR_LIST_*`), la
- * bascule ne déplace aucun nœud : elle pose ou retire des attributs. Tous les
- * paragraphes touchés reçoivent le **même** identifiant de liste, ce qui en
- * fait une seule liste continue plutôt qu'une suite d'éléments isolés.
+ * A list being only a paragraph attribute (`RES_PARATR_LIST_*`), the toggle moves no node: it sets or
+ * removes attributes. All the touched paragraphs get the **same** list id, which makes them one
+ * continuous list rather than a series of isolated items.
  */
 export function toggleList(state: EditorState, kind: ListKind): EditorState {
   const { doc, selection } = state;
@@ -631,7 +621,7 @@ export function toggleList(state: EditorState, kind: ListKind): EditorState {
   const endRank = index.order.indexOf(end.blockId);
   if (startRank === -1 || endRank === -1) return state;
 
-  // Déjà entièrement dans une liste de ce type → on en sort.
+  // Already entirely in a list of this type → we take it out.
   let toutDedans = true;
   for (let rank = startRank; rank <= endRank; rank += 1) {
     const node = index.byId.get(index.order[rank]!)?.paragraph;
@@ -641,8 +631,8 @@ export function toggleList(state: EditorState, kind: ListKind): EditorState {
     }
   }
 
-  // Rejoindre la liste voisine plutôt que d'en ouvrir une nouvelle : passer en
-  // liste le paragraphe qui suit une liste doit continuer sa numérotation.
+  // Join the neighboring list rather than open a new one: turning the paragraph that follows a list
+  // into a list item must continue its numbering.
   const voisin = index.byId.get(index.order[startRank - 1] ?? '')?.paragraph;
   const listId = toutDedans
     ? undefined
@@ -668,8 +658,8 @@ export function toggleList(state: EditorState, kind: ListKind): EditorState {
       updated.listKind = kind;
       updated.listId = listId!;
       updated.listLevel = paragraph.listLevel ?? 0;
-      // Un titre ne devient pas un élément de liste : Writer non plus ne
-      // numérote pas un titre au même titre qu'un paragraphe de corps.
+      // A heading does not become a list item: Writer does not number a heading the way it numbers a body
+      // paragraph either.
       if (updated.type === 'heading') {
         updated.type = 'paragraph';
         delete updated.headingLevel;
@@ -684,11 +674,10 @@ export function toggleList(state: EditorState, kind: ListKind): EditorState {
 }
 
 /**
- * Change le niveau d'imbrication des éléments sélectionnés.
+ * Changes the nesting level of the selected items.
  *
- * Hors liste, la commande retombe sur le retrait ordinaire : c'est ce que fait
- * `Tab` dans Writer, et l'usager n'a pas à savoir dans lequel des deux cas il
- * se trouve.
+ * Outside a list, the command falls back on the ordinary indent: this is what `Tab` does in Writer,
+ * and the user does not have to know which of the two cases they are in.
  */
 export function changeListLevel(state: EditorState, direction: 1 | -1): EditorState {
   const { doc, selection } = state;
@@ -718,7 +707,7 @@ export function changeListLevel(state: EditorState, direction: 1 | -1): EditorSt
     : state;
 }
 
-/** Coche ou décoche un élément de liste à cocher. */
+/** Ticks or unticks an item of a checklist. */
 export function toggleListChecked(state: EditorState, blockId: string): EditorState {
   const paragraph = paragraphIndex(state.doc).byId.get(blockId)?.paragraph;
   if (!paragraph || paragraph.listKind !== 'task') return state;
@@ -731,9 +720,9 @@ export function toggleListChecked(state: EditorState, blockId: string): EditorSt
   };
 }
 
-/* --------------------------------------------------------- presse-papiers */
+/* --------------------------------------------------------- clipboard */
 
-/** Contenu extrait d'une sélection, prêt à recoller sans perdre le formatage. */
+/** Content extracted from a selection, ready to be pasted back without losing the formatting. */
 export interface DocumentFragment {
   paragraphs: { runs: TextRun[]; attributes: ParagraphPatch }[];
 }
@@ -767,7 +756,7 @@ export function extractFragment(state: EditorState): DocumentFragment {
   return { paragraphs };
 }
 
-/** Texte brut d'une sélection — pour le presse-papiers `text/plain`. */
+/** Plain text of a selection, for the `text/plain` clipboard. */
 export function selectionText(state: EditorState): string {
   return extractFragment(state)
     .paragraphs.map((paragraph) => paragraph.runs.map((run) => run.text).join(''))
@@ -775,11 +764,10 @@ export function selectionText(state: EditorState): string {
 }
 
 /**
- * Colle un fragment à la position courante.
+ * Pastes a fragment at the current position.
  *
- * Le premier paragraphe du fragment se **fond** dans le paragraphe d'accueil
- * plutôt que de créer un nœud : coller trois mots au milieu d'une phrase ne
- * doit pas la couper en deux.
+ * The first paragraph of the fragment **blends** into the receiving paragraph rather than creating a
+ * node: pasting three words in the middle of a sentence must not cut it in two.
  */
 export function insertFragment(state: EditorState, fragment: DocumentFragment): EditorState {
   if (fragment.paragraphs.length === 0) return state;
@@ -835,9 +823,9 @@ export function insertFragment(state: EditorState, fragment: DocumentFragment): 
   };
 }
 
-/* ---------------------------------------------------------------- sélection */
+/* ---------------------------------------------------------------- selection */
 
-/** Sélectionne tout le document (`Ctrl+A`). */
+/** Selects the whole document (`Ctrl+A`). */
 export function selectAll(state: EditorState): EditorState {
   const { order, byId } = paragraphIndex(state.doc);
   const firstId = order[0];
@@ -854,7 +842,7 @@ export function selectAll(state: EditorState): EditorState {
   };
 }
 
-/** Replace le curseur, en bornant la position aux limites réelles du document. */
+/** Puts the cursor back, clamping the position to the real limits of the document. */
 export function setSelection(
   state: EditorState,
   selection: DocumentSelection,
@@ -872,7 +860,7 @@ export function setSelection(
   };
 }
 
-/** Étend la sélection jusqu'à `focus` en conservant l'ancre (`Maj` + geste). */
+/** Extends the selection up to `focus` while keeping the anchor (`Shift` + gesture). */
 export function extendSelectionTo(
   state: EditorState,
   focus: DocumentPosition,
@@ -881,7 +869,7 @@ export function extendSelectionTo(
   return setSelection(state, makeSelection(state.selection.anchor, focus, desiredX));
 }
 
-/** La sélection est-elle vide de tout contenu ? */
+/** Is the selection empty of any content? */
 export function isEmptySelection(state: EditorState): boolean {
   return (
     state.selection.isCollapsed ||
@@ -889,12 +877,12 @@ export function isEmptySelection(state: EditorState): boolean {
   );
 }
 
-/** Run unique portant un texte et un formatage — utilitaire des tests et de l'import. */
+/** A single run carrying a text and a formatting: a utility for tests and for import. */
 export function runOf(text: string, formatting: RunFormatting = {}): TextRun {
   return makeRun(text, formatting);
 }
 
-/* --------------------------------------------------- notes de bas de page */
+/* --------------------------------------------------- footnotes */
 
 function toSuperscript(n: number): string {
   const digits = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
@@ -904,7 +892,7 @@ function toSuperscript(n: number): string {
     .join('');
 }
 
-/** Compte le nombre total de notes de bas de page dans le document. */
+/** Counts the total number of footnotes in the document. */
 export function countFootnotes(doc: WriterDocumentState): number {
   let count = 0;
   const { order, byId } = paragraphIndex(doc);
@@ -919,8 +907,8 @@ export function countFootnotes(doc: WriterDocumentState): number {
 }
 
 /**
- * Insère un appel de note de bas de page au curseur.
- * Transposition de `SwFtnFrm` / `SwDoc::Insert(SwFmtFtn)`.
+ * Inserts a footnote call at the cursor. (OpenOffice: `SwFtnFrm` /
+ * `SwDoc::Insert(SwFmtFtn)`.)
  */
 export function insertFootnote(state: EditorState, text: string): EditorState {
   const footnoteContent = text.trim();
@@ -955,7 +943,7 @@ export function insertFootnote(state: EditorState, text: string): EditorState {
   };
 }
 
-/* ---------------------------------------------------- opérations de tableau */
+/* ---------------------------------------------------- table operations */
 
 export function currentTableLocation(state: EditorState): {
   tableId: string;
@@ -975,13 +963,12 @@ export function currentTableLocation(state: EditorState): {
 }
 
 /**
- * Tout ce que l'interface a besoin de savoir du tableau courant, en un appel.
+ * Everything the interface needs to know about the current table, in a single call.
  *
- * Les commandes de tableau sont **inertes** hors d'un tableau : `insertTableRow`
- * et consorts renvoient l'état inchangé. Sans ce sélecteur, un menu ne peut pas
- * distinguer « rien à faire » de « rien ne s'est passé », et l'utilisateur clique
- * sur un élément actif qui ne produit aucun effet — le pire des retours. C'est
- * lui qui permet de griser ce qui n'est pas applicable.
+ * Table commands are **inert** outside a table: `insertTableRow` and the like return the state
+ * unchanged. Without this selector, a menu cannot tell "nothing to do" from "nothing happened", and the
+ * user clicks an active item that has no effect, the worst kind of feedback. It is what makes it
+ * possible to grey out what does not apply.
  */
 export function tableContext(state: EditorState): {
   tableId: string;
@@ -989,15 +976,14 @@ export function tableContext(state: EditorState): {
   cellIndex: number;
   rowCount: number;
   columnCount: number;
-  /** Rectangle de cellules quand la sélection en couvre plusieurs. */
+  /** Rectangle of cells when the selection covers several. */
   rect: CellRect | null;
   /**
-   * La cellule courante est-elle issue d'une fusion ?
+   * Is the current cell the result of a merge?
    *
-   * Sur une cellule fusionnée, « scinder » ne découpe pas : il **rend la
-   * grille**, en libérant les cellules absorbées. Les deux gestes portent des
-   * noms différents dans l'interface, et c'est ce drapeau qui permet de les
-   * distinguer plutôt que de promettre une découpe qui n'aura pas lieu.
+   * On a merged cell, "split" does not cut: it **gives the grid back**, by freeing the absorbed cells.
+   * The two gestures have different names in the interface, and this flag is what tells them apart,
+   * rather than promising a split that will not happen.
    */
   merged: boolean;
 } | null {
@@ -1022,9 +1008,8 @@ export function tableContext(state: EditorState): {
 }
 
 /**
- * Premier paragraphe d'une cellule, en repartant vers l'arrière si la cellule
- * visée a disparu ou est recouverte. Sert à replacer le curseur après une
- * opération structurelle.
+ * First paragraph of a cell, going backwards if the targeted cell has disappeared or is covered. Used
+ * to put the cursor back after a structural operation.
  */
 function cellAnchorId(
   doc: WriterDocumentState,
@@ -1037,9 +1022,8 @@ function cellAnchorId(
   const row = block.rows[Math.min(rowIndex, block.rows.length - 1)] ?? block.rows[0];
   if (!row) return null;
 
-  // Une cellule recouverte n'accueille pas de curseur : on remonte vers sa
-  // maîtresse, à gauche, exactement comme le fait `SwCrsrShell` en sortant
-  // d'un `SwTableBox` de RowSpan négatif.
+  // A covered cell does not take a cursor: we go up to its master, on the left, exactly as `SwCrsrShell`
+  // does when leaving a `SwTableBox` with a negative RowSpan.
   for (let i = Math.min(cellIndex, row.cells.length - 1); i >= 0; i -= 1) {
     const cell = row.cells[i];
     if (cell && !cell.covered && cell.blocks[0]) return cell.blocks[0].id;
@@ -1051,12 +1035,11 @@ function cellAnchorId(
 }
 
 /**
- * Replace le curseur après une suppression de ligne ou de colonne.
+ * Puts the cursor back after a row or column deletion.
  *
- * Le faire retomber sur `order[0]` — le tout premier paragraphe du document —
- * était le comportement précédent : supprimer une ligne d'un tableau en page 12
- * renvoyait l'utilisateur en page 1, sans que rien ne l'explique. On reste dans
- * le tableau tant qu'il existe, et à défaut sur le paragraphe qui le suivait.
+ * Letting it fall on `order[0]`, the very first paragraph of the document, was the previous behavior:
+ * deleting a row of a table on page 12 sent the user back to page 1 with nothing to explain it. We stay
+ * in the table as long as it exists, and otherwise on the paragraph that followed it.
  */
 function selectionAfterStructuralEdit(
   doc: WriterDocumentState,
@@ -1068,8 +1051,8 @@ function selectionAfterStructuralEdit(
   const inCell = cellAnchorId(doc, tableId, rowIndex, cellIndex);
   if (inCell) return collapsedSelection({ blockId: inCell, offset: 0 });
 
-  // Le tableau a disparu avec sa dernière ligne : on se pose sur le paragraphe
-  // qui occupe désormais sa place, ou sur le précédent s'il était en fin.
+  // The table disappeared with its last row: we land on the paragraph that now takes its place, or on the
+  // previous one if it was at the end.
   const index = paragraphIndex(doc);
   for (let i = fallbackBlockIndex; i < doc.blocks.length; i += 1) {
     const block = doc.blocks[i];
@@ -1106,8 +1089,8 @@ export function deleteCurrentTableRow(state: EditorState): EditorState {
   const blockIndex = state.doc.blocks.findIndex((block) => block.id === loc.tableId);
   const doc = deleteTableRow(state.doc, loc.tableId, loc.rowIndex);
   if (doc === state.doc) return state;
-  // On vise la ligne qui a pris la place de celle supprimée, donc le même
-  // index ; `cellAnchorId` la ramène dans les bornes si c'était la dernière.
+  // We aim at the row that took the place of the deleted one, so the same index; `cellAnchorId` brings it
+  // back within bounds if it was the last one.
   const selection = selectionAfterStructuralEdit(
     doc,
     loc.tableId,
@@ -1148,7 +1131,7 @@ export function deleteCurrentTableColumn(state: EditorState): EditorState {
   return { ...state, doc, selection };
 }
 
-/** Supprime le tableau courant en entier, curseur reposé là où il était. */
+/** Deletes the whole current table, with the cursor put back where it was. */
 export function deleteCurrentTable(state: EditorState): EditorState {
   const loc = currentTableLocation(state);
   if (!loc) return state;
@@ -1162,9 +1145,9 @@ export function deleteCurrentTable(state: EditorState): EditorState {
   };
 }
 
-/* ------------------------------------------------- largeur des colonnes */
+/* ------------------------------------------------- column widths */
 
-/** Largeurs de colonne du tableau courant, en pourcentage — pour l'interface. */
+/** Column widths of the current table, as percentages, for the interface. */
 export function currentTableColumnWidths(state: EditorState): number[] | null {
   const loc = currentTableLocation(state);
   if (!loc) return null;
@@ -1173,13 +1156,12 @@ export function currentTableColumnWidths(state: EditorState): number[] | null {
 }
 
 /**
- * Déplace la **frontière** entre deux colonnes voisines, à la souris.
+ * Moves the **boundary** between two neighboring columns, with the mouse.
  *
- * Seules les deux colonnes adjacentes bougent, et leur somme est conservée :
- * c'est le comportement de `SwTable::SetTabCols` en mode « déplacement de
- * bord », et celui qu'attend l'utilisateur — tirer un trait ne doit pas faire
- * frémir toute la grille. Une largeur plancher empêche de rendre une colonne
- * inatteignable à la souris.
+ * Only the two adjacent columns move, and their sum is kept: this is the behavior of
+ * `SwTable::SetTabCols` in "move edge" mode, and the one the user expects, since dragging one line must
+ * not make the whole grid shiver. A minimum width keeps a column from becoming unreachable with the
+ * mouse.
  */
 export function resizeTableColumnBoundary(
   state: EditorState,
@@ -1207,7 +1189,7 @@ export function resizeTableColumnBoundary(
   return { ...state, doc: setTableColumnWidths(state.doc, tableId, next) };
 }
 
-/** Rend aux colonnes du tableau courant des largeurs égales. */
+/** Gives the columns of the current table equal widths again. */
 export function distributeTableColumns(state: EditorState): EditorState {
   const loc = currentTableLocation(state);
   if (!loc) return state;
@@ -1218,14 +1200,14 @@ export function distributeTableColumns(state: EditorState): EditorState {
   return { ...state, doc: setTableColumnWidths(state.doc, loc.tableId, even) };
 }
 
-/* ------------------------------------------------- navigation et sélection */
+/* ------------------------------------------------- navigation and selection */
 
 /**
- * Déplace le curseur d'une cellule, dans l'ordre de lecture (`Tab`).
+ * Moves the cursor by one cell, in reading order (`Tab`).
  *
- * En fin de tableau, `Tab` **ajoute une ligne** plutôt que d'en sortir : c'est
- * la convention de Word, de Google Docs et de Writer, et c'est la façon dont on
- * remplit une grille au clavier sans jamais toucher la souris.
+ * At the end of a table, `Tab` **adds a row** rather than leaving it: this is the convention of Word,
+ * Google Docs and Writer, and it is how a grid is filled with the keyboard without ever touching the
+ * mouse.
  */
 export function moveToAdjacentCell(state: EditorState, forward: boolean): EditorState {
   const loc = currentTableLocation(state);
@@ -1255,8 +1237,8 @@ export function moveToAdjacentCell(state: EditorState, forward: boolean): Editor
   const paragraph = cell?.blocks[0];
   if (!paragraph) return state;
 
-  // Le contenu de la cellule atteinte est sélectionné en entier : c'est ce qui
-  // permet de la remplir en frappant, sans avoir à effacer d'abord.
+  // The content of the cell that is reached is fully selected: this is what lets you fill it by typing,
+  // without having to erase it first.
   const length = paragraphText(cell.blocks[cell.blocks.length - 1]!).length;
   return {
     ...state,
@@ -1267,7 +1249,7 @@ export function moveToAdjacentCell(state: EditorState, forward: boolean): Editor
   };
 }
 
-/** Sélectionne une ligne entière du tableau (clic sur sa poignée). */
+/** Selects a whole row of the table (click on its handle). */
 export function selectTableRow(state: EditorState, tableId: string, rowIndex: number): EditorState {
   const block = state.doc.blocks.find((candidate) => candidate.id === tableId);
   if (!block || !isTable(block)) return state;
@@ -1288,7 +1270,7 @@ export function selectTableRow(state: EditorState, tableId: string, rowIndex: nu
   };
 }
 
-/** Sélectionne une colonne entière du tableau (clic sur sa poignée). */
+/** Selects a whole column of the table (click on its handle). */
 export function selectTableColumn(
   state: EditorState,
   tableId: string,
@@ -1313,7 +1295,7 @@ export function selectTableColumn(
   };
 }
 
-/** Sélectionne toutes les cellules du tableau courant. */
+/** Selects all the cells of the current table. */
 export function selectWholeTable(state: EditorState, tableId: string): EditorState {
   const block = state.doc.blocks.find((candidate) => candidate.id === tableId);
   if (!block || !isTable(block) || block.rows.length === 0) return state;
@@ -1322,19 +1304,17 @@ export function selectWholeTable(state: EditorState, tableId: string): EditorSta
   return { ...state, selection: makeSelection(withFirst.selection.anchor, withLast.selection.focus) };
 }
 
-/* --------------------------------------- fusion et scission de cellules */
+/* --------------------------------------- merging and splitting cells */
 
 /**
- * Rectangle de cellules couvert par la sélection courante.
+ * Rectangle of cells covered by the current selection.
  *
- * Une sélection de tableau, dans Writer comme ici, n'est pas une sélection de
- * texte : `SwCursorShell::IsTableMode` bascule sur un `SwCellFrm` de départ et
- * un d'arrivée, et le rectangle en est le **plus petit englobant**. C'est ce
- * que reconstruit cette fonction à partir des deux extrémités du `SwPaM`.
+ * A table selection, in Writer as here, is not a text selection: `SwCursorShell::IsTableMode` switches
+ * to a start `SwCellFrm` and an end one, and the rectangle is their **smallest bounding box**. That is
+ * what this function rebuilds from the two ends of the `SwPaM`.
  *
- * Le calcul se fait en **colonnes de grille** et non en indices de cellule :
- * après une fusion, `row.cells[2]` n'occupe plus la colonne 2, et confondre
- * les deux fusionnerait le mauvais rectangle.
+ * The computation is done in **grid columns** and not in cell indices: after a merge, `row.cells[2]` no
+ * longer occupies column 2, and mixing them up would merge the wrong rectangle.
  */
 export function selectedCellRect(state: EditorState): {
   tableId: string;
@@ -1367,7 +1347,7 @@ export function selectedCellRect(state: EditorState): {
   };
 }
 
-/** Fusionne les cellules sélectionnées (`SwDoc::MergeTbl`). */
+/** Merges the selected cells (`SwDoc::MergeTbl`). */
 export function mergeSelectedCells(state: EditorState): EditorState {
   const selected = selectedCellRect(state);
   if (!selected) return state;
@@ -1375,8 +1355,8 @@ export function mergeSelectedCells(state: EditorState): EditorState {
   const doc = mergeTableCells(state.doc, selected.tableId, selected.rect);
   if (doc === state.doc) return state;
 
-  // Le curseur se pose dans la cellule maîtresse : les autres n'existent plus
-  // pour la navigation, l'y laisser le rendrait inatteignable.
+  // The cursor lands in the master cell: the others no longer exist for navigation, and leaving it there
+  // would make it unreachable.
   const master = paragraphIndex(doc);
   const block = doc.blocks.find((candidate) => candidate.id === selected.tableId);
   const cell =
@@ -1388,7 +1368,7 @@ export function mergeSelectedCells(state: EditorState): EditorState {
   return { ...state, doc, selection: collapsedSelection({ blockId: target, offset: 0 }) };
 }
 
-/** Scinde la cellule courante (`SwDoc::SplitTbl`). */
+/** Splits the current cell (`SwDoc::SplitTbl`). */
 export function splitCurrentCell(
   state: EditorState,
   direction: 'horizontal' | 'vertical',
@@ -1400,14 +1380,14 @@ export function splitCurrentCell(
   return doc === state.doc ? state : { ...state, doc };
 }
 
-/* -------------------------------------------------- table des matières */
+/* -------------------------------------------------- table of contents */
 
 /**
- * Insère une table des matières après le bloc courant.
+ * Inserts a table of contents after the current block.
  *
- * Le bloc inséré ne contient **aucune entrée** : elles sont dérivées à chaque
- * pagination (cf. `engine/tox.ts`). C'est ce qui garantit qu'un sommaire ne
- * peut pas mentir sur le contenu du document — il n'a rien à mentir *avec*.
+ * The inserted block holds **no entries**: they are derived at every pagination (see `engine/tox.ts`).
+ * This is what guarantees that a table of contents cannot lie about the content of the document: it has
+ * nothing to lie *with*.
  */
 export function insertTableOfContents(state: EditorState, options: TocOptions = {}): EditorState {
   const toc = createToc(options);
@@ -1415,9 +1395,9 @@ export function insertTableOfContents(state: EditorState, options: TocOptions = 
   return { ...state, doc };
 }
 
-/* --------------------------------------------- commentaires et signets */
+/* --------------------------------------------- comments and bookmarks */
 
-/** Pose un commentaire sur la sélection (`SwEditShell::InsertPostIt`). */
+/** Puts a comment on the selection (`SwEditShell::InsertPostIt`). */
 export function commentSelection(
   state: EditorState,
   author: string,
@@ -1425,7 +1405,7 @@ export function commentSelection(
   options: { initials?: string; now?: string } = {},
 ): { state: EditorState; threadId: string } {
   const { start, end } = normalizeSelection(state.doc, state.selection);
-  // Un commentaire sans plage n'a rien à ancrer : Writer refuse aussi.
+  // A comment with no range has nothing to anchor: Writer refuses it too.
   if (state.selection.isCollapsed || start.blockId !== end.blockId) {
     return { state, threadId: '' };
   }
@@ -1441,7 +1421,7 @@ export function commentSelection(
   return { state: doc === state.doc ? state : { ...state, doc }, threadId };
 }
 
-/** Pose un signet sur la sélection (`IDocumentMarkAccess::makeMark`). */
+/** Puts a bookmark on the selection (`IDocumentMarkAccess::makeMark`). */
 export function bookmarkSelection(state: EditorState, name: string): EditorState {
   const { start, end } = normalizeSelection(state.doc, state.selection);
   if (start.blockId !== end.blockId) return state;
@@ -1454,43 +1434,40 @@ export function bookmarkSelection(state: EditorState, name: string): EditorState
   return doc === state.doc ? state : { ...state, doc };
 }
 
-/* -------------------------------------------------------- mode révision */
+/* -------------------------------------------------------- review mode */
 
-/** Active ou désactive le suivi des modifications (`REDLINE_ON` / `REDLINE_NONE`). */
+/** Turns change tracking on or off (`REDLINE_ON` / `REDLINE_NONE`). */
 export function setReviewMode(state: EditorState, who: RedlineAuthor | null): EditorState {
   return { ...state, review: who };
 }
 
-/** Le suivi des modifications est-il actif ? */
+/** Is change tracking on? */
 export function isReviewing(state: EditorState): boolean {
   return state.review != null;
 }
 
-/* ------------------------------------------- déplacement d'un cadre image */
+/* ------------------------------------------- moving an image frame */
 
-/** Où poser un cadre flottant après l'avoir déplacé, en points. */
+/** Where to place a floating frame after it has been moved, in points. */
 export interface FlyDropPlacement {
   xPt: number;
   yPt: number;
 }
 
 /**
- * Déplace le cadre image situé à `offset` vers `target`.
+ * Moves the image frame located at `offset` to `target`.
  *
- * Transposition de `SwFEShell::SetAnchor` / `SwFEShell::EndDrag`
- * (`sw/source/core/frmedt/fefly1.cxx`) : à la fin d'un glissement, Writer ne
- * se contente pas de corriger les coordonnées du cadre, il **change son ancre**
- * pour le paragraphe où on l'a lâché.
+ * Counterpart of `SwFEShell::SetAnchor` / `SwFEShell::EndDrag` (`sw/source/core/frmedt/fefly1.cxx`): at
+ * the end of a drag, Writer does not just correct the frame's coordinates, it **changes its anchor** to
+ * the paragraph where it was dropped.
  *
- * La raison est structurelle : c'est l'ancre qui décide de la page d'un cadre
- * (`SwFlyFrm::AnchorFrm`). Un cadre traîné trois pages plus bas mais resté
- * ancré à son paragraphe d'origine continue d'être dessiné sur la page de
- * celui-ci, et sort de la feuille — il suit le pointeur pendant le geste puis
- * disparaît au relâchement.
+ * The reason is structural: it is the anchor that decides a frame's page (`SwFlyFrm::AnchorFrm`). A frame
+ * dragged three pages down but still anchored to its original paragraph keeps being drawn on that
+ * paragraph's page, and leaves the sheet: it follows the pointer during the gesture and then disappears
+ * when released.
  *
- * `placement` n'est lu que pour un cadre flottant. Une image « comme
- * caractère » n'a pas de coordonnées propres : la déplacer, c'est uniquement
- * la changer de place dans le texte, et le formateur de lignes fait le reste.
+ * `placement` is only read for a floating frame. An image "as a character" has no coordinates of its own:
+ * moving it is only changing its place in the text, and the line formatter does the rest.
  */
 export function moveImageRun(
   doc: WriterDocumentState,
@@ -1511,8 +1488,8 @@ export function moveImageRun(
   const formatage = runFormatting(cadre);
   const flottant = Boolean(cadre.imageAnchor && cadre.imageAnchor !== 'as-char');
 
-  // Un cadre déplacé à la main a quitté son alignement : le laisser aligné le
-  // ramènerait à sa place au prochain calcul, et le geste n'aurait rien fait.
+  // A frame moved by hand has left its alignment: leaving it aligned would bring it back to its place at the
+  // next computation, and the gesture would have done nothing.
   const place = flottant
     ? {
         imageHoriOrient: 'from-left' as const,
@@ -1526,11 +1503,11 @@ export function moveImageRun(
 
   if (target.blockId === blockId) {
     /*
-     * Le retrait décale ce qui le suit.
+     * The removal shifts what follows it.
      *
-     * Un offset visé **après** le cadre désigne, une fois celui-ci retiré, un
-     * caractère plus à gauche : sans cette correction, l'image reculait d'un
-     * cran chaque fois qu'on la déplaçait vers la droite dans son paragraphe.
+     * An offset aimed **after** the frame designates, once the frame is removed, a character further left:
+     * without this correction, the image moved back one notch every time it was moved to the right within its
+     * paragraph.
      */
     const vise =
       target.offset > cible.offset ? target.offset - cadre.text.length : target.offset;
@@ -1543,8 +1520,8 @@ export function moveImageRun(
     return replaceParagraph(doc, blockId, { ...source, runs });
   }
 
-  // Deux paragraphes : on retire d'abord, on insère ensuite. Le paragraphe
-  // d'accueil est **relu** après le retrait — celui qu'on tenait date d'avant.
+  // Two paragraphs: we remove first, then insert. The receiving paragraph is **read again** after the
+  // removal, because the one we were holding dates from before.
   const sansCadre = replaceParagraph(doc, blockId, {
     ...source,
     runs: normalizeRuns(restantes, heritage),
@@ -1563,10 +1540,10 @@ export function moveImageRun(
 }
 
 /**
- * Index et offset de début du cadre image couvrant cet offset.
+ * Index and start offset of the image frame that covers this offset.
  *
- * On accepte l'offset du **début** du cadre comme celui de sa fin : le rendu
- * annonce le premier, un curseur posé juste après l'image donne le second.
+ * We accept the offset of the **start** of the frame as well as that of its end: the rendering announces
+ * the first, and a cursor placed right after the image gives the second.
  */
 function imageRunIndexAt(
   runs: readonly TextRun[],

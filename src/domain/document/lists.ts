@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Numérotation des listes. Transposition de `SwNumRule` et `SwNodeNum`
- * (`sw/source/core/doc/number.cxx`, `sw/source/core/SwNumberTree/`).
+ * List numbering (OpenOffice: `SwNumRule` and `SwNodeNum`,
+ * `sw/source/core/doc/number.cxx`, `sw/source/core/SwNumberTree/`).
  *
- * Aucun compteur n'est stocké dans le document : le numéro d'un élément est
- * **recalculé** en parcourant ce qui le précède, exactement comme Writer
- * reconstruit son arbre de numérotation (`SwNodeNum::GetNumberVector`).
+ * No counter is stored in the document: the number of an item is **recomputed** by
+ * walking what precedes it, exactly as Writer rebuilds its numbering tree
+ * (`SwNodeNum::GetNumberVector`).
  *
- * C'est la seule façon d'être correct : un numéro mémorisé serait faux dès
- * qu'on insère, supprime ou déplace un élément au milieu de la liste — et il
- * faudrait renuméroter toute la suite à chaque frappe.
+ * It is the only way to be correct: a remembered number would be wrong as soon as an
+ * item is inserted, deleted or moved in the middle of the list, and everything after it
+ * would have to be renumbered on every keystroke.
  */
 
 import {
@@ -28,45 +28,44 @@ import {
 } from './types';
 
 /**
- * Retrait par niveau, en points.
+ * Indent per level, in points.
  *
- * `SwNumRule::aDefNumIndents` vaut 1440/4 twips pour le premier niveau puis un
- * quart de pouce par niveau : 0,25 pouce = 18 pt.
+ * `SwNumRule::aDefNumIndents` is 1440/4 twips for the first level and then a quarter of
+ * an inch per level: 0.25 inch = 18 pt.
  */
 export const LIST_INDENT_PT = 18;
 
-/** Puces par niveau, en cycle — la suite qu'emploie Writer par défaut. */
+/** Bullets per level, in a cycle: the sequence Writer uses by default. */
 const BULLETS = ['•', '◦', '▪', '‣'] as const;
 
-/** Ce qu'il faut peindre devant un élément de liste. */
+/** What has to be painted in front of a list item. */
 export interface ListMarker {
   kind: ListKind;
   level: number;
-  /** Texte du marqueur : « • », « 3. », « b) »… Vide pour une case à cocher. */
+  /** Text of the marker: "•", "3.", "b)"... Empty for a checkbox. */
   text: string;
-  /** État de la case, pour une liste à cocher. */
+  /** State of the box, for a checklist. */
   checked: boolean;
-  /** Valeur numérique de l'élément, pour les listes ordonnées. */
+  /** Numeric value of the item, for ordered lists. */
   value: number;
 }
 
-/** Un paragraphe fait-il partie d'une liste ? */
+/** Is a paragraph part of a list? */
 export function isListItem(paragraph: ParagraphNode): boolean {
   return paragraph.listKind !== undefined;
 }
 
-/** Niveau effectif, borné à la profondeur maximale de Writer. */
+/** Effective level, clamped to Writer's maximum depth. */
 export function listLevelOf(paragraph: ParagraphNode): number {
   const level = paragraph.listLevel ?? 0;
   return Math.max(0, Math.min(MAX_LIST_LEVEL - 1, Math.floor(level)));
 }
 
 /**
- * Retrait total du texte d'un paragraphe, numérotation comprise.
+ * Total indent of a paragraph's text, numbering included.
  *
- * Un élément de liste est décalé d'un cran par niveau **en plus** de son propre
- * retrait : les deux se cumulent, comme `SvxLRSpaceItem` se cumule au retrait
- * de la règle de numérotation.
+ * A list item is shifted by one step per level **in addition** to its own indent: the
+ * two add up, as `SvxLRSpaceItem` adds to the indent of the numbering rule.
  */
 export function effectiveIndentLeftPt(paragraph: ParagraphNode): number {
   const own = paragraph.indentLeftPt ?? 0;
@@ -74,7 +73,7 @@ export function effectiveIndentLeftPt(paragraph: ParagraphNode): number {
   return own + (listLevelOf(paragraph) + 1) * LIST_INDENT_PT;
 }
 
-/** Numérotation romaine minuscule — `SVX_NUM_ROMAN_LOWER`. */
+/** Lower-case Roman numerals (`SVX_NUM_ROMAN_LOWER`). */
 function toRoman(value: number): string {
   const table: readonly [number, string][] = [
     [1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'],
@@ -92,7 +91,7 @@ function toRoman(value: number): string {
   return out;
 }
 
-/** Numérotation alphabétique — `SVX_NUM_CHARS_LOWER_LETTER` : a…z, aa…az, ba… */
+/** Alphabetic numbering (`SVX_NUM_CHARS_LOWER_LETTER`): a…z, aa…az, ba… */
 function toLetters(value: number): string {
   let reste = Math.max(1, Math.floor(value));
   let out = '';
@@ -105,11 +104,10 @@ function toLetters(value: number): string {
 }
 
 /**
- * Forme du numéro selon le niveau.
+ * Shape of the number depending on the level.
  *
- * Writer alterne les formats par niveau pour qu'une liste imbriquée reste
- * lisible : « 1. », puis « a) », puis « i. ». Trois formats suffisent, le cycle
- * reprend au-delà.
+ * Writer alternates formats by level so that a nested list stays readable: "1.", then
+ * "a)", then "i.". Three formats are enough, and the cycle starts again beyond that.
  */
 export function formatOrdered(level: number, value: number): string {
   switch (level % 3) {
@@ -127,12 +125,11 @@ export function bulletFor(level: number): string {
 }
 
 /**
- * Calcule le marqueur de chaque élément de liste du document.
+ * Computes the marker of every list item in the document.
  *
- * Un seul parcours, dans l'ordre de lecture. Les compteurs sont tenus par
- * niveau : entrer dans un niveau plus profond ne touche pas au compteur du
- * niveau au-dessus, en ressortir remet à zéro tout ce qui était en dessous —
- * c'est le comportement d'un `SwNumberTree`.
+ * A single pass, in reading order. Counters are kept per level: going into a deeper
+ * level does not touch the counter of the level above, and coming back out resets
+ * everything below it to zero. This is the behavior of a `SwNumberTree`.
  */
 export function computeListMarkers(doc: WriterDocumentState): Map<string, ListMarker> {
   const markers = new Map<string, ListMarker>();
@@ -143,8 +140,8 @@ export function computeListMarkers(doc: WriterDocumentState): Map<string, ListMa
     const kind = paragraph.listKind;
 
     if (kind === undefined) {
-      // Sortir d'une liste ferme ses compteurs : le texte courant qui la suit
-      // sépare deux listes distinctes.
+      // Leaving a list closes its counters: the normal text that follows separates two
+      // distinct lists.
       currentListId = null;
       counters.fill(0);
       return;
@@ -157,7 +154,7 @@ export function computeListMarkers(doc: WriterDocumentState): Map<string, ListMa
     }
 
     const level = listLevelOf(paragraph);
-    // Redescendre d'un niveau annule la numérotation des niveaux plus profonds.
+    // Going back up one level cancels the numbering of the deeper levels.
     for (let deeper = level + 1; deeper < counters.length; deeper += 1) counters[deeper] = 0;
 
     if (paragraph.listRestart) {
@@ -177,15 +174,15 @@ export function computeListMarkers(doc: WriterDocumentState): Map<string, ListMa
   };
 
   for (const block of doc.blocks) {
-    // Un sommaire n'a pas de numérotation propre : ses lignes sont engendrées à
-    // la pagination et n'entrent donc pas dans le compteur de listes.
+    // A table of contents has no numbering of its own: its lines are generated at
+    // pagination time and therefore do not enter the list counter.
     if (isParagraph(block)) {
       visit(block);
       continue;
     }
     if (!isTable(block)) continue;
-    // Chaque cellule est un conteneur à part : une liste n'y continue pas celle
-    // du corps du document, et deux cellules ne partagent pas de compteur.
+    // Each cell is a separate container: a list in it does not continue the one of the
+    // document body, and two cells do not share a counter.
     for (const row of block.rows) {
       for (const cell of row.cells) {
         currentListId = null;

@@ -1,8 +1,10 @@
-/* Jetons de design — source unique de vérité (01_DIRECTIVE_UX_ERGONOMIE.md §2).
-   Aucune valeur littérale de couleur ou d'espacement ne doit apparaître ailleurs. */
+/*
+ * Design tokens: the single source of truth (01_DIRECTIVE_UX_ERGONOMIE.md §2).
+ * No literal color or spacing value must appear anywhere else.
+ */
 
 :root {
-  /* --- Couleur : rôles sémantiques, thème clair --- */
+  /* --- Color: semantic roles, light theme --- */
   --bg-canvas: #f1f2f4;
   --bg-app: #ffffff;
   --bg-raised: #ffffff;
@@ -30,7 +32,7 @@
 
   --focus-ring: #0b5cd5;
 
-  /* Palette de présence : validée en simulation deutéranopie / protanopie / tritanopie */
+  /* Presence palette: validated in deuteranopia / protanopia / tritanopia simulation */
   --presence-1: #d1435b;
   --presence-2: #1f7a8c;
   --presence-3: #b3541e;
@@ -40,7 +42,7 @@
   --presence-7: #145da8;
   --presence-8: #7a5c00;
 
-  /* --- Typographie --- */
+  /* --- Typography --- */
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --font-document: 'Liberation Serif', Georgia, 'Times New Roman', serif;
@@ -53,7 +55,7 @@
   --leading-ui: 1.45;
   --leading-tight: 1.2;
 
-  /* --- Espacement : échelle 4px, rien hors échelle --- */
+  /* --- Spacing: 4px scale, nothing outside the scale --- */
   --space-0: 0;
   --space-1: 2px;
   --space-2: 4px;
@@ -64,19 +66,14 @@
   --space-7: 32px;
   --space-8: 48px;
 
-  /* --- Le papier ---------------------------------------------------------
+  /*
+   * --- The paper ---------------------------------------------------------
    *
-   * La feuille n'est pas une surface d'interface : c'est la **représentation
-   * d'une page imprimée**. Elle ne suit donc pas le thème du système, et ces
-   * jetons gardent la même valeur en clair comme en sombre.
+   * The sheet is not an interface surface: it is the **representation of a printed page**. It therefore does not follow the system theme, and these tokens keep the same value in light and dark.
    *
-   * Les faire basculer avec le thème avait une conséquence qu'on ne voit
-   * qu'une fois le thème sombre actif : le fond de page passait au gris
-   * anthracite, mais le texte gardait la couleur inscrite dans le document —
-   * un noir à 1,16 de contraste sur ce fond, c'est-à-dire illisible. Il aurait
-   * fallu retranscrire toutes les couleurs du document, y compris celles que
-   * l'auteur a choisies, ce qui n'est plus afficher un document mais le
-   * réécrire. Le papier reste donc blanc, et l'interface autour s'assombrit.
+   * Making them switch with the theme had a consequence that only shows once the dark theme is active: the page background went charcoal grey, but the text kept the color written in the document, a black with a contrast of 1.16
+   * on that background, that is to say unreadable. We would have had to re-map all the colors of the document, including those the author chose, which is no longer displaying a document but rewriting it. So the paper stays white,
+   * and the interface around it darkens.
    */
   --paper-bg: #ffffff;
   --paper-fg: #16191d;
@@ -84,37 +81,37 @@
   --paper-border: #c4c8ce;
   --paper-sunken: #f2f4f6;
 
-  /* Teinte de sélection de texte. Alpha, et non couleur pleine : l'habillage
-     de sélection se pose **sur** le contenu, en fusion `multiply`, et les
-     glyphes doivent rester lisibles au travers (cf. `.writer-selection-layer`). */
+  /*
+   * Text selection tint. An alpha, and not a solid color: the selection overlay is placed **over** the content, in `multiply` blending, and the glyphs must stay readable through it (see `.writer-selection-layer`).
+   */
   --selection: rgba(26, 86, 219, 0.22);
 
-  /* --- Rayon --- */
+  /* --- Radius --- */
   --radius: 6px;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
 
-  /* --- Élévation : 4 niveaux, pas un de plus --- */
+  /* --- Elevation: 4 levels, not one more --- */
   --elevation-base: none;
   --elevation-hover: 0 1px 2px rgba(16, 24, 40, 0.08);
   --elevation-popover: 0 4px 12px rgba(16, 24, 40, 0.12);
   --elevation-modal: 0 16px 40px rgba(16, 24, 40, 0.2);
-  /* Ombre portée d'une feuille sur le plan de travail. */
+  /* Drop shadow of a sheet on the work surface. */
   --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.08);
 
-  /* --- Mouvement --- */
+  /* --- Motion --- */
   --motion-fast: 120ms;
   --motion-base: 200ms;
   --motion-slow: 320ms;
   --motion-ease: cubic-bezier(0.2, 0, 0, 1);
 
-  /* --- Densité (data-density="compact" bascule ces valeurs) --- */
+  /* --- Density (data-density="compact" switches these values) --- */
   --control-height: 28px;
   --control-height-sm: 24px;
 
-  /* --- Géométrie de page (A4) --- */
+  /* --- Page geometry (A4) --- */
   --page-width: 210mm;
   --page-height: 297mm;
 }
@@ -171,7 +168,7 @@
   color-scheme: dark;
 }
 
-/* `prefers-reduced-motion` : toute durée tombe à 0, transitions d'opacité comprises. */
+/* `prefers-reduced-motion`: every duration falls to 0, opacity transitions included. */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion-fast: 0ms;
@@ -188,7 +185,7 @@
   }
 }
 
-/* --- Réinitialisation minimale --- */
+/* --- Minimal reset --- */
 *,
 *::before,
 *::after {
@@ -211,7 +208,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Focus visible sur TOUTES les surfaces : 2px + 2px de décalage (WCAG 2.4.11). */
+/* Focus visible on ALL surfaces: 2px + 2px offset (WCAG 2.4.11). */
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;

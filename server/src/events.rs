@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Flux d'observation d'un partage — `/api/v1/sessions/{token_session}/events`.
+//! Live feed of a share: `/api/v1/sessions/{token_session}/events`.
 //!
-//! Le WebSocket de synchronisation sert à **éditer** : il exige de suivre les
-//! révisions et d'appliquer les opérations dans l'ordre. Un script qui veut
-//! seulement savoir « où en est le document ? » n'a pas à réimplémenter cela.
+//! The sync WebSocket is for **editing**: it requires tracking revisions and
+//! applying operations in order. A script that only wants to know "how is the
+//! document doing?" should not have to reimplement that.
 //!
-//! Ce flux est donc l'inverse : **lecture seule**, une trame par lot de
-//! sauvegardes durables, avec le document complet dedans. Il n'ajoute aucun
-//! pouvoir — il faut être participant du partage, comme pour la synchronisation
-//! — et n'accepte rien en écriture.
+//! This feed is therefore the opposite: **read-only**, one frame per batch of
+//! durable saves, with the complete document inside. It adds no power (you must be
+//! a participant of the share, as for synchronization) and accepts nothing in
+//! write direction.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,10 +34,10 @@ use crate::error::{AppError, AppResult};
 use crate::session::SessionRecord;
 use crate::state::AppState;
 
-/// Fenêtre d'agrégation : au-delà, un flux de frappe noierait le lecteur.
+/// Aggregation window: without it, a burst of typing would drown the reader.
 const COALESCE: Duration = Duration::from_millis(250);
-/// Sans trafic, une trame de vie régulière : elle prouve que le lien tient et
-/// empêche les intermédiaires de couper une connexion jugée inactive.
+/// Regular keep-alive frame when there is no traffic: it proves the link is still
+/// up and stops intermediaries from cutting a connection they consider idle.
 const HEARTBEAT: Duration = Duration::from_secs(20);
 
 pub async fn events_handler(
@@ -53,7 +53,7 @@ pub async fn events_handler(
     let record = state.session(&token_session)?;
     let identity = identity_from_headers(&headers, &state.cfg.auth)?;
 
-    // Observer, c'est lire : la même appartenance est exigée que pour l'édition.
+    // Observing is reading: the same membership is required as for editing.
     if record.find_by_user(&identity.user_id).is_none() {
         return Err(AppError::Forbidden);
     }
@@ -94,8 +94,8 @@ async fn stream(
     let (mut sender, mut receiver) = socket.split();
     let mut fanout = handle.tx.subscribe();
 
-    // État courant d'abord : un observateur qui se branche en cours de route doit
-    // voir le document, pas seulement les modifications à venir.
+    // Send the current state first: an observer who connects midway must see the
+    // document, not only the changes still to come.
     let ouverture = event(&record, &handle, "snapshot", 0);
     if sender
         .send(WsMessage::Text(ouverture.to_string()))
@@ -114,13 +114,13 @@ async fn stream(
     loop {
         tokio::select! {
             broadcast = fanout.recv() => match broadcast {
-                // Seules les modifications comptent : la présence est éphémère et
-                // n'est jamais journalisée, l'annoncer comme « sauvegarde » serait faux.
+                // Only modifications count: presence is ephemeral and never logged, so
+                // announcing it as a "save" would be false.
                 Ok(Fanout { durable: true, .. }) => en_attente += 1,
                 Ok(_) => {}
                 Err(RecvError::Lagged(_)) => {
-                    // Trames perdues : la projection du document reste juste,
-                    // seul le compte est approché.
+                    // Frames were dropped: the document projection stays correct, only the
+                    // count is approximate.
                     en_attente += 1;
                 }
                 Err(RecvError::Closed) => break,
@@ -152,8 +152,8 @@ async fn stream(
 
             incoming = receiver.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(WsMessage::Close(_))) => break,
-                // Flux en lecture seule : tout ce qui remonte est ignoré, sans
-                // fermer la connexion — un client peut légitimement envoyer un ping.
+                // Read-only feed: anything the client sends is ignored, without closing the
+                // connection, because a client may legitimately send a ping.
                 Some(Ok(_)) => {}
             },
         }
@@ -178,8 +178,8 @@ fn event(
         "token_session": record.token_session,
         "doc_id": record.doc_id,
         "title": handle.title().unwrap_or_else(|| record.title.clone()),
-        // Vrai par construction : une trame n'est rediffusée qu'après écriture au
-        // journal (`sync.rs`), donc tout ce qui arrive ici est déjà durable.
+        // True by construction: a frame is only re-broadcast after it has been written to
+        // the log (`sync.rs`), so everything that reaches this point is already durable.
         "durable": true,
         "revision": revision,
         "operations": operations,

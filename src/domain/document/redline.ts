@@ -1,71 +1,71 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Suivi des modifications. Transposition de `SwRangeRedline` / `SwRedlineTbl`
- * (`sw/source/core/doc/docredln.cxx`, `sw/inc/redline.hxx`) et du mode
- * `REDLINE_ON` de `IDocumentRedlineAccess` (`sw/inc/IDocumentRedlineAccess.hxx`).
+ * Change tracking (OpenOffice: `SwRangeRedline` / `SwRedlineTbl`,
+ * `sw/source/core/doc/docredln.cxx`, `sw/inc/redline.hxx`, and the `REDLINE_ON` mode of
+ * `IDocumentRedlineAccess`, `sw/inc/IDocumentRedlineAccess.hxx`).
  *
- * Le principe de Writer, conservé tel quel : **en mode révision, on ne détruit
- * rien**. Une frappe pose un `REDLINE_INSERT` sur le texte ajouté ; une
- * suppression ne retire pas le texte mais pose un `REDLINE_DELETE` dessus. Ce
- * n'est qu'à l'acceptation (`AcceptRedline`) ou au rejet (`RejectRedline`) que
- * le document change réellement de contenu.
+ * Writer's principle, kept as it is: **in review mode, nothing is destroyed**. Typing
+ * puts a `REDLINE_INSERT` on the added text; a deletion does not remove the text but puts
+ * a `REDLINE_DELETE` on it. The content of the document only really changes when the
+ * change is accepted (`AcceptRedline`) or rejected (`RejectRedline`).
  *
- * Cette symétrie explique les quatre cas d'`applyRedline` plus bas, qui sont
- * ceux de `docredln.cxx` :
+ * This symmetry explains the four cases of `applyRedline` below, which are those of
+ * `docredln.cxx`:
  *
- *   accepter un ajout     → garder le texte, retirer la marque
- *   accepter une coupe    → retirer le texte
- *   rejeter  un ajout     → retirer le texte
- *   rejeter  une coupe    → garder le texte, retirer la marque
+ *   accept an insertion   → keep the text, remove the mark
+ *   accept a deletion     → remove the text
+ *   reject an insertion   → remove the text
+ *   reject a deletion     → keep the text, remove the mark
  *
- * Comme pour les signets et les commentaires, l'ancre est un **attribut de run**
- * et non un couple de `SwPosition` : la marque suit son texte sans qu'aucun code
- * de maintenance de position n'ait à exister. La table du document ne porte donc
- * que les métadonnées — auteur, date, nature.
+ * As for bookmarks and comments, the anchor is a **run attribute** and not a pair of
+ * `SwPosition`: the mark follows its text without any position-maintenance code having to
+ * exist. The document's table therefore only holds the metadata: author, date, kind.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
 import { newId, paragraphIndex, replaceParagraph, touch } from './document';
 import { makeRun, mapRunsInRange, normalizeRuns, runFormatting } from './runs';
 import type { RedlineType, TextRun, WriterDocumentState } from './types';
 
-/** Métadonnées d'une modification suivie. Transposition de `SwRedlineData`. */
+/** Metadata of a tracked change (OpenOffice: `SwRedlineData`). */
 export interface Redline {
   id: string;
-  /** `RedlineType_t` (IDocumentRedlineAccess.hxx:73-75). */
+  /**
+   * Kind of change: insert, delete or format (`RedlineType_t`,
+   * IDocumentRedlineAccess.hxx:73-75).
+   */
   type: RedlineType;
-  /** `SwRedlineData::GetAuthorString()`. */
+  /** Author of the change (`SwRedlineData::GetAuthorString()`). */
   author: string;
-  /** ISO 8601. `SwRedlineData::GetTimeStamp()`. */
+  /** ISO 8601 date (`SwRedlineData::GetTimeStamp()`). */
   date: string;
-  /** Commentaire de révision, facultatif (`SwRedlineData::GetComment`). */
+  /** Optional review comment (`SwRedlineData::GetComment`). */
   comment?: string;
 }
 
-/** Une modification suivie, résolue à sa position dans le flux. */
+/** A tracked change, resolved to its position in the flow. */
 export interface RedlineRange {
   redline: Redline;
   blockId: string;
   startOffset: number;
   endOffset: number;
-  /** Texte couvert par la marque. */
+  /** Text covered by the mark. */
   text: string;
 }
 
 /**
- * Palette d'auteurs de Writer (`SwPostItMgr` et `SwRedlineTbl` la partagent).
+ * Writer's palette of authors (`SwPostItMgr` and `SwRedlineTbl` share it).
  *
- * Writer attribue une couleur par **rang d'apparition** de l'auteur, pas par
- * hachage du nom : deux auteurs restent ainsi distinguables même si leurs noms
- * se ressemblent, et la couleur d'un relecteur ne change pas parce qu'un autre
- * a été renommé.
+ * Writer gives a color by the author's **rank of appearance**, not by hashing the name:
+ * two authors stay distinguishable even if their names look alike, and one reviewer's
+ * color does not change because another was renamed.
  */
 export const REDLINE_AUTHOR_COLORS = [
   '#c9211e',
@@ -78,7 +78,7 @@ export const REDLINE_AUTHOR_COLORS = [
   '#a33e00',
 ] as const;
 
-/** Auteurs du document, dans leur ordre de première apparition. */
+/** Authors of the document, in order of first appearance. */
 export function redlineAuthors(doc: WriterDocumentState): string[] {
   const seen: string[] = [];
   for (const redline of doc.redlines ?? []) {
@@ -87,31 +87,30 @@ export function redlineAuthors(doc: WriterDocumentState): string[] {
   return seen;
 }
 
-/** Couleur affectée à un auteur, stable pour un document donné. */
+/** Color assigned to an author, stable for a given document. */
 export function redlineAuthorColor(doc: WriterDocumentState, author: string): string {
   const index = redlineAuthors(doc).indexOf(author);
   const palette = REDLINE_AUTHOR_COLORS;
   return palette[(index < 0 ? 0 : index) % palette.length] ?? palette[0];
 }
 
-/* ----------------------------------------------------------------- lecture */
+/* ----------------------------------------------------------------- reading */
 
-/** Le document est-il en cours de relecture ? */
+/** Is the document under review? */
 export function hasRedlines(doc: WriterDocumentState): boolean {
   return (doc.redlines ?? []).length > 0;
 }
 
-/** Métadonnées d'une marque par identifiant. */
+/** Metadata of a mark, by id. */
 export function findRedline(doc: WriterDocumentState, id: string): Redline | null {
   return (doc.redlines ?? []).find((redline) => redline.id === id) ?? null;
 }
 
 /**
- * Toutes les marques résolues à leur position, dans l'ordre du flux.
+ * All the marks resolved to their position, in flow order.
  *
- * Une même marque peut donner plusieurs plages si une édition ultérieure l'a
- * coupée en deux ; chacune est renvoyée séparément, comme `SwRedlineTbl` en
- * conserve une entrée par intervalle.
+ * One mark can give several ranges if a later edit cut it in two; each one is returned
+ * separately, as `SwRedlineTbl` keeps one entry per interval.
  */
 export function listRedlineRanges(doc: WriterDocumentState): RedlineRange[] {
   const byId = new Map((doc.redlines ?? []).map((redline) => [redline.id, redline]));
@@ -159,10 +158,10 @@ function pushRange(
 }
 
 /**
- * Texte du document tel qu'il serait après acceptation de toutes les marques.
+ * Text of the document as it would be after accepting every mark.
  *
- * Utile pour la recherche et le comptage de mots : compter les caractères d'une
- * suppression en attente fausserait les statistiques affichées.
+ * Useful for search and word counting: counting the characters of a pending deletion
+ * would distort the displayed statistics.
  */
 export function visibleText(paragraph: { runs: readonly TextRun[] }): string {
   let out = '';
@@ -173,7 +172,7 @@ export function visibleText(paragraph: { runs: readonly TextRun[] }): string {
   return out;
 }
 
-/* ------------------------------------------------------- pose d'une marque */
+/* ------------------------------------------------------- placing a mark */
 
 export interface RedlineAuthor {
   author: string;
@@ -181,10 +180,10 @@ export interface RedlineAuthor {
 }
 
 /**
- * Marque une plage comme insérée.
+ * Marks a range as inserted.
  *
- * Appelé par `edit.ts` **après** que le texte a été inséré normalement : en mode
- * révision, l'insertion elle-même ne change pas, seule sa signature s'ajoute.
+ * Called by `edit.ts` **after** the text has been inserted in the normal way: in review
+ * mode the insertion itself does not change, only its signature is added.
  */
 export function markInserted(
   doc: WriterDocumentState,
@@ -197,15 +196,15 @@ export function markInserted(
 }
 
 /**
- * Marque une plage comme supprimée, **sans retirer le texte**.
+ * Marks a range as deleted, **without removing the text**.
  *
- * C'est le cœur du mode révision : `SwDoc::DeleteRange` sous `REDLINE_ON`
- * n'appelle jamais `DeleteRangeImpl`, il pose un `REDLINE_DELETE`.
+ * This is the heart of review mode: `SwDoc::DeleteRange` under `REDLINE_ON` never calls
+ * `DeleteRangeImpl`, it puts a `REDLINE_DELETE`.
  *
- * Un cas particulier reproduit celui de Writer : supprimer du texte que **le
- * même auteur** venait d'insérer sans que sa marque ait été acceptée retire le
- * texte pour de bon. Sans cette règle, corriger sa propre frappe laisserait une
- * traînée de caractères barrés que personne n'a jamais eu l'intention d'écrire.
+ * One special case reproduces Writer's: deleting text that **the same author** had just
+ * inserted, before that mark was accepted, removes the text for good. Without this rule,
+ * correcting your own typing would leave a trail of struck-through characters that nobody
+ * ever meant to write.
  */
 export function markDeleted(
   doc: WriterDocumentState,
@@ -221,9 +220,8 @@ export function markDeleted(
   const end = Math.max(startOffset, endOffset);
   if (end <= start) return { doc, removedRanges: [] };
 
-  // Découpe aux deux bornes sans rien transformer : la décision se prend
-  // ensuite run par run, et trois issues sont possibles là où `mapRunsInRange`
-  // n'en offre qu'une.
+  // Split at both ends without transforming anything: the decision is then made run by run,
+  // and there are three possible outcomes where `mapRunsInRange` only offers one.
   const split = mapRunsInRange(node.runs, start, end, (run) => run);
   const kept: TextRun[] = [];
   const removedRanges: { start: number; end: number }[] = [];
@@ -247,13 +245,13 @@ export function markDeleted(
       findRedline(doc, run.redlineId)?.author === who.author;
 
     if (ownFreshInsert) {
-      // Le texte disparaît réellement : rien n'est poussé dans `kept`.
+      // The text really disappears: nothing is pushed into `kept`.
       removedRanges.push({ start: offset, end: runEnd });
       offset = runEnd;
       continue;
     }
 
-    // Déjà marqué supprimé : une seconde suppression n'ajoute rien.
+    // Already marked as deleted: a second deletion adds nothing.
     if (run.redlineType === 'delete') {
       kept.push(run);
       offset = runEnd;
@@ -278,7 +276,7 @@ export function markDeleted(
   return { doc: pruneOrphanRedlines(touch(next)), removedRanges };
 }
 
-/** Marque une plage comme reformatée (`REDLINE_FORMAT`). */
+/** Marks a range as reformatted (`REDLINE_FORMAT`). */
 export function markFormatted(
   doc: WriterDocumentState,
   blockId: string,
@@ -313,8 +311,8 @@ function markRange(
   for (const run of split) {
     const runEnd = offset + run.text.length;
     const inside = offset >= start && runEnd <= end && run.text.length > 0;
-    // Une marque de suppression prime sur une marque d'insertion ou de format :
-    // le texte est en instance de disparition, le reformater n'a pas de sens.
+    // A deletion mark takes precedence over an insertion or format mark: the text is about to
+    // disappear, so reformatting it makes no sense.
     if (inside && run.redlineType !== 'delete') {
       used = true;
       out.push(withRedline(run, redlineId, type));
@@ -345,17 +343,17 @@ function makeRedline(id: string, type: RedlineType, who: RedlineAuthor): Redline
   };
 }
 
-/* ------------------------------------------------ acceptation et rejet */
+/* ------------------------------------------------ accepting and rejecting */
 
 /**
- * Applique ou annule une marque. Transposition de `SwDoc::AcceptRedline` /
- * `SwDoc::RejectRedline`.
+ * Applies or cancels a mark. (OpenOffice: `SwDoc::AcceptRedline` /
+ * `SwDoc::RejectRedline`.)
  *
- * Les quatre combinaisons sont celles décrites en tête de module. Le cas
- * `format` est symétrique et n'a pas de version destructive : le formatage a
- * déjà été appliqué au texte, accepter comme rejeter se contente de retirer la
- * marque — c'est la limite du modèle, `SwRedlineData` conservant en C++ le jeu
- * d'attributs antérieur pour pouvoir le restaurer.
+ * The four combinations are the ones described at the top of the module. The `format`
+ * case is symmetric and has no destructive version: the formatting has already been
+ * applied to the text, so accepting and rejecting both just remove the mark. This is the
+ * limit of the model: in C++, `SwRedlineData` keeps the previous attribute set so that it
+ * can restore it.
  */
 export function applyRedline(
   doc: WriterDocumentState,
@@ -395,7 +393,7 @@ export function applyRedline(
   });
 }
 
-/** Accepte toutes les marques, ou seulement celles d'un auteur. */
+/** Accepts every mark, or only those of one author. */
 export function acceptAllRedlines(
   doc: WriterDocumentState,
   author?: string,
@@ -403,7 +401,7 @@ export function acceptAllRedlines(
   return applyAll(doc, 'accept', author);
 }
 
-/** Rejette toutes les marques, ou seulement celles d'un auteur. */
+/** Rejects every mark, or only those of one author. */
 export function rejectAllRedlines(
   doc: WriterDocumentState,
   author?: string,
@@ -425,13 +423,13 @@ function applyAll(
   return next;
 }
 
-/* ------------------------------------------------------------- utilitaires */
+/* ------------------------------------------------------------- utilities */
 
 /**
- * Retire de la table les marques dont plus aucun run ne porte l'ancre.
+ * Removes from the table the marks whose anchor no run carries any more.
  *
- * Sans ce nettoyage, éditer par-dessus une révision laisserait dans la table
- * des entrées invisibles, que l'export ODF réémettrait sans plage.
+ * Without this cleanup, editing over a revision would leave invisible entries in the
+ * table, which the ODF export would write out again with no range.
  */
 export function pruneOrphanRedlines(doc: WriterDocumentState): WriterDocumentState {
   const redlines = doc.redlines ?? [];
