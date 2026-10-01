@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Dépôt d'images du document.
 //!
 //! Une image insérée dans un document partagé est répliquée à tous les

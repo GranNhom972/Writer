@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 import { useState, type JSX } from 'react';
 import type { PageSetup, DocumentDefaults } from '../../domain/document/types';
 import { Modal } from '../../design/components/Modal';

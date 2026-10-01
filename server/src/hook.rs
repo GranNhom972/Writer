@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Rappels vers CloudServ : déchargement périodique et fin de session.
 //!
 //! Writer n'est, pour CloudServ, qu'un éditeur **temporaire** : le document et

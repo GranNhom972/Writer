@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Projection JSON ⇄ document répliqué (CRDT).
 //!
 //! ⚠️ **Exception assumée au rôle de relais.** Le cœur du serveur — rediffusion

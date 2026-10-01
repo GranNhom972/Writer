@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+//
+// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
+// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
+// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+
 /**
  * Suivi des modifications. Transposition de `SwRangeRedline` / `SwRedlineTbl`
  * (`sw/source/core/doc/docredln.cxx`, `sw/inc/redline.hxx`) et du mode

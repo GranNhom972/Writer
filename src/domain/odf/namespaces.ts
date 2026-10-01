@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Espaces de noms OpenDocument (OASIS ODF 1.2, partie 3).
  *

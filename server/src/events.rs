@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Flux d'observation d'un partage — `/api/v1/sessions/{token_session}/events`.
 //!
 //! Le WebSocket de synchronisation sert à **éditer** : il exige de suivre les

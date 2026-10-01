@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /** Miroir TypeScript des jetons ayant besoin d'être lus par le code. */
 
 /** Nombre de couleurs de présence exposées par `tokens.css`. */

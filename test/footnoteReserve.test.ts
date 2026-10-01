@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Réservation de la zone de notes — `SwFtnContFrm` / `SwFtnBossFrm::GetVarSpace`
  * (`sw/source/core/layout/ftnfrm.cxx`).

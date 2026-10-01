@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 import { useMemo, type JSX } from 'react';
 import type { WriterDocumentState } from '../../domain/document/types';
 import { isParagraph } from '../../domain/document/types';

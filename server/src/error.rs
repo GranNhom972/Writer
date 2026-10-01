@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Erreurs applicatives normalisées RFC 9457.
 //!
 //! Règle reprise du serveur Write : aucun `unwrap`/`expect` sur un chemin d'I/O,

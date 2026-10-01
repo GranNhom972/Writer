@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+//
+// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
+// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
+// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+
 /**
  * Moteur d'exportation PDF natif — Transposition de `vcl::PDFWriter`
  * (`aoo-4.1.16/main/vcl/source/gdi/pdfwriter_impl.cxx`) et `PDFExport`

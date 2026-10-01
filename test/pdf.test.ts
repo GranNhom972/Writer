@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, createParagraph, createTable } from '../src/domain/document/document';
 import { paginateDocument } from '../src/domain/engine/paginate';

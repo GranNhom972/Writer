@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 import { useEffect, useRef, useState } from 'react';
 import type { Swatch } from '../color/palette';
 import { parseHex, readableOutline } from '../color/color';

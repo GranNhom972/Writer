@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Atelier d'une bande d'en-tête ou pied : l'aperçu EST la surface de travail.
  *

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Configuration et état partagé du serveur.
 
 use std::sync::atomic::{AtomicU64, Ordering};

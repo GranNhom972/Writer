@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! SHA-256, HMAC-SHA256 et base64url.
 //!
 //! Écrits ici plutôt qu'importés, pour la raison qui a déjà fait écrire
