@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Modèles et exemples de formules mathématiques.
+ * Templates and examples of math formulas.
  */
 
 export interface MathSnippet {
-  /** Libellé accessible (le bouton n'affiche que le symbole). */
+  /** Accessible label (the button only shows the symbol). */
   label: string;
-  /** Symbole affiché sur le bouton. */
+  /** Symbol shown on the button. */
   glyph: string;
-  /** Code inséré. */
+  /** Code inserted. */
   latex: string;
-  /** Décalage du curseur depuis la fin du code inséré (négatif = revenir en arrière). */
+  /** Cursor shift from the end of the inserted code (negative = go back). */
   caret?: number;
 }
 
@@ -101,7 +101,7 @@ export const MATH_SNIPPETS: readonly MathSnippetGroup[] = [
   },
 ];
 
-/** Exemples proposés au premier usage : montrer vaut mieux qu'expliquer. */
+/** Examples offered on first use: showing beats explaining. */
 export const MATH_EXAMPLES: readonly { label: string; latex: string }[] = [
   { label: 'Identité remarquable', latex: '(a+b)^2 = a^2 + 2ab + b^2' },
   { label: 'Équation du second degré', latex: 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}' },

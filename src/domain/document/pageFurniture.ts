@@ -1,38 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * En-tête et pied de page physiques pour OpenOffice Writer (`SwHeaderFrm` & `SwFooterFrm`).
+ * Physical page header and footer for OpenOffice Writer (`SwHeaderFrm` & `SwFooterFrm`).
  *
- * Inspiré directement de l'architecture d'Apache OpenOffice (`aoo-4.1.16/main/sw/source/core/layout/hffrm.cxx`,
- * `pagedesc.cxx`, `pagedesc.hxx`) :
- *  - Structure 3 zones tabulées (Gauche / Centre / Droite) ou ligne simple (`SwTabCols`) ;
- *  - Différenciation des pages paires et impaires (`HEADERSHARE` / `FOOTERSHARE` / `PD_LEFT`, `PD_RIGHT`, `PD_MIRROR`) ;
- *  - Différenciation ou omission sur la première page (`onFirstPage` / `differentFirstPage`) ;
- *  - Filets séparateurs et bordures configurables (`SwBorderAttrs` / `SwPageFtnInfo`) ;
- *  - Couleur de fond / trame de la bande (`SvxBrushItem`) ;
- *  - Calcul dynamique de hauteur (`FormatSize` / `ATT_MIN_SIZE`) et distance au corps de texte (`DEF_DIST_WRITER`) ;
- *  - Éléments et logos libres ancrés (`SwFlyFrm`) avec positionnement magnétique ;
- *  - Jetons dynamiques étendus ({page}, {pages}, {titre}, {auteur}, {date}, {heure}) et numérotations arabes, romaines, alphabétiques.
+ * Directly inspired by the architecture of Apache OpenOffice
+ * (`aoo-4.1.16/main/sw/source/core/layout/hffrm.cxx`, `pagedesc.cxx`, `pagedesc.hxx`):
+ *  - 3-zone tabbed structure (Left / Center / Right) or a single line (`SwTabCols`);
+ *  - Different even and odd pages (`HEADERSHARE` / `FOOTERSHARE` / `PD_LEFT`, `PD_RIGHT`,
+ *    `PD_MIRROR`);
+ *  - Different or omitted on the first page (`onFirstPage` / `differentFirstPage`);
+ *  - Configurable separator lines and borders (`SwBorderAttrs` / `SwPageFtnInfo`);
+ *  - Background color / shading of the band (`SvxBrushItem`);
+ *  - Dynamic height calculation (`FormatSize` / `ATT_MIN_SIZE`) and distance to the text
+ *    body (`DEF_DIST_WRITER`);
+ *  - Free elements and logos anchored in the band (`SwFlyFrm`) with magnetic positioning;
+ *  - Extended dynamic tokens ({page}, {pages}, {titre}, {auteur}, {date}, {heure}) and
+ *    Arabic, Roman and alphabetic numbering.
  *
- * Module pur : aucune dépendance à React ni au DOM.
+ * Pure module: no dependency on React or the DOM.
  */
 
 import { ptToMm } from './units';
 
 export type FurnitureAlign = 'left' | 'center' | 'right';
 
-/** Les deux bandes d'une feuille physique. */
+/** The two bands of a physical sheet: the header at the top and the footer at the bottom. */
 export type FurnitureBand = 'header' | 'footer';
 
 export type FurnitureBlockKind = 'text' | 'image';
 
 /**
- * Présentation du numéro de page.
+ * How the page number is presented.
  */
 export type PageNumberFormat =
   | 'simple'
@@ -60,23 +63,23 @@ export const PAGE_NUMBER_FORMATS: readonly { valeur: PageNumberFormat; exemple: 
 export type SeparatorLineStyle = 'solid' | 'dashed' | 'dotted';
 
 /**
- * Un élément libre posé dans une bande (`SwFlyFrm`).
+ * A free element placed inside a band (`SwFlyFrm`): a piece of text or an image.
  */
 export interface FurnitureBlock {
   id: string;
   band: FurnitureBand;
   kind: FurnitureBlockKind;
   /**
-   * Bord gauche, en fraction de la largeur utile (0 = marge gauche, 1 = marge droite).
+   * Left edge, as a fraction of the usable width (0 = left margin, 1 = right margin).
    */
   x: number;
-  /** Bord haut, en millimètres depuis le haut de la bande. */
+  /** Top edge, in millimeters from the top of the band. */
   y: number;
-  /** Texte du bloc, jetons compris. Vide pour une image. */
+  /** Text of the block, tokens included. Empty for an image. */
   text: string;
-  /** Adresse de l'image. Vide pour un texte. */
+  /** Address of the image. Empty for a text. */
   src: string;
-  /** Description de l'image. */
+  /** Description of the image. */
   alt: string;
   widthMm: number;
   heightMm: number;
@@ -84,60 +87,63 @@ export interface FurnitureBlock {
   bold: boolean;
   italic: boolean;
   underline: boolean;
-  /** Couleur du texte, en notation `#rrggbb`. */
+  /** Text color, as `#rrggbb`. */
   color: string;
-  /** Découpe / rognage de l'image (0 à 80 %). */
+  /** Crop of the image (0 to 80 %). */
   cropTop?: number;
   cropRight?: number;
   cropBottom?: number;
   cropLeft?: number;
-  /** Spécifique pour n'apparaître que sur pages impaires ('odd'), paires ('even'), première page ('first') ou toutes ('all'). */
+  /**
+   * Restricts the element to odd pages ('odd'), even pages ('even'), the first page
+   * ('first') or all of them ('all').
+   */
   targetPageType?: 'all' | 'odd' | 'even' | 'first';
 }
 
 export interface PageFurniture {
-  /** Texte principal / ligne simple de l'en-tête (pages impaires ou toutes pages). */
+  /** Main text / single line of the header (odd pages, or all pages). */
   header: string;
-  /** Texte principal / ligne simple du pied de page (pages impaires ou toutes pages). */
+  /** Main text / single line of the footer (odd pages, or all pages). */
   footer: string;
 
-  /** 3 Zones OpenOffice pour l'en-tête (Gauche / Centre / Droite). */
+  /** The 3 OpenOffice zones of the header (Left / Center / Right). */
   headerLeft?: string;
   headerCenter?: string;
   headerRight?: string;
 
-  /** 3 Zones OpenOffice pour le pied de page (Gauche / Centre / Droite). */
+  /** The 3 OpenOffice zones of the footer (Left / Center / Right). */
   footerLeft?: string;
   footerCenter?: string;
   footerRight?: string;
 
-  /** Affiche le numéro de page dans le pied. */
+  /** Shows the page number in the footer. */
   pageNumber: boolean;
-  /** Présentation de ce numéro. */
+  /** How that number is presented. */
   pageNumberFormat: PageNumberFormat;
-  /** Numéro de page initial (décalage). */
+  /** First page number (offset). */
   startPageNumber?: number;
 
-  /** Affiche l'en-tête et le pied sur la première page (page de garde). */
+  /** Shows the header and footer on the first page (cover page). */
   onFirstPage: boolean;
 
-  /** Pages paires et impaires différenciées (`HEADERSHARE` / `FOOTERSHARE`). */
+  /** Even and odd pages are different (`HEADERSHARE` / `FOOTERSHARE`). */
   differentEvenOdd?: boolean;
-  /** Contenu de l'en-tête pour les pages paires (verso / gauche). */
+  /** Content of the header for even pages (verso / left). */
   headerEven?: string;
   headerEvenLeft?: string;
   headerEvenCenter?: string;
   headerEvenRight?: string;
   headerEvenAlign?: FurnitureAlign;
 
-  /** Contenu du pied pour les pages paires (verso / gauche). */
+  /** Content of the footer for even pages (verso / left). */
   footerEven?: string;
   footerEvenLeft?: string;
   footerEvenCenter?: string;
   footerEvenRight?: string;
   footerEvenAlign?: FurnitureAlign;
 
-  /** Première page différente (si `onFirstPage` est actif mais avec contenu spécifique). */
+  /** Different first page (when `onFirstPage` is on but with specific content). */
   differentFirstPage?: boolean;
   firstPageHeader?: string;
   firstPageHeaderLeft?: string;
@@ -148,7 +154,7 @@ export interface PageFurniture {
   firstPageFooterCenter?: string;
   firstPageFooterRight?: string;
 
-  /** Filets séparateurs (bordures). */
+  /** Separator lines (borders). */
   headerSeparator?: boolean;
   headerSeparatorWidthPt?: number;
   headerSeparatorColor?: string;
@@ -159,26 +165,26 @@ export interface PageFurniture {
   footerSeparatorColor?: string;
   footerSeparatorStyle?: SeparatorLineStyle;
 
-  /** Couleur de fond de bande (`SvxBrushItem`). */
+  /** Background color of the band (`SvxBrushItem`). */
   headerBackground?: string;
   footerBackground?: string;
 
-  /** Distance entre le bord haut de la feuille et l'en-tête, en millimètres. */
+  /** Distance between the top edge of the sheet and the header, in millimeters. */
   headerMm: number;
-  /** Distance entre le bord bas de la feuille et le pied, en millimètres. */
+  /** Distance between the bottom edge of the sheet and the footer, in millimeters. */
   footerMm: number;
   headerAlign: FurnitureAlign;
   footerAlign: FurnitureAlign;
-  /** Corps de l'en-tête et du pied, en points. */
+  /** Font size of the header and footer text, in points. */
   fontSizePt: number;
 
-  /** Marges du corps de texte, en millimètres. */
+  /** Margins of the text body, in millimeters. */
   marginTopMm: number;
   marginBottomMm: number;
   marginLeftMm: number;
   marginRightMm: number;
 
-  /** Blocs libres posés dans l'une ou l'autre bande (`SwFlyFrm`). */
+  /** Free blocks placed in either band (`SwFlyFrm`). */
   blocks: FurnitureBlock[];
 }
 
@@ -233,19 +239,19 @@ export const DEFAULT_FURNITURE: PageFurniture = {
 
 export const PAGE_GAP_MM = 5;
 
-/** Millimètres par point typographique (72 pt = 1 pouce = 25,4 mm). */
+/** Millimeters per typographic point (72 pt = 1 inch = 25.4 mm). */
 const MM_PAR_POINT = ptToMm(1);
 
 const FURNITURE_LEADING = 1.3;
 
 export const FURNITURE_DIST_MM = 5;
 
-/** Hauteur d'une ligne de texte à ce corps, en millimètres. */
+/** Height of one line of text at this font size, in millimeters. */
 export function lineHeightMm(fontSizePt: number): number {
   return Math.round(fontSizePt * FURNITURE_LEADING * MM_PAR_POINT * 10) / 10;
 }
 
-/** Bornes des réglages. */
+/** Limits of the settings. */
 export const FURNITURE_LIMITS = {
   distanceMm: { min: 5, max: 40 },
   marginMm: { min: 10, max: 60 },
@@ -420,7 +426,7 @@ export function blocksOf(
   });
 }
 
-/** 3 Zones pour une page donnée */
+/** The 3 zones for a given page */
 export interface ThreeZoneContent {
   left: string;
   center: string;
@@ -429,19 +435,19 @@ export interface ThreeZoneContent {
 }
 
 /**
- * Compose les trois zones d'une bande à partir du modèle.
+ * Builds the three zones of a band from the model.
  *
- * La ligne simple (`header` / `footer`) est la valeur de repli de la **bande**,
- * jamais celle d'une zone : elle ne se peint que si les trois zones sont vides.
+ * The single line (`header` / `footer`) is the fallback value of the **band**, never
+ * that of a zone: it is only painted if the three zones are empty.
  *
- * C'est ce que dit déjà l'atelier, dont le champ « ou ligne simple unifiée »
- * disparaît dès qu'une zone porte du texte. Le modèle, lui, reversait la ligne
- * simple dans la zone que désignait l'alignement, fût-elle la seule vide — et
- * un contenu écrit dans les **deux** représentations se peignait alors deux
- * fois. C'est le cas de tous les préréglages et de tout en-tête importé d'ODF,
- * où la ligne simple est la chaîne complète et les zones ses morceaux : poser
- * « CONFIDENTIEL » en zone droite puis demander l'alignement à gauche en
- * affichait un à gauche et un resté à droite.
+ * This is what the editing dialog already says, where the "or unified single line" field
+ * disappears as soon as a zone holds text. The model, for its part, used to pour the
+ * single line into the zone designated by the alignment, even when that was the only
+ * empty one, and content written in **both** representations was then painted twice.
+ * That is the case of every preset and of any header imported from ODF, where the single
+ * line is the complete string and the zones are its pieces: putting "CONFIDENTIEL" in the
+ * right zone and then asking for left alignment displayed one on the left and one left on
+ * the right.
  */
 function composerZones(
   gaucheBrut: string | undefined,
@@ -511,7 +517,7 @@ export function getThreeZones(
         );
   }
 
-  // Cas nominal (pages impaires ou toutes pages)
+  // Nominal case (odd pages, or all pages)
   if (band === 'header') {
     return composerZones(
       furniture.headerLeft,
@@ -530,15 +536,15 @@ export function getThreeZones(
     furniture.footerAlign,
   );
 
-  // Le numéro de page occupe la zone droite d'un pied resté vide : c'est sa
-  // place par défaut, celle qu'un document attend sans qu'on la lui demande.
+  // The page number takes the right zone of a footer that has stayed empty: that is its
+  // default place, the one a document expects without being asked.
   if (!furniture.pageNumber || zones.hasContent) return zones;
   return { left: '', center: '', right: '{page}', hasContent: true };
 }
 
 /**
- * Hauteur du contenu d'une bande, en millimètres — filet non compris.
- * Transposition de `SwHeadFootFrm::FormatSize` d'OpenOffice.
+ * Height of the content of a band, in millimeters, separator line not included.
+ * Counterpart of OpenOffice's `SwHeadFootFrm::FormatSize`.
  */
 export function bandContentMm(
   furniture: PageFurniture,
@@ -555,7 +561,7 @@ export function bandContentMm(
   return Math.round(Math.max(ligne, bas) * 10) / 10;
 }
 
-/** La bande a-t-elle quoi que ce soit à montrer sur cette page ? */
+/** Does the band have anything to show on this page? */
 export function bandIsEmpty(
   furniture: PageFurniture,
   band: FurnitureBand,
@@ -580,7 +586,7 @@ export interface ResolvedGeometry {
 }
 
 /**
- * Calcul exact de la géométrie de page pour Writer (`SwPageFrm::FormatPrt`).
+ * Exact computation of the page geometry for Writer (`SwPageFrm::FormatPrt`).
  */
 export function resolveGeometry(furniture: PageFurniture, pageNumber = 1): ResolvedGeometry {
   const rawHeaderContentMm = bandContentMm(furniture, 'header', pageNumber);
@@ -718,14 +724,14 @@ export interface FurnitureContext {
   titre: string;
   auteur?: string;
   /**
-   * Date du document, ou **chaîne déjà mise en forme**.
+   * Date of the document, or an **already formatted string**.
    *
-   * Les deux formes sont admises à dessein : le serveur d'export fournit une
-   * chaîne pour que le rendu ne dépende pas de la locale de la machine, tandis
-   * que l'éditeur passe une `Date` et laisse le navigateur la présenter.
+   * Both forms are accepted on purpose: the export server supplies a string so that the
+   * rendering does not depend on the locale of the machine, while the editor passes a
+   * `Date` and lets the browser present it.
    */
   date?: Date | string;
-  /** Heure déjà mise en forme. Déduite de `date` quand elle est absente. */
+  /** Time, already formatted. Deduced from `date` when absent. */
   heure?: string;
 }
 
@@ -769,7 +775,7 @@ function toAlpha(num: number): string {
   return res;
 }
 
-/** Remplace les jetons par leurs valeurs pour une page donnée. */
+/** Replaces the tokens by their values for a given page. */
 export function renderFurniture(modele: string, contexte: FurnitureContext): string {
   if (!modele) return '';
   const d = typeof contexte.date === 'string'
@@ -837,7 +843,7 @@ export function formatPageNumber(
   }
 }
 
-/** Texte du pied, numéro de page compris. */
+/** Text of the footer, page number included. */
 export function footerLine(furniture: PageFurniture, contexte: FurnitureContext): string {
   const zones = getThreeZones(furniture, 'footer', contexte.page);
   const left = renderFurniture(zones.left, contexte).trim();
@@ -856,7 +862,7 @@ export function footerLine(furniture: PageFurniture, contexte: FurnitureContext)
   return texte ? `${texte} — ${numero}` : numero;
 }
 
-/** L'en-tête et le pied s'affichent-ils sur cette page ? */
+/** Are the header and footer shown on this page? */
 export function showsOn(furniture: PageFurniture, page: number): boolean {
   return furniture.onFirstPage || page > 1;
 }
@@ -917,14 +923,13 @@ export interface FurniturePreset {
 }
 
 /*
- * Les préréglages écrivent les **zones**, et vident la ligne simple.
+ * The presets write the **zones**, and clear the single line.
  *
- * Les deux représentations décrivent la même bande : les zones quand la mise en
- * page est à trois colonnes, la ligne simple sinon — et la composition ne
- * retient la seconde que si les trois premières sont vides (`getThreeZones`),
- * exactement comme l'export ODF. Les remplir toutes deux laissait une doublure
- * invisible, prête à ressortir au premier changement d'alignement ou dès la
- * zone vidée.
+ * The two representations describe the same band: the zones when the layout has three
+ * columns, the single line otherwise, and the composition only keeps the second one if
+ * the first three are empty (`getThreeZones`), exactly like the ODF export. Filling both
+ * left an invisible duplicate, ready to reappear at the first change of alignment or as
+ * soon as a zone was emptied.
  */
 export const FURNITURE_PRESETS: readonly FurniturePreset[] = [
   {

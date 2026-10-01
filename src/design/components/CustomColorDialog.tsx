@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -13,9 +13,9 @@ import {
 } from '../color/color';
 
 interface CustomColorDialogProps {
-  /** Couleur de départ (celle appliquée, ou noir). */
+  /** Starting color (the applied one, or black). */
   initial: string;
-  /** Fond sur lequel la couleur sera lue — sert au calcul de contraste. */
+  /** Background on which the color will be read: used for the contrast calculation. */
   background?: string;
   onCancel: () => void;
   onConfirm: (hex: string) => void;
@@ -24,16 +24,13 @@ interface CustomColorDialogProps {
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 
 /**
- * Sélecteur de couleur personnalisée.
+ * Custom color picker.
  *
- * Trois chemins pour la même valeur, tous synchronisés : le carré
- * saturation/luminosité, la teinte, et la saisie exacte (HEX ou R/V/B).
+ * Three paths to the same value, all synchronized: the saturation/brightness square, the hue, and exact entry (HEX or R/G/B).
  *
- * Accessibilité : le carré 2D n'a pas de rôle ARIA satisfaisant (un `slider` est
- * unidimensionnel). Il reste manipulable aux flèches, mais **le chemin accessible
- * de référence est la saisie numérique** — étiquetée, annoncée, sans piège.
- * Le rapport de contraste est affiché en continu : choisir une couleur de texte
- * illisible est une décision, pas un accident (directive UX §6).
+ * Accessibility: the 2D square has no satisfactory ARIA role (a `slider` is one-dimensional). It can still be handled with the arrow
+ * keys, but **the reference accessible path is numeric entry**: labeled, announced, with no trap. The contrast ratio is displayed
+ * continuously: choosing unreadable text color is a decision, not an accident (UX directive §6).
  */
 export function CustomColorDialog({
   initial,
@@ -60,8 +57,7 @@ export function CustomColorDialog({
     setHexDraft(toHex(next));
     if (!options.keepHue) {
       const nextHsv = rgbToHsv(next);
-      // Une couleur désaturée n'a pas de teinte propre : on conserve la précédente
-      // pour que le curseur de teinte ne saute pas à zéro.
+      // A desaturated color has no hue of its own: we keep the previous one so that the hue slider does not jump to zero.
       if (nextHsv.s > 0.001) setHue(nextHsv.h);
     }
   }, []);
@@ -78,8 +74,7 @@ export function CustomColorDialog({
     [applyRgb, hue],
   );
 
-  // Glisser dans le carré : les événements sont suivis au niveau du document,
-  // sinon relâcher hors de la zone laisserait le curseur « collé ».
+  // Dragging in the square: events are followed at document level, otherwise releasing outside the area would leave the cursor "stuck".
   const startDrag = (event: React.PointerEvent): void => {
     event.preventDefault();
     areaRef.current?.focus();
@@ -112,7 +107,7 @@ export function CustomColorDialog({
     );
   };
 
-  // `Échap` annule, `Entrée` valide : conventions de dialogue, pas de surprise.
+  // `Escape` cancels, `Enter` confirms: dialog conventions, no surprises.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
@@ -195,8 +190,7 @@ export function CustomColorDialog({
               const raw = event.target.value;
               setHexDraft(raw);
               const parsed = parseHex(raw);
-              // Saisie partielle (« #1a5 ») : on n'applique que ce qui est valide,
-              // sans effacer ce que l'usager est en train de taper.
+              // Partial input ("#1a5"): we only apply what is valid, without erasing what the user is in the middle of typing.
               if (parsed) applyRgb(parsed);
             }}
           />

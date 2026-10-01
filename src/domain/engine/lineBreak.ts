@@ -1,27 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Découpage d'un paragraphe en lignes. Transposition de `SwTxtGuess::Guess`
- * (`sw/source/core/text/guess.cxx`) et de `SwTxtFormatter`.
+ * Splitting a paragraph into lines. (OpenOffice: `SwTxtGuess::Guess`,
+ * `sw/source/core/text/guess.cxx`, and `SwTxtFormatter`.)
  *
- * L'algorithme d'origine, dans l'ordre :
+ * The original algorithm, in order:
  *
- *  1. tout le reste tient dans la ligne → on la termine là ;
- *  2. sinon `nCutPos` = **premier caractère qui ne tient plus** ;
- *  3. si ce caractère est une espace : couper là, reculer sur les espaces
- *     finales (elles débordent sans compter), puis avancer sur les espaces
- *     suivantes — la ligne suivante ne commence jamais par une espace ;
- *  4. sinon, chercher la dernière **occasion de coupure** avant `nCutPos` ;
- *  5. aucune trouvée → coupure forcée dans le mot (« break cut »).
+ *  1. everything that is left fits in the line → finish it there;
+ *  2. otherwise `nCutPos` = the **first character that no longer fits**;
+ *  3. if that character is a space: cut there, step back over the trailing spaces (they
+ *     overflow without counting), then move forward over the following spaces, so the next
+ *     line never starts with a space;
+ *  4. otherwise, look for the last **break opportunity** before `nCutPos`;
+ *  5. none found → forced break inside the word ("break cut").
  *
- * Ce qui n'est pas repris : césure par dictionnaire (`XHyphenator`),
- * ponctuation suspendue et compression des kanas. Le point 5 les remplace, et
- * la structure reste prête à les accueillir.
+ * What is not reproduced: dictionary hyphenation (`XHyphenator`), hanging punctuation and kana
+ * compression. Step 5 replaces them, and the structure stays ready to welcome them.
  */
 
 import { cmToPx, ptToPx } from '../document/units';
@@ -48,12 +47,12 @@ import {
 } from '../document/images';
 import { nextClearY, usableBand, type FlyExclusion } from './flyLayout';
 
-/** Taquet de tabulation par défaut de Writer : 1,25 cm. */
+/** Writer's default tab stop: 1.25 cm. */
 export const DEFAULT_TAB_STOP_PX = cmToPx(1.25);
 
-/** Espace sécable au sens du retour à la ligne (`CH_BLANK`, `CH_FULL_BLANK`). */
+/** A space where the line may be broken (`CH_BLANK`, `CH_FULL_BLANK`). */
 export function isBlank(char: string): boolean {
-  // L'espace insécable en est volontairement exclue : c'est sa raison d'être.
+  // The non-breaking space is deliberately left out: that is its whole purpose.
   return char === ' ' || char === '　';
 }
 
@@ -65,10 +64,10 @@ function isCjk(code: number): boolean {
   );
 }
 
-/** Ponctuation qui ne peut pas commencer une ligne (règle du kinsoku). */
+/** Punctuation that cannot start a line (the kinsoku rule). */
 const NO_LINE_START = '、。，．！？」』）»)]}!?,.;:';
 
-/** Un morceau de ligne prêt à peindre : même fonte, même formatage. */
+/** A piece of a line ready to paint: same font, same formatting. */
 export interface LayoutSegment {
   startOffset: number;
   endOffset: number;
@@ -76,48 +75,47 @@ export interface LayoutSegment {
   formatting: RunFormatting;
   font: FontSpec;
   color: string;
-  /** Abscisse du bord gauche, relative au bord gauche de la zone de contenu. */
+  /** X coordinate of the left edge, relative to the left edge of the content area. */
   leftPx: number;
   widthPx: number;
-  /** Vrai pour le segment engendré par une tabulation (largeur calculée). */
+  /** True for a segment produced by a tab (computed width). */
   isTab: boolean;
   /**
-   * Hauteur réservée à la légende d'une image, blanc compris.
+   * Height reserved for the caption of an image, white space included.
    *
-   * Portée par le segment parce que c'est le moteur qui l'a mesurée et qui l'a
-   * déjà comptée dans la hauteur de la ligne. La recalculer au rendu ferait
-   * dépendre l'affichage d'une seconde dérivation, qui finirait par diverger de
-   * celle qui fait autorité.
+   * Carried by the segment because the engine is the one that measured it and already counted it
+   * in the line height. Recomputing it at render time would make the display depend on a second
+   * derivation, which would end up diverging from the authoritative one.
    */
   captionHeightPx?: number;
 }
 
 export interface LayoutLine {
   index: number;
-  /** Premier offset de la ligne, dans la chaîne brute du paragraphe. */
+  /** First offset of the line, in the paragraph's raw string. */
   startOffset: number;
-  /** Fin du contenu **peint** : les espaces finales en sont exclues. */
+  /** End of the **painted** content: trailing spaces are excluded. */
   endOffset: number;
-  /** Offset où commence la ligne suivante (espaces avalées comprises). */
+  /** Offset where the next line starts (swallowed spaces included). */
   nextOffset: number;
   segments: LayoutSegment[];
   leftPx: number;
   widthPx: number;
   heightPx: number;
   ascentPx: number;
-  /** Ordonnée du haut de la ligne, relative au haut du contenu du paragraphe. */
+  /** Y coordinate of the top of the line, relative to the top of the paragraph's content. */
   topPx: number;
-  /** Espacement de mot ajouté par la justification, en pixels. */
+  /** Word spacing added by justification, in pixels. */
   wordSpacingPx: number;
   isLast: boolean;
 }
 
-/** Puce ou numéro peint devant la première ligne d'un élément de liste. */
+/** Bullet or number painted in front of the first line of a list item. */
 export interface LayoutMarker {
   kind: ListKind;
   text: string;
   checked: boolean;
-  /** Abscisse du bord gauche, relative au bord gauche de la zone de contenu. */
+  /** X coordinate of the left edge, relative to the left edge of the content area. */
   leftPx: number;
   widthPx: number;
   font: FontSpec;
@@ -127,13 +125,13 @@ export interface LayoutMarker {
 export interface ParagraphLayout {
   blockId: string;
   lines: LayoutLine[];
-  /** Absent hors liste. */
+  /** Absent outside a list. */
   marker: LayoutMarker | null;
   marginTopPx: number;
   marginBottomPx: number;
-  /** Hauteur du seul contenu, marges exclues. */
+  /** Height of the content alone, margins excluded. */
   contentHeightPx: number;
-  /** Hauteur totale occupée dans le flux. */
+  /** Total height taken in the flow. */
   heightPx: number;
   alignment: Alignment;
 }
@@ -141,53 +139,51 @@ export interface ParagraphLayout {
 export interface LayoutContext {
   measurer: TextMeasurer;
   defaults: DocumentDefaults;
-  /** Largeur de la zone imprimable de la page. */
+  /** Width of the printable area of the page. */
   contentWidthPx: number;
   tabStopPx?: number;
-  /** Marqueur de liste, calculé en amont par `computeListMarkers`. */
+  /** List marker, computed upstream by `computeListMarkers`. */
   marker?: ListMarker | undefined;
   /**
-   * Intervalles horizontaux interdits par les cadres flottants qui traversent
-   * ce paragraphe, dans son repère local (`SwTxtFly`, txtfly.cxx).
+   * Horizontal intervals forbidden by the floating frames that cross this paragraph, in its
+   * local frame of reference (`SwTxtFly`, txtfly.cxx).
    *
-   * Absent dans le cas courant — un document sans cadre flottant ne paie donc
-   * rien pour cette fonctionnalité, la boucle de remplissage retombant sur la
-   * largeur pleine sans un test de plus par caractère.
+   * Absent in the usual case: a document with no floating frame therefore pays nothing for this
+   * feature, the fill loop falling back on the full width without one more test per character.
    */
   exclusions?: readonly FlyExclusion[] | undefined;
   /**
-   * Numéros de figure du document, et paragraphe en cours de mise en page.
+   * Figure numbers of the document, and the paragraph being laid out.
    *
-   * La légende d'une image occupe de la hauteur : elle doit donc être mesurée
-   * ici, avec son numéro, sinon le texte qui suit passerait dessus. Le numéro
-   * n'est pas dans le run — il est dérivé de l'ordre du document (cf.
-   * `figureNumbering`) — d'où ces deux champs, qui n'existent que pour le lui
-   * rapporter.
+   * The caption of an image takes height: it must therefore be measured here, with its number,
+   * otherwise the text that follows would run over it. The number is not in the run (it is derived
+   * from the order of the document, see `figureNumbering`), hence these two fields, which only exist
+   * to report it.
    */
   figureNumbers?: ReadonlyMap<string, number> | undefined;
   blockId?: string | undefined;
 }
 
-/** Taille de police d'une légende, relativement au corps du document. */
+/** Font size of a caption, relative to the document's font size. */
 export const CAPTION_FONT_RATIO = 0.85;
-/** Interligne d'une légende. */
+/** Line spacing of a caption. */
 export const CAPTION_LINE_RATIO = 1.3;
 /**
- * Blanc entre l'image et sa légende.
+ * White space between the image and its caption.
  *
- * Il ne fait **plus** partie de la hauteur mesurée de la légende : il était
- * compté dedans, puis retranché à l'affichage, si bien qu'il finissait en bas du
- * cadre au lieu de séparer l'image de son texte. Il est maintenant posé où il
- * doit l'être, et réglable (`imageCaptionGapPt`).
+ * It is **no longer** part of the measured height of the caption: it used to be counted in it and
+ * then subtracted at display time, so it ended up at the bottom of the frame instead of separating
+ * the image from its text. It is now placed where it belongs, and is adjustable
+ * (`imageCaptionGapPt`).
  */
 
 /**
- * Hauteur qu'occupe la légende d'une image, blanc compris.
+ * Height taken by the caption of an image, white space included.
  *
- * La légende est cadrée sur la **largeur de l'image** et se replie autant de
- * fois qu'il le faut : c'est ce que fait Writer, dont la légende vit dans un
- * cadre de la largeur du sien. Mesurer ici, et non au rendu, est ce qui garantit
- * que la ligne suivante du texte soit posée sous la légende et non dessus.
+ * The caption is framed on the **width of the image** and wraps as many times as needed: this is
+ * what Writer does, whose caption lives in a frame the width of its own. Measuring here, and not at
+ * render time, is what guarantees that the next line of text is placed below the caption and not on
+ * top of it.
  */
 export function captionHeightPx(
   text: string,
@@ -205,8 +201,8 @@ export function captionHeightPx(
   const lineHeight = fontSizePx * CAPTION_LINE_RATIO;
   const usable = Math.max(1, imageWidthPx);
 
-  // Repli au mot, comme le remplisseur de ligne : compter les caractères
-  // donnerait un nombre de lignes faux dès le premier mot long.
+  // Wrap at the word, like the line filler: counting characters would give a wrong number of lines
+  // from the first long word.
   let lines = 1;
   let current = '';
   for (const word of text.split(/\s+/)) {
@@ -222,35 +218,34 @@ export function captionHeightPx(
   return lines * lineHeight;
 }
 
-/** Mesures pré-calculées d'un paragraphe : avances par offset et fontes par run. */
+/** Pre-computed measurements of a paragraph: advances per offset and fonts per run. */
 interface ParagraphMetrics {
   text: string;
-  /** Index du run auquel appartient chaque offset. */
+  /** Index of the run each offset belongs to. */
   runAt: Int32Array;
   /**
-   * Avances cumulées, **hors tabulations** : l'avance d'une tabulation dépend
-   * de la position courante, elle ne peut pas figurer dans un cumul. Le
-   * remplisseur de ligne ne mesure donc jamais à travers une tabulation.
+   * Cumulative advances, **excluding tabs**: the advance of a tab depends on the current position, so
+   * it cannot be part of a running total. The line filler therefore never measures across a tab.
    */
   cum: Float64Array;
   fonts: FontSpec[];
   colors: string[];
   formats: RunFormatting[];
   metrics: FontMetrics[];
-  /** Hauteur de légende par run — nulle hors image légendée. */
+  /** Caption height per run: zero except on a captioned image. */
   captionHeights: number[];
 }
 
 /**
- * Estime la largeur horizontale réelle d'une formule LaTeX en tenant compte
- * de l'empilement vertical des fractions, des matrices et des radicaux.
+ * Estimates the real horizontal width of a LaTeX formula, taking into account the vertical stacking
+ * of fractions, matrices and radicals.
  */
 export function estimateLatexWidth(latex: string, em: number): number {
   if (!latex || !latex.trim()) return em * 1.2;
 
   let str = latex.trim();
 
-  // Traiter les matrices / environnements
+  // Handle matrices / environments
   const matrixMatch = str.match(/\\begin\{(matrix|pmatrix|bmatrix|vmatrix|cases)\}([\s\S]*?)\\end\{\1\}/);
   if (matrixMatch && matrixMatch[2]) {
     const rows = matrixMatch[2].split('\\\\');
@@ -270,7 +265,7 @@ export function estimateLatexWidth(latex: string, em: number): number {
     return estimateLatexWidth(before, em) + tableWidth + estimateLatexWidth(after, em);
   }
 
-  // Traiter les fractions \frac{num}{den}, \dfrac, \tfrac (empilement vertical)
+  // Handle the fractions \frac{num}{den}, \dfrac, \tfrac (vertical stacking)
   const fracRegex = /\\(frac|dfrac|tfrac)\s*\{((?:[^{}]|{[^{}]*})*)\}\s*\{((?:[^{}]|{[^{}]*})*)\}/;
   let fracMatch = str.match(fracRegex);
   while (fracMatch) {
@@ -285,7 +280,7 @@ export function estimateLatexWidth(latex: string, em: number): number {
     fracMatch = str.match(fracRegex);
   }
 
-  // Traiter les racines carrées \sqrt{content} ou \sqrt[n]{content}
+  // Handle square roots \sqrt{content} or \sqrt[n]{content}
   const sqrtRegex = /\\sqrt(?:\[[^\]]*\])?\s*\{((?:[^{}]|{[^{}]*})*)\}/;
   let sqrtMatch = str.match(sqrtRegex);
   while (sqrtMatch) {
@@ -298,7 +293,7 @@ export function estimateLatexWidth(latex: string, em: number): number {
     sqrtMatch = str.match(sqrtRegex);
   }
 
-  // Calculer la largeur restante
+  // Compute the remaining width
   let totalWidth = 0;
   const placeholderRegex = /__(FRAC|SQRT)_(\d+)__/g;
   let lastIdx = 0;
@@ -324,7 +319,7 @@ function estimateSimpleMathTextWidth(text: string, em: number): number {
     .replace(/\\(left|right|displaystyle|textstyle|mathbf|mathit|mathrm|mathbb|mathcal)\b/g, '')
     .replace(/[{}\\]/g, ' ');
 
-  // Remplacer les commandes de symboles usuels (\alpha, \pm, \int, \sum, etc.) par 1 glyphe
+  // Replace the usual symbol commands (\alpha, \pm, \int, \sum, etc.) with 1 glyph
   s = s.replace(/\\[a-zA-Z]+/g, 'X');
 
   for (let i = 0; i < s.length; i += 1) {
@@ -346,9 +341,9 @@ function estimateSimpleMathTextWidth(text: string, em: number): number {
 }
 
 /**
- * Estime la géométrie (hauteur, ligne de base et largeur) d'une formule mathématique.
- * Permet au moteur de réserver l'espace vertical adéquat pour les fractions, racines,
- * matrices et intégrales sans risquer de chevauchement sur les lignes voisines.
+ * Estimates the geometry (height, baseline and width) of a math formula. It lets the engine reserve
+ * the right vertical space for fractions, radicals, matrices and integrals without overlapping the
+ * neighboring lines.
  */
 export function estimateMathMetrics(
   latex: string,
@@ -360,7 +355,7 @@ export function estimateMathMetrics(
     if (exact.widthPx > 0) return exact;
   }
 
-  // Facteur d'échelle de police KaTeX : ~1.22 en ligne et ~1.38 en mode bloc centré
+  // KaTeX font scale factor: about 1.22 inline and about 1.38 in centered block mode
   const mathScale = display ? 1.38 : 1.22;
   const em = font.fontSizePx * mathScale;
   const isComplex = /\\(frac|sqrt|sum|prod|int|iint|iiint|cases|matrix|pmatrix|bmatrix|vmatrix|begin)/.test(latex);
@@ -415,21 +410,19 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
     colors.push(resolveColor(formatting, ctx));
 
     if (isImageFormatting(formatting)) {
-      // Un cadre image n'a pas de ligne de base propre : `SwFlyCntFrm` est posé
-      // sur celle du texte et monte d'autant (`SwTxtFrm::CalcBaseOfstForFly`).
-      // Toute sa hauteur est donc de l'ascendance, la descente est nulle.
-      // Un cadre flottant ne compte ni en largeur ni en hauteur dans la ligne :
-      // il est posé hors du fil, et le texte est creusé autour de lui par les
-      // exclusions de `flyLayout`. Lui donner sa taille ici réservait en plus
-      // une place vide au milieu du texte.
+      // An image frame has no baseline of its own: `SwFlyCntFrm` sits on the text's baseline and rises by
+      // as much (`SwTxtFrm::CalcBaseOfstForFly`). All of its height is therefore ascent, and the descent is
+      // zero. A floating frame counts neither in width nor in height inside the line: it is placed outside
+      // the flow, and the text is carved out around it by the exclusions of `flyLayout`. Giving it its
+      // size here would in addition reserve an empty space in the middle of the text.
       const flottant = Boolean(formatting.imageAnchor && formatting.imageAnchor !== 'as-char');
-      // La marge fait partie de la boîte : elle repousse le texte pour de bon.
+      // The margin is part of the box: it really pushes the text away.
       const margePx = flottant ? 0 : ptToPx(imageMarginPt(formatting));
       const widthPx = flottant ? 0 : ptToPx(formatting.imageWidthPt ?? 0);
       const imageHeightPx = flottant ? 0 : ptToPx(formatting.imageHeightPt ?? 0);
 
-      // La légende fait partie du cadre : sa hauteur s'ajoute à celle de
-      // l'image, sinon la ligne suivante viendrait se poser dessus.
+      // The caption is part of the frame: its height adds to that of the image, otherwise the next line
+      // would land on top of it.
       const legende = hasCaption(formatting)
         ? captionText(
             imageCaptionOf(formatting),
@@ -442,7 +435,7 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
         ptToPx(ctx.defaults.fontSizePt) * CAPTION_FONT_RATIO,
         ctx.measurer,
       );
-      // Le blanc n'existe que s'il y a une légende à séparer de l'image.
+      // The gap only exists if there is a caption to separate from the image.
       const captionPx =
         texteLegende > 0 ? texteLegende + ptToPx(imageCaptionGapPt(formatting)) : 0;
       const heightPx = imageHeightPx + captionPx + margePx * 2;
@@ -454,8 +447,8 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
         naturalLineHeightPx: heightPx,
       });
 
-      // Le run vaut un seul caractère de substitution : toute sa largeur tombe
-      // sur cette unique avance, ce qui interdit au curseur de s'y insérer.
+      // The run is worth a single replacement character: all of its width falls on that one advance, which
+      // prevents the cursor from being inserted inside it.
       const charCount = Math.max(1, run.text.length);
       const step = (widthPx + margePx * 2) / charCount;
       for (let i = 0; i < run.text.length; i += 1) {
@@ -494,17 +487,17 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
   return { text, runAt, cum, fonts, colors, formats, metrics, captionHeights };
 }
 
-/** Largeur de `[from, to)`, valide tant que l'intervalle ne franchit pas de tabulation. */
+/** Width of `[from, to)`, valid as long as the interval does not cross a tab. */
 function width(m: ParagraphMetrics, from: number, to: number): number {
   return m.cum[to]! - m.cum[from]!;
 }
 
 /**
- * Plus grand `j` de `[from, limit]` tel que `[from, j)` tienne dans `available`.
+ * Largest `j` in `[from, limit]` such that `[from, j)` fits in `available`.
  *
- * Recherche dichotomique sur les avances cumulées — c'est le rôle de
- * `SwTxtSizeInfo::GetTxtBreak`, que le périphérique de sortie résout en une
- * passe ; ici les cumuls sont déjà là, autant en profiter.
+ * A binary search on the cumulative advances. This is the role of `SwTxtSizeInfo::GetTxtBreak`,
+ * which the output device resolves in one pass; here the running totals are already there, so we
+ * might as well use them.
  */
 function fittingEnd(
   m: ParagraphMetrics,
@@ -524,16 +517,15 @@ function fittingEnd(
 }
 
 /**
- * Dernière occasion de coupure dans `(lineStart, cutPos]`, ou `-1`.
+ * Last break opportunity in `(lineStart, cutPos]`, or `-1`.
  *
- * Remplace `XBreakIterator::getLineBreak`. Les occasions retenues : après une
- * espace, après un tiret ou une barre oblique, et entre idéogrammes — sauf
- * devant une ponctuation qui ne peut pas ouvrir une ligne.
+ * Replaces `XBreakIterator::getLineBreak`. The opportunities kept: after a space, after a hyphen or a
+ * slash, and between ideographs, except in front of punctuation that cannot open a line.
  */
 function findBreakOpportunity(m: ParagraphMetrics, lineStart: number, cutPos: number): number {
   const { text } = m;
   for (let p = cutPos; p > lineStart; p -= 1) {
-    // Ne jamais couper à l'intérieur d'un objet mathématique atomique
+    // Never break inside an atomic math object
     const runIdxBefore = m.runAt[p - 1];
     const runIdxAfter = m.runAt[p];
     if (
@@ -553,9 +545,8 @@ function findBreakOpportunity(m: ParagraphMetrics, lineStart: number, cutPos: nu
     if (NO_LINE_START.includes(after)) continue;
 
     if (before === '-' || before === '/' || before === '–' || before === '—') {
-      // Ne pas couper « 12 - 3 » juste après le tiret d'une plage numérique
-      // isolée : la coupure y est correcte, mais pas au milieu d'un nombre
-      // négatif collé au signe.
+      // Do not break "12 - 3" right after the hyphen of an isolated numeric range: the break is correct
+      // there, but not in the middle of a negative number stuck to its sign.
       return p;
     }
     if (isCjk(before.codePointAt(0) ?? 0) || isCjk(after.codePointAt(0) ?? 0)) return p;
@@ -563,12 +554,12 @@ function findBreakOpportunity(m: ParagraphMetrics, lineStart: number, cutPos: nu
   return -1;
 }
 
-/** Prochain taquet de tabulation strictement à droite de `x`. */
+/** Next tab stop strictly to the right of `x`. */
 function nextTabStop(x: number, tabStopPx: number): number {
   return (Math.floor(x / tabStopPx) + 1) * tabStopPx;
 }
 
-/** Avance d'au moins une grappe de graphèmes, pour garantir la progression. */
+/** Moves forward by at least one grapheme cluster, to guarantee progress. */
 function advanceOneGrapheme(text: string, from: number): number {
   const code = text.codePointAt(from);
   if (code === undefined) return from + 1;
@@ -576,17 +567,17 @@ function advanceOneGrapheme(text: string, from: number): number {
 }
 
 interface LineBreakResult {
-  /** Fin du contenu peint, espaces finales retirées. */
+  /** End of the painted content, trailing spaces removed. */
   endOffset: number;
-  /** Début de la ligne suivante. */
+  /** Start of the next line. */
   nextOffset: number;
 }
 
 /**
- * Détermine où couper la ligne commencée à `lineStart`.
+ * Decides where to cut the line that begins at `lineStart`.
  *
- * `startX` permet de reprendre après une tabulation : la largeur disponible
- * n'est plus la ligne entière mais ce qu'il en reste.
+ * `startX` makes it possible to resume after a tab: the available width is no longer the whole line
+ * but what is left of it.
  */
 function breakLine(
   m: ParagraphMetrics,
@@ -600,8 +591,7 @@ function breakLine(
   let x = 0;
 
   for (;;) {
-    // Le morceau courant s'arrête à la prochaine tabulation, au prochain saut
-    // de ligne, ou à la fin du paragraphe.
+    // The current piece stops at the next tab, the next line break, or the end of the paragraph.
     let stop = total;
     for (let i = pos; i < total; i += 1) {
       const char = text[i]!;
@@ -624,13 +614,13 @@ function breakLine(
 
     const char = text[pos]!;
     if (char === '\n') {
-      // Saut de ligne exprès (`SwBreakPortion`) : la ligne s'arrête avant, et
-      // le caractère lui-même n'est pas peint.
+      // Deliberate line break (`SwBreakPortion`): the line stops before it, and the character itself is
+      // not painted.
       return { endOffset: pos, nextOffset: pos + 1 };
     }
 
-    // Tabulation : avancer au taquet suivant. Si le taquet sort de la ligne,
-    // la tabulation elle-même provoque le passage à la ligne.
+    // Tab: advance to the next tab stop. If the tab stop falls outside the line, the tab itself causes
+    // the wrap to the next line.
     const tabX = nextTabStop(x, tabStopPx);
     if (tabX > available) {
       return pos > lineStart
@@ -642,7 +632,7 @@ function breakLine(
   }
 }
 
-/** Points 2 à 5 de `SwTxtGuess::Guess`, appliqués à un morceau sans tabulation. */
+/** Steps 2 to 5 of `SwTxtGuess::Guess`, applied to a piece with no tab. */
 function breakInsideChunk(
   m: ParagraphMetrics,
   lineStart: number,
@@ -653,14 +643,13 @@ function breakInsideChunk(
   const { text } = m;
   let cutPos = fittingEnd(m, chunkStart, chunkEnd, Math.max(0, available));
 
-  // Colonne si étroite qu'aucun caractère ne tient : avancer d'une grappe
-  // malgré tout. Sans cette garde, la ligne serait vide et la boucle
-  // appelante ne progresserait jamais.
+  // A column so narrow that not one character fits: advance by one cluster anyway. Without this guard
+  // the line would be empty and the calling loop would never make progress.
   if (cutPos <= lineStart) cutPos = advanceOneGrapheme(text, lineStart);
   if (cutPos >= chunkEnd) return { endOffset: chunkEnd, nextOffset: chunkEnd };
 
-  // Si cutPos tombe au milieu d'un objet atomique — formule ou cadre image —
-  // couper **avant** l'objet plutôt qu'en son sein.
+  // If cutPos falls in the middle of an atomic object (a formula or an image frame), cut **before** the
+  // object rather than inside it.
   const cutRunIdx = m.runAt[cutPos];
   if (
     cutRunIdx !== undefined &&
@@ -678,12 +667,11 @@ function breakInsideChunk(
   const cutChar = text[cutPos]!;
 
   if (isBlank(cutChar)) {
-    // Espace à la coupure : reculer sur les espaces finales, qui débordent dans
-    // la marge sans compter dans la largeur…
+    // Space at the cut: step back over the trailing spaces, which overflow into the margin without
+    // counting toward the width...
     let endOffset = cutPos;
     while (endOffset > lineStart && isBlank(text[endOffset - 1]!)) endOffset -= 1;
-    // …puis avaler celles qui suivent, pour que la ligne suivante commence sur
-    // un caractère visible.
+    // ...then swallow those that follow, so that the next line starts on a visible character.
     let nextOffset = cutPos;
     while (nextOffset < text.length && isBlank(text[nextOffset]!)) nextOffset += 1;
     return { endOffset, nextOffset };
@@ -696,12 +684,12 @@ function breakInsideChunk(
     return { endOffset, nextOffset: breakPos };
   }
 
-  // Aucune occasion de coupure : mot plus long que la ligne, coupure forcée.
+  // No break opportunity: a word longer than the line, forced break.
   const forced = Math.max(cutPos, advanceOneGrapheme(text, lineStart));
   return { endOffset: forced, nextOffset: forced };
 }
 
-/** Construit les segments peints d'une ligne, tabulations résolues. */
+/** Builds the painted segments of a line, with tabs resolved. */
 function buildSegments(
   m: ParagraphMetrics,
   startOffset: number,
@@ -735,8 +723,8 @@ function buildSegments(
       continue;
     }
 
-    // Un segment court jusqu'au changement de run, jusqu'à la prochaine
-    // tabulation, ou jusqu'à la fin de la ligne — le premier des trois.
+    // A segment runs up to the change of run, the next tab, or the end of the line, whichever of the
+    // three comes first.
     const runIndex = m.runAt[pos]!;
     let stop = pos + 1;
     while (stop < endOffset && m.runAt[stop] === runIndex && m.text[stop] !== '\t') stop += 1;
@@ -759,10 +747,9 @@ function buildSegments(
   }
 
   if (segments.length === 0) {
-    // Ligne vide : un segment de largeur nulle porte tout de même la fonte, ce
-    // qui donne au curseur sa hauteur et à la frappe suivante son formatage.
-    // Un paragraphe vide conserve toujours un run (cf. `normalizeRuns`), donc
-    // `fonts[0]` existe : il n'y a pas de cas sans fonte à couvrir.
+    // Empty line: a zero-width segment still carries the font, which gives the cursor its height and the
+    // next keystroke its formatting. An empty paragraph always keeps a run (see `normalizeRuns`), so
+    // `fonts[0]` exists: there is no font-less case to cover.
     const runIndex = Math.max(0, Math.min(m.fonts.length - 1, m.runAt[startOffset] ?? 0));
     segments.push({
       startOffset,
@@ -780,7 +767,7 @@ function buildSegments(
   return { segments, widthPx: x };
 }
 
-/** Hauteur et ligne de base d'une ligne : le plus grand des runs qui la composent. */
+/** Height and baseline of a line: the largest of the runs that make it up. */
 function lineHeightOf(
   m: ParagraphMetrics,
   startOffset: number,
@@ -799,24 +786,24 @@ function lineHeightOf(
   }
 
   const heightPx = natural * spacing;
-  // L'interligne supplémentaire se place **au-dessus** du texte, comme le
-  // « leading » d'une fonte : la ligne de base descend d'autant.
+  // The extra line spacing goes **above** the text, like the "leading" of a font: the baseline moves
+  // down by as much.
   return { heightPx, ascentPx: ascent + (heightPx - natural) / 2 };
 }
 
-/** Aucun cadre : constante partagée pour éviter une allocation par paragraphe. */
+/** No frames: a shared constant, to avoid one allocation per paragraph. */
 const EMPTY_EXCLUSIONS: readonly FlyExclusion[] = [];
 
 /**
- * Nombre maximal de descentes successives sous des cadres bloquants.
+ * Maximum number of successive moves down below blocking frames.
  *
- * Garde-fou, pas une limite fonctionnelle : `nextClearY` progresse strictement,
- * donc la boucle termine toujours. Elle borne le coût d'un document pathologique
- * empilant des dizaines de cadres `surround: none` au même endroit.
+ * A safety guard, not a functional limit: `nextClearY` progresses strictly, so the loop always ends.
+ * It bounds the cost of a pathological document that stacks dozens of `surround: none` frames in the
+ * same place.
  */
 const MAX_FLY_DESCENTS = 64;
 
-/** Bande utile pour une ligne, ou la colonne entière en l'absence de cadre. */
+/** Usable band for a line, or the whole column when there is no frame. */
 function resolveBand(
   exclusions: readonly FlyExclusion[],
   hasExclusions: boolean,
@@ -828,7 +815,7 @@ function resolveBand(
   return usableBand(exclusions, topPx, topPx + Math.max(1, heightPx), contentWidthPx);
 }
 
-/** Abscisse du bord gauche de la ligne, alignement appliqué. */
+/** X coordinate of the left edge of the line, alignment applied. */
 function alignLine(
   alignment: Alignment,
   lineWidth: number,
@@ -850,10 +837,10 @@ function alignLine(
 }
 
 /**
- * Met en page un paragraphe : découpage en lignes, hauteurs, alignement.
+ * Lays out a paragraph: splitting into lines, heights, alignment.
  *
- * Fonction pure — c'est elle qui rend le moteur exécutable dans un Web Worker
- * ou en environnement serveur sans accès direct au DOM.
+ * A pure function: it is what makes the engine runnable in a Web Worker or in a server environment
+ * without direct DOM access.
  */
 export function layoutParagraph(
   paragraph: ParagraphNode,
@@ -876,8 +863,8 @@ export function layoutParagraph(
   let top = 0;
   let index = 0;
 
-  // Cadres flottants traversant ce paragraphe. Le cas courant — aucun — court-
-  // circuite tout le calcul de bande ci-dessous.
+  // Floating frames crossing this paragraph. The usual case, none, short-circuits the whole band
+  // computation below.
   const exclusions = ctx.exclusions ?? EMPTY_EXCLUSIONS;
   const hasExclusions = exclusions.length > 0;
 
@@ -885,15 +872,14 @@ export function layoutParagraph(
     const isFirst = index === 0;
     const extraIndent = isFirst ? firstLineIndentPx : 0;
 
-    // Hauteur *probable* de la ligne, avant de savoir ce qu'elle contiendra :
-    // la bande utile dépend de l'extension verticale de la ligne, qui dépend de
-    // son contenu, qui dépend de la bande. Writer tranche la circularité de la
-    // même façon (`SwTxtFrm::FormatLine`) — on estime, on découpe, et on ne
-    // recommence qu'une fois si l'estimation s'est révélée trop basse.
+    // *Probable* height of the line, before knowing what it will contain: the usable band depends on the
+    // vertical extent of the line, which depends on its content, which depends on the band. Writer
+    // settles the circularity the same way (`SwTxtFrm::FormatLine`): we estimate, we cut, and we only start
+    // again once if the estimate turned out too low.
     let probeHeight = lineHeightOf(metrics, offset, Math.min(total, offset + 1), spacing).heightPx;
     let band = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
 
-    // Aucune bande exploitable : la ligne descend sous le cadre qui la bloque.
+    // No usable band: the line moves down below the frame that blocks it.
     let guard = 0;
     while (band === null && guard < MAX_FLY_DESCENTS) {
       const clear = nextClearY(exclusions, top, top + probeHeight);
@@ -918,9 +904,8 @@ export function layoutParagraph(
       spacing,
     );
 
-    // La ligne s'est révélée plus haute que l'estimation — une image en ligne,
-    // une formule — et croise donc peut-être un cadre que la bande ignorait.
-    // Une seule reprise suffit : la seconde estimation, elle, est exacte.
+    // The line turned out taller than the estimate (an inline image, a formula) and may therefore cross a
+    // frame that the band ignored. A single retry is enough: the second estimate is exact.
     if (hasExclusions && measured.heightPx > probeHeight) {
       probeHeight = measured.heightPx;
       const retry = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
@@ -947,9 +932,8 @@ export function layoutParagraph(
     const { heightPx, ascentPx } = measured;
     const leftPx = alignLine(alignment, widthPx, available, lineLeftPx, extraIndent);
 
-    // Justification : l'espace en trop se répartit sur les blancs de la ligne.
-    // La dernière ligne d'un paragraphe en est exclue, sinon un mot esseulé se
-    // retrouverait étiré sur toute la largeur.
+    // Justification: the extra space is spread over the blanks of the line. The last line of a paragraph is
+    // excluded, otherwise a lone word would be stretched across the full width.
     let wordSpacingPx = 0;
     if (alignment === 'justify' && !isLast) {
       const gaps = countBlanks(metrics.text, offset, endOffset);
@@ -975,8 +959,8 @@ export function layoutParagraph(
 
     top += heightPx;
     index += 1;
-    // `nextOffset` progresse toujours, sauf en fin de paragraphe : la garde
-    // évite la boucle infinie que provoquerait un découpage sans avancée.
+    // `nextOffset` always moves forward, except at the end of the paragraph: the guard prevents the
+    // infinite loop a split without progress would cause.
     if (nextOffset <= offset && nextOffset < total) break;
     offset = nextOffset;
   } while (offset < total);
@@ -997,12 +981,11 @@ export function layoutParagraph(
 }
 
 /**
- * Géométrie du marqueur de liste.
+ * Geometry of the list marker.
  *
- * Il est posé **en dehors** du texte, un cran à gauche : c'est la disposition
- * par défaut de Writer, où le numéro occupe le retrait du niveau précédent et
- * le texte commence à celui de son propre niveau. Le marqueur ne participe donc
- * pas au retour à la ligne — il n'entre jamais en concurrence avec le texte.
+ * It is placed **outside** the text, one step to the left: this is Writer's default layout, where the
+ * number occupies the indent of the previous level and the text starts at that of its own level. The
+ * marker therefore does not take part in line wrapping: it never competes with the text.
  */
 function buildMarker(
   paragraph: ParagraphNode,
@@ -1014,8 +997,8 @@ function buildMarker(
 
   const first = paragraph.runs[0];
   const formatting = first ? runFormatting(first) : {};
-  // Le marqueur suit la fonte du texte mais jamais son gras ni son italique :
-  // une puce en italique n'a aucun sens, et Writer ne les propage pas non plus.
+  // The marker follows the font of the text but never its bold or italic: an italic bullet makes no
+  // sense, and Writer does not carry them over either.
   const font = { ...resolveFont(formatting, paragraph, ctx), bold: false, italic: false };
 
   return {

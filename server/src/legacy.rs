@@ -1,54 +1,52 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Lecture des documents écrits par la version précédente du serveur.
+//! Reading documents written by the previous version of the server.
 //!
-//! Jusqu'ici, la synchronisation ne relayait pas des updates CRDT mais des
-//! **opérations de bloc** typées, que le serveur séquençait et journalisait en
-//! JSON (`journal.jsonl`, `snapshot.json`). Le modèle convergeait — mais à la
-//! granularité du bloc : deux personnes qui écrivaient dans le même paragraphe
-//! produisaient chacune un « remplace ce paragraphe », et la dernière arrivée
-//! effaçait l'autre. C'est ce défaut-là qui a fait passer la synchronisation au
-//! CRDT (`content.rs`, `doc.rs`), comme dans l'application Write.
+//! Until now, synchronization did not relay CRDT updates but typed **block
+//! operations**, which the server sequenced and logged as JSON (`journal.jsonl`,
+//! `snapshot.json`). The model converged, but only at block granularity: two people
+//! writing in the same paragraph each produced a "replace this paragraph", and the
+//! last to arrive erased the other. That flaw is what moved synchronization to a
+//! CRDT (`content.rs`, `doc.rs`), as in the Write application.
 //!
-//! Ce module ne sert donc plus à synchroniser quoi que ce soit. Il ne subsiste
-//! que pour **relire** ce qui a été écrit avant : au premier chargement d'un
-//! document ancien, le serveur rejoue son journal, obtient l'état JSON final, et
-//! s'en sert pour amorcer le document répliqué. Sans lui, un partage créé la
-//! veille se rouvrirait vide.
+//! So this module no longer synchronizes anything. It only remains to **re-read**
+//! what was written before: the first time an old document is loaded, the server
+//! replays its log, gets the final JSON state, and uses it to seed the replicated
+//! document. Without it, a share created the day before would reopen empty.
 //!
-//! Rien ici n'est atteignable depuis le réseau : aucune route, aucune trame de
-//! synchronisation ne construit plus d'`Operation`.
+//! Nothing here can be reached from the network: no route and no sync frame builds
+//! an `Operation` any more.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{AppError, AppResult};
 
-/// Longueur maximale d'un identifiant de bloc. Les identifiants sont fabriqués
-/// par le client (`newId('p')`) : on borne pour ne pas laisser gonfler l'état.
+/// Maximum length of a block id. Ids are made up by the client (`newId('p')`), so
+/// we cap them to keep the state from growing.
 pub const MAX_BLOCK_ID_LEN: usize = 128;
 
-/// Nombre maximal de blocs dans un document. Au-delà, ce n'est plus un document
-/// mais une base de données, et la pagination côté client s'effondrerait bien avant.
+/// Maximum number of blocks in a document. Beyond that it is no longer a document
+/// but a database, and pagination on the client would collapse long before.
 pub const MAX_BLOCKS: usize = 50_000;
 
-/// Une modification élémentaire du document.
+/// One elementary modification of the document.
 ///
-/// Le découpage suit celui du modèle : un document est une **suite ordonnée de
-/// blocs identifiés**, plus quelques attributs globaux. Chaque variante ne
-/// touche qu'à l'un ou l'autre, ce qui rend deux opérations sur des blocs
-/// distincts commutatives — d'où la fusion sans conflit du cas courant.
+/// The split follows the model: a document is an **ordered sequence of identified
+/// blocks**, plus a few global attributes. Each variant touches only one or the
+/// other, so two operations on different blocks commute, which is why the common
+/// case merges without conflict.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Operation {
-    /// Remplace un bloc existant. Le cas de la frappe : le client renvoie le
-    /// paragraphe entier, qui reste petit.
+    /// Replaces an existing block. The typing case: the client sends back the whole
+    /// paragraph, which stays small.
     ReplaceBlock {
         id: String,
         block: Value,
     },
-    /// Insère un bloc. `after` absent = en tête du document.
+    /// Inserts a block. A missing `after` means "at the top of the document".
     InsertBlock {
         block: Value,
         #[serde(default)]
@@ -57,11 +55,11 @@ pub enum Operation {
     RemoveBlock {
         id: String,
     },
-    /// Réordonne : la nouvelle suite complète des identifiants.
+    /// Reorders: the new complete sequence of ids.
     ReorderBlocks {
         order: Vec<String>,
     },
-    /// Métadonnées (titre, auteur).
+    /// Metadata (title, author).
     SetMeta {
         meta: Value,
     },
@@ -71,22 +69,21 @@ pub enum Operation {
     SetDefaults {
         defaults: Value,
     },
-    /// En-tête et pied de page. `null` retire le mobilier.
+    /// Header and footer. `null` removes the furniture.
     SetFurniture {
         furniture: Value,
     },
-    /// Remplace le document entier — ouverture d'un `.odt`, restauration.
+    /// Replaces the entire document (opening an `.odt`, restoring).
     ///
-    /// Volontairement distincte des autres : c'est la seule qui efface le
-    /// travail d'autrui, et la journaliser sous son propre nom permet de la
-    /// retrouver dans l'historique quand quelqu'un demande « où est passé mon
-    /// document ? ».
+    /// Deliberately separate from the others: it is the only one that erases other
+    /// people's work, and logging it under its own name makes it findable in the
+    /// history when someone asks "where did my document go?".
     ReplaceDocument {
         document: Value,
     },
 }
 
-/// Identifiant d'un bloc JSON, s'il en porte un utilisable.
+/// Id of a JSON block, if it carries a usable one.
 fn block_id(block: &Value) -> AppResult<String> {
     let id = block
         .get("id")
@@ -101,12 +98,12 @@ fn block_id(block: &Value) -> AppResult<String> {
     Ok(id.to_string())
 }
 
-/// Le document tel que le serveur le détient : du JSON, avec un contrat minimal.
+/// The document as the server holds it: JSON, with a minimal contract.
 ///
-/// Le serveur **ne valide pas le schéma** du document — c'est le client qui
-/// connaît `WriterDocumentState`, et dupliquer ici sa définition condamnerait
-/// les deux à évoluer ensemble. Il valide seulement ce dont il a besoin pour
-/// appliquer une opération : `blocks` est un tableau, un bloc a un `id`.
+/// The server **does not validate the document schema**: the client knows
+/// `WriterDocumentState`, and duplicating its definition here would condemn both
+/// to evolve together. It only validates what it needs to apply an operation:
+/// `blocks` is an array, and a block has an `id`.
 #[derive(Debug, Clone)]
 pub struct DocumentState {
     pub value: Value,
@@ -134,8 +131,8 @@ impl DocumentState {
             .as_object_mut()
             .ok_or_else(|| AppError::Operation("document: objet JSON attendu".into()))?;
 
-        // Un document sans `blocks` est celui qu'on vient de créer : on l'ouvre
-        // plutôt que de refuser la première frappe.
+        // A document with no `blocks` is one that has just been created: we open it
+        // rather than refuse the first keystroke.
         let entry = object
             .entry("blocks")
             .or_insert_with(|| Value::Array(Vec::new()));
@@ -152,11 +149,11 @@ impl DocumentState {
             .unwrap_or(0)
     }
 
-    /// Applique une opération. L'état n'est modifié qu'en cas de succès.
+    /// Applies an operation. The state is only modified on success.
     ///
-    /// Chaque variante valide **avant** d'écrire : une opération refusée à
-    /// mi-chemin laisserait un document dont personne ne connaîtrait l'état, et
-    /// que le journal ne permettrait pas de reconstituer.
+    /// Each variant validates **before** writing: an operation refused halfway would
+    /// leave a document whose state nobody knows and which the log could not
+    /// reconstruct.
     pub fn apply(&mut self, operation: &Operation) -> AppResult<()> {
         match operation {
             Operation::ReplaceBlock { id, block } => {
@@ -173,11 +170,10 @@ impl DocumentState {
 
                 match position {
                     Some(index) => blocks[index] = block.clone(),
-                    // Remplacer un bloc absent n'est pas une erreur : l'auteur a
-                    // pu écrire dans un paragraphe qu'un autre venait de
-                    // supprimer. Le refuser bloquerait sa session ; on ajoute le
-                    // bloc, et la suppression concurrente reste rattrapable par
-                    // l'historique.
+                    // Replacing a missing block is not an error: the author may have written into a
+                    // paragraph that somebody else had just deleted. Refusing it would block their
+                    // session, so we add the block, and the concurrent deletion can still be
+                    // recovered from the history.
                     None => blocks.push(block.clone()),
                 }
                 self.guard_size()
@@ -201,8 +197,8 @@ impl DocumentState {
                         let index = blocks.iter().position(|existing| {
                             existing.get("id").and_then(Value::as_str) == Some(anchor.as_str())
                         });
-                        // Ancre disparue : on pose en fin plutôt que de perdre le
-                        // bloc. Sa place exacte se corrigera au réordonnancement.
+                        // The anchor has disappeared: put the block at the end rather than lose it. Its
+                        // exact place will be corrected when the blocks are reordered.
                         match index {
                             Some(at) => blocks.insert(at + 1, block.clone()),
                             None => blocks.push(block.clone()),
@@ -231,9 +227,8 @@ impl DocumentState {
                         ordonne.push(restant.remove(index));
                     }
                 }
-                // Les blocs absents de l'ordre demandé sont **conservés**, en
-                // queue : un client dont la vue est en retard ne doit pas
-                // supprimer, par omission, un bloc qu'il n'a pas encore reçu.
+                // Blocks missing from the requested order are **kept**, at the end: a client whose
+                // view is behind must not delete, by omission, a block it has not received yet.
                 ordonne.append(&mut restant);
                 *blocks = ordonne;
                 Ok(())
@@ -261,8 +256,8 @@ impl DocumentState {
             .as_object_mut()
             .ok_or_else(|| AppError::Operation("document: objet JSON attendu".into()))?;
 
-        // `null` retire le champ : c'est ainsi qu'on enlève un en-tête de page,
-        // là où écrire `null` laisserait au client un champ défini mais vide.
+        // `null` removes the field: this is how a page header is taken away, whereas
+        // writing `null` would leave the client with a field that is defined but empty.
         if value.is_null() {
             object.remove(name);
         } else {
@@ -279,23 +274,23 @@ impl DocumentState {
     }
 }
 
-/// Une opération telle qu'elle était journalisée : numérotée et signée.
+/// An operation as it was logged: numbered and signed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SequencedOperation {
-    /// Numéro d'ordre attribué par l'ancien séquenceur.
+    /// Sequence number assigned by the old sequencer.
     pub revision: u64,
-    /// Auteur, pour l'affichage et l'historique.
+    /// Author, for display and history.
     pub author: String,
     #[serde(flatten)]
     pub operation: Operation,
 }
 
-/// Rejoue un journal ancien par-dessus son instantané et rend l'état final.
+/// Replays an old log on top of its snapshot and returns the final state.
 ///
-/// Les opérations antérieures à l'instantané y sont déjà incluses : les rejouer
-/// les compterait deux fois. Celles qui ne s'appliquent plus — un bloc
-/// entre-temps disparu — sont ignorées avec un avertissement plutôt que de
-/// rendre le document inouvrable.
+/// Operations older than the snapshot are already included in it: replaying them
+/// would count them twice. Those that no longer apply (a block that has since
+/// disappeared) are ignored with a warning rather than making the document
+/// impossible to open.
 pub fn replay(
     snapshot: Option<(u64, Value)>,
     operations: &[SequencedOperation],
@@ -355,9 +350,9 @@ mod tests {
 
     #[test]
     fn replace_block_refuse_un_identifiant_qui_ment() {
-        // Sans ce contrôle, un client pourrait écraser le bloc « a » en annonçant
-        // modifier « b » : l'identifiant du corps ferait autorité sur celui de
-        // l'opération, et le journal serait illisible.
+        // Without this check, a client could overwrite block "a" by announcing that it
+        // modifies "b": the id in the body would override the one in the operation, and the
+        // log would become unreadable.
         let mut state = document(&["a", "b"]);
         let resultat = state.apply(&Operation::ReplaceBlock {
             id: "b".into(),
@@ -369,8 +364,8 @@ mod tests {
 
     #[test]
     fn replace_dun_bloc_supprime_par_un_autre_ne_casse_pas_la_session() {
-        // Cas concurrent réel : Alice tape dans un paragraphe que Bob vient de
-        // supprimer. L'opération doit passer — refuser fermerait la session d'Alice.
+        // A real concurrent case: Alice types into a paragraph that Bob has just deleted.
+        // The operation must go through, because refusing it would close Alice's session.
         let mut state = document(&["a"]);
         state
             .apply(&Operation::ReplaceBlock {
@@ -430,8 +425,8 @@ mod tests {
 
     #[test]
     fn reorder_conserve_les_blocs_absents_de_lordre() {
-        // Un client en retard d'une insertion ne doit pas supprimer, par omission,
-        // le bloc qu'il n'a pas encore reçu.
+        // A client that is one insertion behind must not delete, by omission, the block it
+        // has not received yet.
         let mut state = document(&["a", "b", "c"]);
         state
             .apply(&Operation::ReorderBlocks {
@@ -461,8 +456,8 @@ mod tests {
 
     #[test]
     fn les_operations_sur_des_blocs_distincts_commutent() {
-        // C'est la propriété qui fait converger deux rédactions parallèles : le
-        // résultat ne dépend pas de l'ordre tant que les blocs diffèrent.
+        // This is the property that makes two parallel editing sessions converge: the
+        // result does not depend on the order as long as the blocks differ.
         let alice = Operation::ReplaceBlock {
             id: "a".into(),
             block: bloc("a", "Alice"),
@@ -485,8 +480,8 @@ mod tests {
 
     #[test]
     fn une_operation_se_serialise_et_se_relit() {
-        // Le journal contient du JSON : ce qu'on écrit doit se relire à
-        // l'identique, sinon un redémarrage perdrait des modifications.
+        // The log contains JSON: what we write must read back identically, otherwise a
+        // restart would lose modifications.
         let operation = Operation::InsertBlock {
             block: bloc("x", "contenu"),
             after: Some("w".into()),

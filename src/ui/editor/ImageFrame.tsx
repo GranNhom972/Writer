@@ -1,33 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Cadre image dans le texte : légende, sélection, redimensionnement, rognage.
+ * Image frame inside the text: caption, selection, resizing, cropping.
  *
- * Partage des rôles, conforme à la demande :
+ * Split of roles, as requested:
  *
- *  - la **fenêtre** règle la légende — titre, mode de numérotation, position,
- *    alignement — ainsi que le **rognage**, qu'on y ouvre en double-cliquant
- *    l'aperçu : c'est là qu'on dispose d'une image assez grande pour désigner
- *    précisément ce que l'on garde, et la taille s'y saisit au millimètre ;
- *  - l'**éditeur**, ici, donne la prise directe : on saisit l'image dans le
- *    texte et on la retaille à la souris, sans rien ouvrir.
+ *  - the **window** sets the caption (title, numbering mode, position, alignment) as well as the **crop**, which you open by double-clicking the preview: that is where you have an image large enough to designate
+ *    precisely what you keep, and where the size is entered to the millimeter;
+ *  - the **editor**, here, gives direct manipulation: you grab the image in the text and resize it with the mouse, without opening anything.
  *
- * ## Ce que le moteur impose
+ * ## What the engine imposes
  *
- * La hauteur du cadre — image **et** légende — est calculée par `lineBreak`
- * (`captionHeightPx`), qui l'a déjà comptée comme ascendance de la ligne. Ce
- * composant ne peut donc pas décider de sa propre taille : il remplit
- * exactement la boîte qu'on lui donne. Toute marge ajoutée ici ferait diverger
- * le rendu du calcul, et le curseur dériverait du texte.
+ * The height of the frame, image **and** caption, is computed by `lineBreak` (`captionHeightPx`), which already counted it as the ascent of the line. This component therefore cannot decide its own size: it fills
+ * exactly the box it is given. Any margin added here would make the rendering diverge from the calculation, and the cursor would drift away from the text.
  *
- * ## Le geste de redimensionnement
+ * ## The resize gesture
  *
- * Le rapport est **conservé par défaut** : déformer une image est presque
- * toujours un accident. `Alt` le relâche pour qui le veut vraiment. Les
- * transactions d'un même glissement se regroupent en une seule entrée
- * d'historique (`dragGroup`), sinon défaire une poignée tirée demanderait
- * autant de `Ctrl+Z` qu'elle a produit d'événements.
+ * The ratio is **kept by default**: distorting an image is almost always an accident. `Alt` releases it for whoever really wants that. The transactions of one drag are grouped into a single history entry
+ * (`dragGroup`), otherwise undoing one dragged handle would take as many `Ctrl+Z` as it produced events.
  */
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
@@ -50,22 +41,22 @@ import { ptToPx, pxToPt } from '../../domain/document/units';
 import type { RunFormatting } from '../../domain/document/types';
 import { CAPTION_FONT_RATIO, CAPTION_LINE_RATIO } from '../../domain/engine/lineBreak';
 
-/** Côté d'une poignée d'angle, en pixels de page. */
+/** Side of a corner handle, in page pixels. */
 const HANDLE_PX = 10;
 
 export interface ImageFrameProps {
   formatting: RunFormatting;
   blockId: string;
   offset: number;
-  /** Largeur totale du cadre — image seule, hors légende. */
+  /** Total width of the frame: the image alone, without the caption. */
   widthPx: number;
-  /** Hauteur de l'image seule. */
+  /** Height of the image alone. */
   imageHeightPx: number;
-  /** Hauteur réservée à la légende, blanc compris. Zéro s'il n'y en a pas. */
+  /** Height reserved for the caption, white space included. Zero if there is none. */
   captionHeightPx: number;
-  /** Numéro de figure, ou `null` en mode manuel. */
+  /** Figure number, or `null` in manual mode. */
   figureNumber: number | null;
-  /** Taille de police du corps du document, en points. */
+  /** Font size of the document body, in points. */
   bodyFontSizePt: number;
   selected: boolean;
   zoom: number;
@@ -73,25 +64,23 @@ export interface ImageFrameProps {
   onSelect: (blockId: string, offset: number) => void;
   onOpenDialog: (blockId: string, offset: number) => void;
   onResize: (blockId: string, offset: number, widthPt: number, heightPt: number) => void;
-  /** Change l'intégration au texte (`SwFmtSurround`). Absent = réglage indisponible. */
+  /** Changes how the image fits into the text (`SwFmtSurround`). Absent = setting unavailable. */
   onWrapChange?: (blockId: string, offset: number, mode: ImageWrapMode) => void;
   /**
-   * Déplace un cadre **flottant**, en points, dans le repère de son ancre.
+   * Moves a **floating** frame, in points, in the frame of reference of its anchor.
    *
-   * Appelé en continu pendant le glissement : le cadre suit le pointeur.
+   * Called continuously during the drag: the frame follows the pointer.
    */
   onMove?: (blockId: string, offset: number, xPt: number, yPt: number) => void;
   /**
-   * Fin du glissement, aux coordonnées de la fenêtre.
+   * End of the drag, at window coordinates.
    *
-   * C'est l'éditeur qui sait quel paragraphe se trouve sous ce point ; ce
-   * composant ne connaît que sa propre boîte. Il lui passe donc le point brut
-   * et le laisse ré-ancrer (`SwFEShell::SetAnchor`).
+   * It is the editor that knows which paragraph is under that point; this component only knows its own box. So it hands it the raw point and lets it re-anchor (`SwFEShell::SetAnchor`).
    */
   onDrop?: (blockId: string, offset: number, clientX: number, clientY: number) => void;
 }
 
-/** Les quatre angles, avec leur curseur et le sens de leur tirage. */
+/** The four corners, with their cursor and the direction of their drag. */
 const CORNERS = [
   { key: 'nw', cursor: 'nwse-resize', dx: -1, dy: -1, top: 0, left: 0 },
   { key: 'ne', cursor: 'nesw-resize', dx: 1, dy: -1, top: 0, left: 1 },
@@ -123,14 +112,10 @@ export function ImageFrame({
   const deplacable = Boolean(onDrop) && !readOnly;
 
   /**
-   * Décalage visuel pendant le glissement d'une image **du fil du texte**.
+   * Visual offset while dragging an image **from the text flow**.
    *
-   * Un cadre flottant se déplace pour de vrai — le modèle porte sa position, et
-   * la page le repeint où il va. Une image dans la ligne n'a pas de position à
-   * modifier : elle n'en prend une qu'au moment où on la lâche, quand on sait
-   * de quel paragraphe elle relève. Entre les deux, ce décalage purement
-   * graphique la fait suivre le pointeur — sans lui, le geste ne montre rien et
-   * l'on croit que rien ne se passe.
+   * A floating frame really moves: the model carries its position, and the page repaints it where it goes. An image in the line has no position to modify: it only takes one when it is dropped, when we know which
+   * paragraph it belongs to. In between, this purely graphic offset makes it follow the pointer; without it, the gesture shows nothing and people think nothing is happening.
    */
   const [glissement, setGlissement] = useState<{ x: number; y: number } | null>(null);
   const caption = imageCaptionOf(formatting);
@@ -139,7 +124,7 @@ export function ImageFrame({
   const decoupe = hasCrop(crop) ? cropGeometry(crop, widthPx, imageHeightPx) : null;
   const alt = formatting.imageAlt ?? '';
 
-  /* ------------------------------------------------- redimensionnement */
+  /* ------------------------------------------------- resizing */
 
   const resize = useRef<{
     startX: number;
@@ -155,9 +140,7 @@ export function ImageFrame({
       const drag = resize.current;
       if (!drag) return;
 
-      // Le geste se mesure depuis son **origine**, non depuis le dernier
-      // événement : la taille est absolue, et cumuler des deltas y accumulerait
-      // les arrondis d'un `clampSize` à chaque pas.
+      // The gesture is measured from its **origin**, not from the last event: the size is absolute, and accumulating deltas would accumulate the rounding of a `clampSize` at each step.
       const deltaXPt = pxToPt((event.clientX - drag.startX) / zoom) * drag.dx;
       const deltaYPt = pxToPt((event.clientY - drag.startY) / zoom) * drag.dy;
 
@@ -166,12 +149,11 @@ export function ImageFrame({
       let heightPt: number;
 
       if (event.altKey) {
-        // Déformation assumée : chaque axe suit sa propre poignée.
+        // Deliberate distortion: each axis follows its own handle.
         widthPt = drag.widthPt + deltaXPt;
         heightPt = drag.heightPt + deltaYPt;
       } else {
-        // Rapport conservé. On suit l'axe le plus sollicité, pour que la
-        // diagonale réponde sans à-coups quel que soit le sens du geste.
+        // Ratio kept. We follow the axis that is stressed the most, so that the diagonal responds smoothly whatever the direction of the gesture.
         const parWidth = drag.widthPt + deltaXPt;
         const parHeight = (drag.heightPt + deltaYPt) / Math.max(0.0001, ratio);
         widthPt = Math.abs(deltaXPt) >= Math.abs(deltaYPt) ? parWidth : parHeight;
@@ -189,28 +171,26 @@ export function ImageFrame({
     document.body.classList.remove('writer-resizing-image');
   }, []);
 
-  /* ---------------------------------------------------- déplacement */
+  /* ---------------------------------------------------- moving */
 
   /**
-   * Glissement d'un cadre flottant.
+   * Dragging a floating frame.
    *
-   * Même principe que le redimensionnement : le geste se mesure **depuis son
-   * origine**, non depuis le dernier événement. La position est absolue dans
-   * l'ancre, et cumuler des deltas y accumulerait les arrondis de conversion
-   * point ↔ pixel — le cadre dériverait sous le curseur au fil du glissement.
+   * Same principle as resizing: the gesture is measured **from its origin**, not from the last event. The position is absolute within the anchor, and accumulating deltas would accumulate the rounding of the
+   * point ↔ pixel conversion: the frame would drift under the cursor along the drag.
    */
   const move = useRef<{
     startX: number;
     startY: number;
     xPt: number;
     yPt: number;
-    /** Le cadre flotte : le modèle porte sa position et la suit en direct. */
+    /** The frame floats: the model carries its position and follows it live. */
     flottant: boolean;
-    /** Le pointeur a-t-il vraiment bougé ? Un simple clic ne déplace rien. */
+    /** Has the pointer really moved? A simple click moves nothing. */
     bouge: boolean;
   } | null>(null);
 
-  /** Sous ce seuil, en pixels, le geste est un clic et non un glissement. */
+  /** Under this threshold, in pixels, the gesture is a click and not a drag. */
   const SEUIL_PX = 3;
 
   const onMovePointer = useCallback(
@@ -240,8 +220,7 @@ export function ImageFrame({
       setGlissement(null);
       document.body.classList.remove('writer-resizing-image');
 
-      // Un clic n'est pas un dépôt : ré-ancrer sur place remplacerait le run et
-      // ferait perdre la sélection à chaque fois qu'on touche l'image.
+      // A click is not a drop: re-anchoring in place would replace the run and lose the selection every time the image is touched.
       if (drag.bouge && event && onDrop) onDrop(blockId, offset, event.clientX, event.clientY);
     },
     [blockId, offset, onDrop],
@@ -261,8 +240,7 @@ export function ImageFrame({
   }, [onMovePointer, endMove]);
 
   useEffect(() => {
-    // Écouteurs sur la fenêtre : un glissement rapide quitte la poignée de
-    // 10 px bien avant que la souris ne s'arrête.
+    // Listeners on the window: a fast drag leaves the 10 px handle long before the mouse stops.
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', endResize);
     window.addEventListener('pointercancel', endResize);
@@ -279,9 +257,8 @@ export function ImageFrame({
   const margePx = ptToPx(imageMarginPt(formatting));
 
   const captionStyle = {
-    // Le blanc est posé **entre** l'image et la légende, du bon côté selon que
-    // celle-ci est au-dessus ou au-dessous. Il était auparavant retranché de la
-    // hauteur du texte et se retrouvait en bas du cadre, en pur vide.
+    // The white space is placed **between** the image and the caption, on the right side depending on whether the caption is above or below. It used to be subtracted from the height of the text and ended up at the
+    // bottom of the frame, as pure emptiness.
     height: `${Math.max(0, captionBoxPx - gapPx)}px`,
     [caption.position === 'above' ? 'marginBottom' : 'marginTop']: `${gapPx}px`,
     fontSize: `${captionFontPx}px`,
@@ -305,13 +282,11 @@ export function ImageFrame({
         width: `${widthPx + margePx * 2}px`,
         height: `${imageHeightPx + captionBoxPx + margePx * 2}px`,
         padding: `${margePx}px`,
-        // Le cadre est posé **sur** la ligne de base et monte d'autant : c'est
-        // ce que fait `SwFlyCntFrm`, et c'est la hauteur que le moteur a déjà
-        // comptée comme ascendance.
+        // The frame is placed **on** the baseline and rises by as much: that is what `SwFlyCntFrm` does, and it is the height the engine has already counted as ascent.
         verticalAlign: 'baseline',
         position: 'relative',
         ...(deplacable ? { cursor: 'move', touchAction: 'none' } : {}),
-        // Le fantôme d'une image du fil, pendant qu'on la déplace.
+        // The ghost of an in-flow image, while it is being moved.
         ...(glissement
           ? {
               transform: `translate(${glissement.x}px, ${glissement.y}px)`,
@@ -331,13 +306,10 @@ export function ImageFrame({
         onSelect(blockId, offset);
 
         /*
-         * Toute image se saisit et se pose — `SwFEShell::BeginDrag`.
+         * Every image can be grabbed and dropped: `SwFEShell::BeginDrag`.
          *
-         * Le geste est le même dans les deux cas, seul son effet diffère : un
-         * cadre flottant change de coordonnées, une image du fil change de
-         * place dans le texte. Réserver le glissement aux cadres flottants
-         * laissait sans réponse le geste le plus naturel sur une image, et le
-         * mode par défaut est justement celui du fil.
+         * The gesture is the same in both cases, only its effect differs: a floating frame changes coordinates, an in-flow image changes place in the text. Reserving the drag for floating frames left the most natural
+         * gesture on an image unanswered, and the default mode is precisely the in-flow one.
          */
         if (!deplacable || event.button !== 0) return;
         event.preventDefault();
@@ -397,8 +369,7 @@ export function ImageFrame({
               className="writer-image__handle"
               style={{
                 cursor: corner.cursor,
-                // Les poignées se posent sur les angles de l'**image**, pas du
-                // cadre : la légende n'est pas redimensionnable.
+                // The handles sit on the corners of the **image**, not of the frame: the caption cannot be resized.
                 left: corner.left ? `${widthPx - HANDLE_PX / 2}px` : `${-HANDLE_PX / 2}px`,
                 top:
                   (caption.position === 'above' ? captionBoxPx : 0) +
@@ -425,14 +396,7 @@ export function ImageFrame({
           ))
         : null}
 
-      {/*
-        Barre d'actions de l'image sélectionnée.
-
-        Le **rognage n'y est pas** : il se règle dans la fenêtre, en
-        double-cliquant l'aperçu — c'est là qu'on dispose d'une image assez
-        grande pour désigner précisément ce qu'on garde. L'éditeur, lui, garde
-        le geste direct : saisir l'image et la retailler.
-      */}
+      {/* Action bar of the selected image.  **Cropping is not in it**: it is set in the window, by double-clicking the preview, where you have an image large enough to designate precisely what you keep. The editor keeps the direct gesture: grab the image and resize it. */}
       {selected && !readOnly ? (
         <span
           className="writer-image__bar"

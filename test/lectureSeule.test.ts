@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Lecture seule — un partage sans droit d'écriture ne doit pas laisser écrire.
+ * Read-only: a share without write permission must not let anyone write.
  *
- * Le refus du serveur ne suffisait pas : la frappe était acceptée localement,
- * s'affichait, puis disparaissait à la fermeture de l'onglet. On croyait avoir
- * écrit. La garde vit désormais dans l'éditeur, à l'entonnoir des transactions.
+ * The server's refusal was not enough: the keystroke was accepted locally, displayed, then disappeared when the tab was closed. People believed they had written. The guard now lives in the editor, at the funnel of
+ * transactions.
  */
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, createParagraph } from '../src/domain/document/document';
@@ -37,8 +36,7 @@ describe('transactionAutorisee', () => {
   });
 
   it('laisse naviguer et sélectionner en lecture seule', () => {
-    // Le document est inchangé : seule la sélection bouge. Bloquer cela
-    // empêcherait de lire — et de copier, ce qu'un lecteur a le droit de faire.
+    // The document is unchanged: only the selection moves. Blocking that would prevent reading, and copying, which a reader has the right to do.
     const avant = etatAvecTexte('Bonjour');
     const apres = { ...avant, selection: { ...avant.selection } };
 
@@ -47,10 +45,8 @@ describe('transactionAutorisee', () => {
   });
 
   it('juge sur le document, pas sur l’intention', () => {
-    // Une commande qui ne change rien — mettre en gras un texte déjà gras,
-    // supprimer dans un document vide — passe même en lecture seule : elle
-    // n'écrit rien. C'est la conséquence directe de comparer les documents
-    // plutôt que d'énumérer les commandes interdites.
+    // A command that changes nothing (making already bold text bold, deleting in an empty document) goes through even in read-only mode: it writes nothing. This is the direct consequence of comparing documents rather than
+    // listing the forbidden commands.
     const avant = etatAvecTexte('Bonjour');
     const apres = { ...avant };
 

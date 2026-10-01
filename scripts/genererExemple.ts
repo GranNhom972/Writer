@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Génère `exemple/doc_test.odt` — le document de démonstration de 25 pages.
+ * Generates `exemple/doc_test.odt`: the 25-page demo document.
  *
- * Le but n'est pas de faire joli : c'est un **banc d'essai exécutable**. Chaque
- * chapitre exerce un sous-système porté depuis OpenOffice, de sorte qu'ouvrir
- * le fichier dans Writer 4.1 (ou dans l'éditeur web) suffise à vérifier que le
- * portage tient — les listes ont gardé leur numérotation, les notes n'écrasent
- * pas le corps, l'habillage écarte bien le texte, le sommaire renvoie aux bons
- * numéros de page.
+ * The goal is not to look good: it is an **executable test bench**. Each chapter exercises a subsystem ported from OpenOffice, so that opening
+ * the file in Writer 4.1 (or in the web editor) is enough to check that the port holds up: lists kept their numbering, notes do not overwrite the
+ * body, wrapping really moves the text aside, and the table of contents points to the right page numbers.
  *
- * Le script contrôle lui-même sa sortie : il pagine le document, refuse de
- * l'écrire s'il ne fait pas la longueur voulue, et vérifie l'aller-retour ODF
- * avant d'enregistrer. Un fichier d'exemple faux serait pire qu'aucun.
+ * The script checks its own output: it paginates the document, refuses to write it if it is not the intended length, and verifies the ODF round
+ * trip before saving. A wrong sample file would be worse than none.
  *
  *   npx vite-node scripts/genererExemple.ts
  */
@@ -47,24 +43,23 @@ import type {
   WriterDocumentState,
 } from '../src/domain/document/types';
 
-/** Longueur visée. Le script échoue hors de cette fourchette. */
+/** Target length. The script fails outside this range. */
 const PAGES_MIN = 25;
 const PAGES_MAX = 27;
 
 /**
- * Une image PNG 1×1 en `data:`.
+ * A 1×1 PNG image as a `data:` URL.
  *
- * Volontairement minuscule : ce qui est démontré ici est l'**ancrage** et
- * l'habillage, pas la qualité de l'image. Un fichier d'exemple de plusieurs
- * mégaoctets serait pénible à cloner pour rien.
+ * Deliberately tiny: what is demonstrated here is the **anchoring** and the wrapping, not the quality of the image. A sample file of several
+ * megabytes would be tiresome to clone for nothing.
  */
 const PNG_1X1 =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
-/* ------------------------------------------------------------- fabriquants */
+/* ------------------------------------------------------------- builders */
 
 let compteur = 0;
-/** Identifiant lisible et **déterministe** : deux exécutions donnent le même fichier. */
+/** Readable and **deterministic** id: two runs give the same file. */
 function id(prefixe: string): string {
   compteur += 1;
   return `${prefixe}${compteur}`;
@@ -92,7 +87,7 @@ function elementListe(
   return { ...para(texte), listKind: kind, listId, listLevel: level, ...extra };
 }
 
-/** Texte de remplissage : du vrai français, pour que la césure ait du sens. */
+/** Filler text: real French, so that line breaking makes sense. */
 const LOREM = [
   "La typographie n'est pas un ornement : c'est ce qui rend un texte lisible sans que le lecteur ait à y penser.",
   "Un moteur de composition décide, pour chaque ligne, où couper, combien d'espace ajouter entre les mots, et si la ligne suivante appartient encore à la même page.",
@@ -105,13 +100,13 @@ function paragrapheLorem(index: number): ParagraphNode {
   return para(`${LOREM[index % LOREM.length]} ${LOREM[(index + 2) % LOREM.length]}`);
 }
 
-/* -------------------------------------------------------------- le document */
+/* -------------------------------------------------------------- the document */
 
 function construireDocument(): WriterDocumentState {
   const base = createEmptyDocument('Banc d\'essai — portage OpenOffice Writer');
   const blocs: DocumentBlock[] = [];
 
-  /* -- Page de garde et sommaire ------------------------------------------ */
+  /* -- Cover page and table of contents --------------------------------- */
 
   blocs.push(
     runsPara(
@@ -143,7 +138,7 @@ function construireDocument(): WriterDocumentState {
   const toc = { ...createToc({ title: 'Table des matières', maxLevel: 3 }), id: 'toc_principal' };
   blocs.push({ ...toc, pageBreakBefore: true });
 
-  /* -- 1. Composition de ligne -------------------------------------------- */
+  /* -- 1. Line composition --------------------------------------------- */
 
   blocs.push({ ...titre('Composition de ligne et pagination', 1), pageBreakBefore: true });
   blocs.push(para('SwTxtGuess::Guess, SwTxtFormatter, WidowsAndOrphans', { alignment: 'left' }));
@@ -168,7 +163,7 @@ function construireDocument(): WriterDocumentState {
   blocs.push({ ...paragrapheLorem(3), keepTogether: true, alignment: 'justify' });
   for (let i = 0; i < 4; i += 1) blocs.push({ ...paragrapheLorem(i + 2), alignment: 'justify' });
 
-  /* -- 2. Caractères et styles -------------------------------------------- */
+  /* -- 2. Characters and styles ----------------------------------------- */
 
   blocs.push({ ...titre('Attributs de caractère', 1), pageBreakBefore: true });
   blocs.push(para('SwpHints, SwTxtAttr, SwAttrSet'));
@@ -219,7 +214,7 @@ function construireDocument(): WriterDocumentState {
   blocs.push(titre('Titre de niveau 4', 4));
   blocs.push(para('Ce titre-ci n\'apparaît pas dans la table des matières, par construction.'));
 
-  /* -- 3. Listes ----------------------------------------------------------- */
+  /* -- 3. Lists --------------------------------------------------------- */
 
   blocs.push({ ...titre('Listes et numérotation', 1), pageBreakBefore: true });
   blocs.push(para('SwNumRule, SwNumberTree, SwNodeNum'));
@@ -268,7 +263,7 @@ function construireDocument(): WriterDocumentState {
   blocs.push(elementListe('Porter la pagination', 'task', listeT, 0, { listChecked: true }));
   blocs.push(elementListe('Porter les sections multicolonnes', 'task', listeT, 0));
 
-  /* -- 4. Tableaux --------------------------------------------------------- */
+  /* -- 4. Tables -------------------------------------------------------- */
 
   blocs.push({ ...titre('Tableaux', 1), pageBreakBefore: true });
   blocs.push(para('SwTable, SwTableLine, SwTableBox, SwTabFrm'));
@@ -320,7 +315,7 @@ function construireDocument(): WriterDocumentState {
   const tableauFinal = docScinde.blocks.find((b) => b.type === 'table');
   if (tableauFinal) blocs.push(tableauFinal);
 
-  /* -- 5. Notes de bas de page --------------------------------------------- */
+  /* -- 5. Footnotes ----------------------------------------------------- */
 
   blocs.push({ ...titre('Notes de bas de page', 1), pageBreakBefore: true });
   blocs.push(para('SwFtnFrm, SwFtnContFrm, SwFmtFtn'));
@@ -360,7 +355,7 @@ function construireDocument(): WriterDocumentState {
     ], { alignment: 'justify' }),
   );
 
-  /* -- 6. Images et habillage ---------------------------------------------- */
+  /* -- 6. Images and wrapping ------------------------------------------- */
 
   blocs.push({ ...titre('Images, ancrage et habillage', 1), pageBreakBefore: true });
   blocs.push(para('SwFlyFrm, SwFlyCntFrm, SwFmtSurround, SwTxtFly'));
@@ -428,7 +423,7 @@ function construireDocument(): WriterDocumentState {
   );
   for (let i = 0; i < 3; i += 1) blocs.push({ ...paragrapheLorem(i + 1), alignment: 'justify' });
 
-  /* -- 7. Formules --------------------------------------------------------- */
+  /* -- 7. Formulas ------------------------------------------------------ */
 
   blocs.push({ ...titre('Formules mathématiques', 1), pageBreakBefore: true });
   blocs.push(para('starmath, transposé en LaTeX/KaTeX'));
@@ -452,7 +447,7 @@ function construireDocument(): WriterDocumentState {
   );
   blocs.push({ ...paragrapheLorem(4), alignment: 'justify' });
 
-  /* -- 8. Retraits et espacements ------------------------------------------ */
+  /* -- 8. Indents and spacing ------------------------------------------- */
 
   blocs.push({ ...titre('Retraits, espacements et sauts', 1), pageBreakBefore: true });
   blocs.push(para('SvxLRSpaceItem, SvxULSpaceItem, SwFmtPageDesc'));
@@ -466,7 +461,7 @@ function construireDocument(): WriterDocumentState {
   blocs.push({ ...paragrapheLorem(0), lineSpacing: 2, alignment: 'justify' });
   blocs.push({ ...paragrapheLorem(1), marginTopPt: 18, marginBottomPt: 18, alignment: 'justify' });
 
-  /* -- 9. Signets et renvois ------------------------------------------------ */
+  /* -- 9. Bookmarks and cross-references -------------------------------- */
 
   blocs.push({ ...titre('Signets et renvois internes', 1), pageBreakBefore: true });
   blocs.push(para('SwBookmark, IDocumentMarkAccess, SwGetRefField'));
@@ -487,7 +482,7 @@ function construireDocument(): WriterDocumentState {
   );
   for (let i = 0; i < 4; i += 1) blocs.push({ ...paragrapheLorem(i), alignment: 'justify' });
 
-  /* -- 10. Commentaires et révisions ---------------------------------------- */
+  /* -- 10. Comments and revisions --------------------------------------- */
 
   blocs.push({ ...titre('Commentaires et suivi des modifications', 1), pageBreakBefore: true });
   blocs.push(para('SwPostItField, SwPostItMgr, SwRangeRedline, SwRedlineTbl'));
@@ -510,7 +505,7 @@ function construireDocument(): WriterDocumentState {
   blocs.push(revise);
   for (let i = 0; i < 5; i += 1) blocs.push({ ...paragrapheLorem(i), alignment: 'justify' });
 
-  /* -- 11. Remplissage jusqu'à la longueur voulue --------------------------- */
+  /* -- 11. Padding up to the intended length ---------------------------- */
 
   blocs.push({ ...titre('Annexe — matière de pagination', 1), pageBreakBefore: true });
   blocs.push(
@@ -523,9 +518,8 @@ function construireDocument(): WriterDocumentState {
     ),
   );
 
-  // Sections d'annexe : le nombre est calibré pour atteindre la fourchette de
-  // pages contrôlée en fin de script. Les titres sont numérotés pour qu'un
-  // sommaire long reste vérifiable d'un coup d'œil.
+  // Appendix sections: the number is calibrated to reach the page range checked at the end of the script. The titles are numbered so that a long
+  // table of contents stays verifiable at a glance.
   const SECTIONS_ANNEXE = 9;
   const PARAGRAPHES_PAR_SECTION = 13;
 
@@ -545,7 +539,7 @@ function construireDocument(): WriterDocumentState {
     ),
   );
 
-  /* -- Assemblage et annotations -------------------------------------------- */
+  /* -- Assembly and annotations ----------------------------------------- */
 
   let doc: WriterDocumentState = {
     ...base,
@@ -568,8 +562,7 @@ function construireDocument(): WriterDocumentState {
       pageNumber: true,
       pageNumberFormat: 'page-sur',
       startPageNumber: 1,
-      // La page de garde ne porte ni en-tête ni pied : c'est la convention de
-      // `SwPageDesc` pour une première page distincte.
+      // The cover page carries neither header nor footer: that is the `SwPageDesc` convention for a distinct first page.
       onFirstPage: false,
       differentFirstPage: true,
       differentEvenOdd: false,
@@ -591,14 +584,14 @@ function construireDocument(): WriterDocumentState {
     blocks: blocs,
   };
 
-  // Signet : posé après l'assemblage, car il modifie les runs du paragraphe.
+  // Bookmark: set after assembly, because it modifies the runs of the paragraph.
   doc = setBookmark(
     doc,
     { blockId: cible.id, startOffset: 0, endOffset: 13 },
     'point_de_repere',
   );
 
-  // Commentaires : un fil avec réponse, un fil résolu.
+  // Comments: one thread with a reply, one resolved thread.
   const premier = addComment(
     doc,
     { blockId: commente.id, startOffset: 0, endOffset: 24 },
@@ -623,7 +616,7 @@ function construireDocument(): WriterDocumentState {
   );
   doc = resolveCommentThread(second.doc, second.threadId, true);
 
-  // Révisions : une insertion, une suppression, un changement de format.
+  // Revisions: one insertion, one deletion, one formatting change.
   doc = markInserted(doc, revise.id, 0, 18, { author: 'Alice', now: '2026-01-03T08:00:00.000Z' });
   doc = markDeleted(doc, revise.id, 40, 60, { author: 'Bob', now: '2026-01-03T08:15:00.000Z' }).doc;
   doc = markFormatted(doc, revise.id, 70, 90, { author: 'Alice', now: '2026-01-03T08:30:00.000Z' });
@@ -631,7 +624,7 @@ function construireDocument(): WriterDocumentState {
   return doc;
 }
 
-/* ---------------------------------------------------------------- contrôles */
+/* ---------------------------------------------------------------- checks */
 
 async function main(): Promise<void> {
   const doc = construireDocument();
@@ -648,7 +641,7 @@ async function main(): Promise<void> {
     );
   }
 
-  // Contrôles de contenu : mieux vaut échouer ici qu'écrire un exemple faux.
+  // Content checks: better to fail here than write a wrong sample.
   const verifications: [string, boolean][] = [
     ['un sommaire', doc.blocks.some((b) => b.type === 'toc')],
     ['des tableaux', doc.blocks.filter((b) => b.type === 'table').length >= 2],
@@ -670,7 +663,7 @@ async function main(): Promise<void> {
     console.log(`  ✓ ${quoi}`);
   }
 
-  // L'invariant de la zone de notes, vérifié sur le document réel.
+  // The invariant of the footnote area, verified on the real document.
   for (const page of layout.pages) {
     const total = page.usedHeightPx + (page.footnoteAreaHeightPx ?? 0);
     if (total > layout.geometry.contentHeightPx + 0.5) {
@@ -679,7 +672,7 @@ async function main(): Promise<void> {
   }
   console.log('  ✓ corps + notes tiennent dans la hauteur utile, sur toutes les pages');
 
-  // Le XML doit contenir les balises des sous-systèmes annoncés.
+  // The XML must contain the tags of the announced subsystems.
   const xml = buildContentXml(doc);
   const balises = [
     'text:table-of-content',
@@ -705,8 +698,7 @@ async function main(): Promise<void> {
   const chemin = resolve(dossier, 'doc_test.odt');
   await writeFile(chemin, octets);
 
-  // Le texte brut sert de témoin lisible : un diff sur ce fichier montre
-  // immédiatement ce qu'une régression aurait changé dans le contenu.
+  // The plain text serves as a readable witness: a diff on this file immediately shows what a regression would have changed in the content.
   await writeFile(resolve(dossier, 'doc_test.txt'), documentPlainText(doc), 'utf-8');
 
   console.log(`\nÉcrit : exemple/doc_test.odt (${(octets.length / 1024).toFixed(1)} Kio, ${pages} pages)`);

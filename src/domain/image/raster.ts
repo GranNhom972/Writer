@@ -1,24 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Adaptateur d'images : décodage et rastérisation par le navigateur.
+ * Image adapter: decoding and rasterization by the browser.
  *
- * Ce module est le pendant de `CanvasTextMeasurer` dans `engine/measure.ts` :
- * la couche 2 reste pure, et **ce fichier seul** connaît le DOM. La raison est
- * la même que pour la mesure du texte — écrire nous-mêmes un décodeur PNG, JPEG,
- * GIF et WebP serait un projet à part entière, alors que le navigateur en
- * possède un, exact, déjà chargé.
+ * This module is the counterpart of `CanvasTextMeasurer` in `engine/measure.ts`: layer 2 stays pure, and **this file
+ * alone** knows the DOM. The reason is the same as for text measurement: writing our own PNG, JPEG, GIF and WebP
+ * decoder would be a project in itself, whereas the browser has one, exact and already loaded.
  *
- * Deux services :
+ * Two services:
  *
- *  - la **taille naturelle** d'une image, pour l'insérer à ses dimensions
- *    réelles comme le fait `SwFEShell::Insert` ;
- *  - une **rastérisation en JPEG** pour l'export PDF. Un PDF ne sait pas porter
- *    de PNG : `/DCTDecode` transporte un JPEG tel quel, `/FlateDecode` des
- *    pixels bruts. Passer par le canevas donne les pixels de n'importe quel
- *    format que le navigateur sait lire, transparence aplatie comprise — le PDF
- *    n'ayant pas de couche alpha en DeviceRGB.
+ *  - the **natural size** of an image, to insert it at its real dimensions as `SwFEShell::Insert` does;
+ *  - a **JPEG rasterization** for the PDF export. A PDF cannot carry a PNG: `/DCTDecode` carries a JPEG as is,
+ *    `/FlateDecode` raw pixels. Going through the canvas gives the pixels of any format the browser can read,
+ *    transparency flattened included, since PDF has no alpha layer in DeviceRGB.
  */
 
 import { MAX_IMAGE_BYTES } from '../document/images';
@@ -28,19 +23,19 @@ export interface NaturalSize {
   heightPx: number;
 }
 
-/** Image décodée, prête à devenir un objet PDF. */
+/** Decoded image, ready to become a PDF object. */
 export interface RasterImage {
-  /** Octets JPEG, à placer tels quels dans un flux `/DCTDecode`. */
+  /** JPEG bytes, to be placed as they are in a `/DCTDecode` stream. */
   jpegBytes: Uint8Array;
   widthPx: number;
   heightPx: number;
 }
 
 /**
- * Charge une image et rend sa taille naturelle.
+ * Loads an image and returns its natural size.
  *
- * Échoue plutôt que de deviner : une taille inventée poserait un cadre qui ne
- * correspondrait à rien, et l'écart ne se verrait qu'à l'impression.
+ * Fails rather than guess: an invented size would place a frame that matches nothing, and the gap would only show at
+ * printing time.
  */
 export function probeImageSize(src: string): Promise<NaturalSize> {
   return new Promise((resolve, reject) => {
@@ -49,9 +44,8 @@ export function probeImageSize(src: string): Promise<NaturalSize> {
       return;
     }
     const image = new Image();
-    // Les images distantes doivent arriver sans identifiants et avec un en-tête
-    // CORS : sans lui, le canevas serait « taché » et l'export PDF échouerait
-    // au moment de lire les pixels, bien après l'insertion.
+    // Remote images must arrive without credentials and with a CORS header: without it, the canvas would be "tainted" and
+    // the PDF export would fail when reading the pixels, long after the insertion.
     image.crossOrigin = 'anonymous';
     image.onload = () =>
       resolve({ widthPx: image.naturalWidth, heightPx: image.naturalHeight });
@@ -60,7 +54,7 @@ export function probeImageSize(src: string): Promise<NaturalSize> {
   });
 }
 
-/** Lit un fichier local en `data:` — la forme que porte le document hors ligne. */
+/** Reads a local file as a `data:` URL: the form the document carries offline. */
 export function readFileAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     if (file.size > MAX_IMAGE_BYTES) {
@@ -78,15 +72,14 @@ export function readFileAsDataUrl(file: Blob): Promise<string> {
   });
 }
 
-/** Qualité JPEG de l'export PDF : au-delà, le gain visuel ne paie plus le poids. */
+/** JPEG quality of the PDF export: beyond it, the visual gain does not pay for the weight. */
 const PDF_JPEG_QUALITY = 0.92;
 
 /**
- * Rastérise une image en JPEG pour l'export PDF.
+ * Rasterizes an image to JPEG for the PDF export.
  *
- * Le fond est peint en blanc avant l'image : une transparence aplatie sur du
- * noir — ce que donne un canevas vierge converti en JPEG — rendrait illisible
- * tout logo à fond transparent, cas le plus courant.
+ * The background is painted white before the image: a transparency flattened onto black (what a blank canvas converted
+ * to JPEG gives) would make any logo with a transparent background unreadable, the most common case.
  */
 export async function rasterizeForPdf(src: string): Promise<RasterImage> {
   if (typeof document === 'undefined') {
@@ -124,7 +117,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Base64 → octets, sans dépendance : `atob` rend une chaîne d'octets latin-1. */
+/** Base64 → bytes, with no dependency: `atob` returns a latin-1 byte string. */
 export function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64.replace(/\s+/g, ''));
   const bytes = new Uint8Array(binary.length);
@@ -133,12 +126,11 @@ export function base64ToBytes(base64: string): Uint8Array {
 }
 
 /**
- * Rastérise toutes les images d'un document, indexées par adresse.
+ * Rasterizes all the images of a document, indexed by address.
  *
- * Une image qui refuse de se décoder n'est **pas** une erreur d'export : elle
- * manquera du PDF, où le moteur laissera un cadre vide à sa place, et le reste
- * du document partira quand même. Refuser l'export entier pour une adresse
- * morte serait disproportionné.
+ * An image that refuses to decode is **not** an export error: it will be missing from the PDF, where the engine leaves an
+ * empty frame in its place, and the rest of the document leaves anyway. Refusing the whole export for a dead address would
+ * be out of proportion.
  */
 export async function rasterizeAll(sources: readonly string[]): Promise<Map<string, RasterImage>> {
   const out = new Map<string, RasterImage>();
@@ -147,7 +139,7 @@ export async function rasterizeAll(sources: readonly string[]): Promise<Map<stri
       try {
         out.set(src, await rasterizeForPdf(src));
       } catch {
-        /* cadre vide dans le PDF, document exporté tout de même */
+        /* empty frame in the PDF, document exported anyway */
       }
     }),
   );

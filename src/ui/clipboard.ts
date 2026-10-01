@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Copie un texte dans le presse-papiers.
+ * Copies a text to the clipboard.
  *
- * `navigator.clipboard` n'existe qu'en contexte sécurisé (HTTPS ou localhost) :
- * la page ouverte par l'IP du poste en HTTP, sur le réseau local, n'y a pas
- * accès — le bouton « Copier » ne faisait alors rien. Repli : sélection d'une
- * zone de texte invisible et `execCommand('copy')`, puis le focus est rendu à
- * l'élément qui l'avait.
+ * `navigator.clipboard` only exists in a secure context (HTTPS or localhost): a page opened through the machine's IP over HTTP, on the
+ * local network, cannot use it, and the "Copy" button then did nothing. Fallback: select an invisible text area and call
+ * `execCommand('copy')`, then give the focus back to the element that had it.
  */
 export async function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard?.writeText) {
@@ -16,7 +14,7 @@ export async function copyText(text: string): Promise<boolean> {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // Permission refusée : on tente le repli.
+      // Permission denied: we try the fallback.
     }
   }
   const previous = document.activeElement as HTMLElement | null;

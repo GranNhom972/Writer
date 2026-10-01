@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en Rust, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to Rust. See the NOTICE and
+// LICENSE-APACHE files.
 
-//! Session WebSocket de synchronisation CRDT — `/api/v1/sync/{doc_id}`.
+//! CRDT synchronization WebSocket session: `/api/v1/sync/{doc_id}`.
 //!
-//! Reprise du relais de l'application Write. Le protocole est celui de
-//! `y-protocols` : des trames **binaires** que le serveur valide, journalise et
-//! rediffuse sans jamais les ouvrir.
+//! Taken over from the relay of the Write application. The protocol is
+//! `y-protocols`: **binary** frames that the server validates, logs and
+//! re-broadcasts without ever opening them.
 //!
-//! Séquence d'une update entrante, dans cet ordre et pas un autre :
+//! What happens to an incoming update, in this order and no other:
 //!
-//!   1. **valider** — portée suffisante, update décodable ;
-//!   2. **journaliser** — écriture avec `fsync` ;
-//!   3. **rediffuser** aux pairs.
+//!   1. **validate**: enough scope, and the update can be decoded;
+//!   2. **log**: written to disk with `fsync`;
+//!   3. **re-broadcast** to the peers.
 //!
-//! Rediffuser avant de journaliser exposerait à une perte que les pairs
-//! auraient déjà affichée.
+//! Re-broadcasting before logging would risk a loss that the peers would already
+//! have displayed.
 //!
-//! Ce qui a disparu par rapport à la version précédente : la numérotation des
-//! révisions, le rattrapage par différentiel d'opérations, la rétention des
-//! opérations en attente d'accusé. Le CRDT rend tout cela inutile — un pair en
-//! retard annonce son vecteur d'état, et le serveur lui répond par le
-//! différentiel exact, quelle que soit la durée de son absence.
+//! What has disappeared compared with the previous version: revision numbering,
+//! catch-up by operation diff, and holding operations until they are acknowledged.
+//! The CRDT makes all of that unnecessary: a peer that is behind announces its
+//! state vector, and the server answers with the exact difference, however long
+//! the peer was away.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -53,7 +53,7 @@ use crate::state::{
 };
 use crate::store::COMPACTION_THRESHOLD;
 
-// Codes de fermeture normalisés, repris du serveur Write.
+// Standard close codes, taken from the Write server.
 const CLOSE_IDLE: u16 = 4408;
 const CLOSE_TOO_LARGE: u16 = 4413;
 const CLOSE_RATE_LIMITED: u16 = 4429;
@@ -64,21 +64,21 @@ pub async fn sync_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    // 1. Origine (anti-CSWSH) avant toute autre chose : une page hostile ne doit
-    //    pas pouvoir ouvrir un WebSocket avec les identifiants de l'usager.
+    // 1. Origin check (anti-CSWSH) before anything else: a hostile page must not be
+    //    able to open a WebSocket with the user's credentials.
     if !origin_allowed(&headers, &state.cfg.allowed_origins) {
         return Err(AppError::Forbidden);
     }
 
-    // 2. Identité issue du jeton, jamais de l'URL.
+    // 2. Identity comes from the token, never from the URL.
     let mut identity = identity_from_headers(&headers, &state.cfg.auth)?;
     identity.ensure_document(doc_id)?;
 
-    // 3. Document partagé : la liste des participants fait foi.
+    // 3. Shared document: the participant list decides.
     //
-    //    La portée demandée par le jeton ne peut que **restreindre** celle de la
-    //    session, jamais l'élargir : sans quoi il suffirait de réclamer `write`
-    //    dans son jeton pour l'obtenir.
+    //    The scope requested by the token can only **narrow** the session's scope,
+    //    never widen it: otherwise claiming `write` in your token would be enough to
+    //    get it.
     if let Some(record) = state.session_for_doc(doc_id) {
         let Some(participant) = record.find_by_user(&identity.user_id) else {
             tracing::warn!(%doc_id, user = %identity.user_id, "accès refusé : hors du partage");
@@ -87,13 +87,13 @@ pub async fn sync_handler(
         identity.scope = identity.scope.min(participant.scope());
     }
 
-    // 4. Le document doit exister ; sinon 404, sans divulguer davantage.
+    // 4. The document must exist; otherwise 404, without revealing anything more.
     let handle = state.load_doc(doc_id)?;
     if handle.active_clients() >= MAX_CLIENTS_PER_DOCUMENT {
         return Err(AppError::Forbidden);
     }
 
-    // Le navigateur exige que le serveur sélectionne l'un des sous-protocoles offerts.
+    // The browser requires the server to select one of the sub-protocols it offered.
     let selected = offered_bearer_protocol(&headers);
     let mut upgrade = ws
         .max_frame_size(MAX_FRAME_BYTES)
@@ -129,9 +129,9 @@ impl RateLimiter {
         }
     }
 
-    /// Seau à jetons : `MAX_MESSAGES_PER_SECOND` en régime établi,
-    /// `MESSAGE_BURST` en pointe. Une update Yjs pèse quelques dizaines
-    /// d'octets et part à chaque frappe : la rafale doit être large.
+    /// Token bucket: `MAX_MESSAGES_PER_SECOND` in steady state, `MESSAGE_BURST` at
+    /// peak. A Yjs update weighs a few dozen bytes and is sent on every keystroke, so
+    /// the burst has to be wide.
     fn allow(&mut self) -> bool {
         let now = Instant::now();
         self.tokens = (self.tokens
@@ -169,22 +169,22 @@ async fn session(
     let mut fanout = handle.tx.subscribe();
     let mut limiter = RateLimiter::new();
 
-    // Présences annoncées par cette connexion : à retirer quand elle se ferme,
-    // sinon les autres participants gardent un fantôme dans la liste.
+    // Presences announced by this connection: to be removed when it closes,
+    // otherwise the other participants keep a ghost in their list.
     let mut presences: HashMap<u64, u64> = HashMap::new();
     let mut write_refused = false;
 
-    // SyncStep1 : le serveur annonce son vecteur d'état dès l'ouverture. Le
-    // client en déduit ce qu'il lui manque, et réciproquement.
+    // SyncStep1: the server announces its state vector as soon as the connection
+    // opens. The client works out what it is missing, and vice versa.
     let hello = Message::SyncStep1(handle.state_vector()).encode();
     if sender.send(WsMessage::Binary(hello)).await.is_err() {
         handle.client_left();
         return;
     }
 
-    // Qui est déjà là. La présence ne circule qu'au moment où elle change :
-    // sans ce rappel, l'arrivant afficherait une liste de participants vide
-    // jusqu'à la prochaine annonce de chacun.
+    // Who is already here. Presence only travels when it changes: without this
+    // reminder, the newcomer would see an empty participant list until each person
+    // announced themselves again.
     if !greet(&mut sender, &handle, connection_id).await {
         handle.client_left();
         return;
@@ -196,8 +196,8 @@ async fn session(
             incoming = tokio::time::timeout(idle, receiver.next()) => {
                 let frame = match incoming {
                     Err(_) => break Some(CLOSE_IDLE),
-                    Ok(None) => break None,          // pair déconnecté
-                    Ok(Some(Err(_))) => break None,  // transport rompu
+                    Ok(None) => break None,          // peer disconnected
+                    Ok(Some(Err(_))) => break None,  // transport broken
                     Ok(Some(Ok(frame))) => frame,
                 };
 
@@ -210,7 +210,7 @@ async fn session(
                     WsMessage::Binary(b) => b,
                     WsMessage::Close(_) => break None,
                     WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
-                    // Le protocole est binaire : une trame texte est hors contrat.
+                    // The protocol is binary: a text frame is outside the contract.
                     WsMessage::Text(_) => continue,
                 };
 
@@ -249,10 +249,9 @@ async fn session(
                     }
                     Ok(_) => {}
                     Err(RecvError::Lagged(skipped)) => {
-                        // Client trop lent : il a perdu des trames. Le CRDT permet
-                        // de le remettre à niveau par un simple SyncStep1 — c'est
-                        // précisément ce que l'ancien séquenceur ne pouvait pas
-                        // faire, faute de savoir ce qui avait été manqué.
+                        // Client too slow: it has lost frames. The CRDT lets us bring it back up to date
+                        // with a simple SyncStep1, which is exactly what the old sequencer could not do,
+                        // since it could not know what had been missed.
                         tracing::warn!(%doc_id, connection_id, skipped, "client en retard, resynchronisation");
                         let resync = Message::SyncStep1(handle.state_vector()).encode();
                         if sender.send(WsMessage::Binary(resync)).await.is_err() {
@@ -274,8 +273,8 @@ async fn session(
             .await;
     }
 
-    // Annonce du départ : les pairs retirent immédiatement les curseurs et
-    // l'avatar de ce participant, sans attendre l'expiration côté client.
+    // Announce the departure: the peers immediately remove this participant's cursors
+    // and avatar, without waiting for the client-side expiry.
     handle.forget_presence(connection_id);
     if !presences.is_empty() {
         let entries: Vec<(u64, u64)> = presences.into_iter().collect();
@@ -290,18 +289,18 @@ async fn session(
     let remaining = handle.client_left();
     tracing::info!(%doc_id, connection_id, remaining, "session fermée");
 
-    // Dernier parti : le document est sauvegardé chez son propriétaire, puis
-    // effacé d'ici. Rien n'est fait tout de suite — un rechargement de page
-    // passe par ce chemin, et `schedule_close` attend de voir si quelqu'un
-    // revient avant de conclure.
+    // Last one out: the document is saved with its owner, then erased from here.
+    // Nothing is done right away, because a page reload goes through this path, and
+    // `schedule_close` waits to see whether someone comes back before concluding.
     if remaining == 0 {
         crate::hook::schedule_close(state.clone(), handle.clone(), doc_id);
     }
-    // Aucun « vidage à la déconnexion » : la durabilité est acquise à l'update
-    // près, c'est tout l'intérêt de journaliser avant de rediffuser.
+    // No "flush on disconnect": durability is already guaranteed up to the last
+    // update, which is the whole point of logging before re-broadcasting.
 }
 
-/// Sert à l'arrivant les présences déjà annoncées. Rend `false` si le lien casse.
+/// Serves the newcomer the presences already announced. Returns `false` if the
+/// link breaks.
 async fn greet(
     sender: &mut futures::stream::SplitSink<WebSocket, WsMessage>,
     handle: &Arc<DocHandle>,
@@ -316,8 +315,8 @@ async fn greet(
     true
 }
 
-/// Traite une trame et rend ce qu'il faut renvoyer à **l'émetteur**.
-/// Ce qui doit partir aux autres passe par `handle.tx`.
+/// Handles one frame and returns what must be sent back to the **sender**.
+/// What has to go to the others goes through `handle.tx`.
 #[allow(clippy::too_many_arguments)]
 async fn handle_frame(
     state: &AppState,
@@ -327,14 +326,13 @@ async fn handle_frame(
     doc_id: Uuid,
     bytes: &[u8],
     presences: &mut HashMap<u64, u64>,
-    // Journalisé une seule fois par session : un lecteur émet son état à chaque
-    // synchronisation, ce qui inonderait les journaux.
+    // Logged only once per session: a reader sends its state on every
+    // synchronization, which would flood the logs.
     write_refused: &mut bool,
 ) -> Vec<Vec<u8>> {
     let Some(message) = Message::decode(bytes) else {
-        // Trame illisible ou type non supporté : ignorée, session conservée. La
-        // fermer déclencherait une boucle de reconnexion chez un client dont
-        // une seule trame est en cause.
+        // Unreadable frame or unsupported type: ignored, session kept. Closing it would
+        // trigger a reconnection loop for a client of which only one frame is at fault.
         return Vec::new();
     };
 
@@ -348,12 +346,11 @@ async fn handle_frame(
         },
 
         Message::SyncStep2(update) | Message::Update(update) => {
-            // Portée insuffisante : la modification est **ignorée**, pas la
-            // session. Fermer la connexion serait une faute : le protocole de
-            // synchronisation impose au client d'envoyer son état à l'ouverture
-            // (SyncStep2), y compris en lecture seule. La fermer déclencherait
-            // une boucle — le client se reconnecte, renvoie son état, se fait
-            // fermer, indéfiniment.
+            // Insufficient scope: the modification is **ignored**, not the session. Closing
+            // the connection would be a mistake: the sync protocol requires the client to send
+            // its state when it opens (SyncStep2), even in read-only mode. Closing it would
+            // create a loop: the client reconnects, sends its state again, gets closed,
+            // forever.
             if !identity.scope.can_write() {
                 if !*write_refused {
                     *write_refused = true;
@@ -378,17 +375,17 @@ async fn handle_frame(
             Vec::new()
         }
 
-        // Le client demande qui est là. On lui sert le registre plutôt que de le
-        // laisser attendre la prochaine annonce spontanée de chacun.
+        // The client asks who is here. We serve it the registry rather than make it wait
+        // for each person's next spontaneous announcement.
         Message::QueryAwareness => handle
             .known_presences(connection_id)
             .into_iter()
             .map(|payload| Message::Awareness(payload.as_ref().clone()).encode())
             .collect(),
 
-        // Présence : relayée telle quelle, jamais journalisée (donnée éphémère).
-        // On note quels participants transitent par cette connexion, pour
-        // pouvoir les retirer à sa fermeture.
+        // Presence: relayed as-is, never logged (ephemeral data). We note which
+        // participants come through this connection, so we can remove them when it
+        // closes.
         Message::Awareness(payload) => {
             if let Some(entries) = parse_awareness(&payload) {
                 for entry in entries {
@@ -400,8 +397,8 @@ async fn handle_frame(
                 }
             }
 
-            // Retenue avant d'être rediffusée : c'est la même charge utile qui
-            // servira d'accueil au prochain arrivant.
+            // Remembered before being re-broadcast: the same payload will be used as the
+            // welcome for the next newcomer.
             handle.note_presence(connection_id, Arc::new(payload.clone()));
 
             let frame = Message::Awareness(payload).encode();
@@ -439,9 +436,9 @@ async fn persist_and_compact(
         let store = state.store.clone();
         let key = doc_id.to_string();
         let snapshot = handle.full_state();
-        // La compaction part en tâche de fond : elle réécrit tout le document,
-        // et la faire en ligne bloquerait la frappe de tous les participants le
-        // temps d'un `fsync` sur plusieurs mégaoctets.
+        // Compaction runs as a background task: it rewrites the whole document, and doing
+        // it inline would block everyone's typing for the duration of an `fsync` of
+        // several megabytes.
         tokio::spawn(async move {
             let resultat =
                 tokio::task::spawn_blocking(move || store.write_snapshot(&key, &snapshot)).await;
@@ -453,10 +450,10 @@ async fn persist_and_compact(
         });
     }
 
-    // Le journal et l'instantané ci-dessus protègent d'un redémarrage de
-    // *Writer* : ils ne mettent rien dans le Drive. C'est le déchargement qui
-    // remet la partie utile à CloudServ, seul propriétaire du document — et
-    // c'est lui qui borne ce qu'une panne coûte à l'utilisateur.
+    // The log and the snapshot above protect against a restart of *Writer*: they put
+    // nothing in the Drive. It is the periodic hand-over that gives the useful part to
+    // CloudServ, the only owner of the document, and it is what bounds what a failure
+    // costs the user.
     crate::hook::schedule_checkpoint(state.clone(), handle.clone(), doc_id);
 }
 

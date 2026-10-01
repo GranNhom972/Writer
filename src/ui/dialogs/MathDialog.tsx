@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Éditeur ergonomique de formules mathématiques.
+ * Ergonomic editor for math formulas.
  *
- * Saisie LaTeX avec :
- *  - aperçu rendu en direct (KaTeX avec fallback textuel élégant) ;
- *  - palette de modèles par catégories (Structures, Opérateurs, Relations, Lettres grecques, Ensembles) ;
- *  - exemples complets prêts à l'emploi à insérer au clic ;
- *  - positionnement automatique du curseur dans le modèle ;
- *  - messages d'erreurs traduits en français clair.
+ * LaTeX input with:
+ *  - a live rendered preview (KaTeX with a graceful text fallback);
+ *  - a palette of templates by category (Structures, Operators, Relations, Greek letters, Sets);
+ *  - complete ready-to-use examples that can be inserted with a click;
+ *  - automatic placement of the cursor inside the template;
+ *  - error messages translated into plain French.
  */
 
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
@@ -38,7 +38,7 @@ export function MathDialog({ draft, onCancel, onSubmit, onDelete }: MathDialogPr
   });
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Aperçu différé pour éviter les clignotements pendant la saisie
+  // Deferred preview to avoid flicker while typing
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -54,7 +54,7 @@ export function MathDialog({ draft, onCancel, onSubmit, onDelete }: MathDialogPr
     };
   }, [latex, display]);
 
-  /** Insère un modèle à la position actuelle du curseur */
+  /** Inserts a template at the current cursor position */
   const insert = (snippet: string, caret = 0): void => {
     const field = fieldRef.current;
     const start = field?.selectionStart ?? latex.length;
@@ -98,7 +98,7 @@ export function MathDialog({ draft, onCancel, onSubmit, onDelete }: MathDialogPr
           />
         </label>
 
-        {/* Prévisualisation en direct */}
+        {/* Live preview */}
         <div className="math-dialog__preview" aria-live="polite" aria-atomic="true">
           {'html' in preview ? (
             <div
@@ -120,7 +120,7 @@ export function MathDialog({ draft, onCancel, onSubmit, onDelete }: MathDialogPr
           )}
         </div>
 
-        {/* Mode de disposition */}
+        {/* Layout mode */}
         <fieldset className="math-dialog__mode">
           <legend className="field__label">Disposition</legend>
           <label className="math-dialog__radio">
@@ -143,7 +143,7 @@ export function MathDialog({ draft, onCancel, onSubmit, onDelete }: MathDialogPr
           </label>
         </fieldset>
 
-        {/* Palette de modèles rapides */}
+        {/* Palette of quick templates */}
         <div className="math-dialog__palette">
           {MATH_SNIPPETS.map((group) => (
             <section key={group.name} className="math-group">
@@ -166,7 +166,7 @@ export function MathDialog({ draft, onCancel, onSubmit, onDelete }: MathDialogPr
           ))}
         </div>
 
-        {/* Exemples prêts à l'emploi */}
+        {/* Ready-to-use examples */}
         <section className="math-dialog__examples">
           <h3 className="math-group__title">Exemples</h3>
           <div className="math-dialog__example-row">
@@ -183,7 +183,7 @@ export function MathDialog({ draft, onCancel, onSubmit, onDelete }: MathDialogPr
           </div>
         </section>
 
-        {/* Actions du dialogue */}
+        {/* Dialog actions */}
         <footer className="math-dialog__actions">
           {onDelete && (
             <button

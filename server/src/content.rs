@@ -1,32 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Projection JSON ⇄ document répliqué (CRDT).
+//! Conversion between JSON and the replicated (CRDT) document.
 //!
-//! ⚠️ **Exception assumée au rôle de relais.** Le cœur du serveur — rediffusion
-//! et journal — reste aveugle au schéma : il ne manipule que des updates
-//! opaques et convergentes. Ce module est le seul endroit qui connaisse la
-//! forme d'un document Writer, et il ne sert que sur des chemins **optionnels** :
+//! ⚠️ **A deliberate exception to the relay role.** The core of the server
+//! (re-broadcast and log) stays blind to the schema: it only handles opaque,
+//! convergent updates. This module is the only place that knows the shape of a
+//! Writer document, and it is only used on **optional** paths:
 //!
-//! - l'**amorçage** d'un partage à partir du document fourni par le client
-//!   (`POST /api/v1/sessions`, `POST /api/v1/documents`) ;
-//! - l'**observation** en JSON (`GET …/snapshot`, flux `…/events`), qui permet
-//!   à un script de suivre un document sans réimplémenter Yjs ;
-//! - la **reprise** d'un document écrit par la version précédente du serveur,
-//!   qui journalisait des opérations de blocs (`legacy.rs`).
+//! - **seeding** a share from the document supplied by the client
+//!   (`POST /api/v1/sessions`, `POST /api/v1/documents`);
+//! - **observing** as JSON (`GET …/snapshot`, the `…/events` feed), which lets a
+//!   script follow a document without reimplementing Yjs;
+//! - **taking over** a document written by the previous version of the server,
+//!   which logged block operations (`legacy.rs`).
 //!
-//! Le schéma est le miroir exact de `client/src/domain/collab/crdt.ts`. Les deux
-//! doivent rester d'accord au nom de clé près : c'est le seul endroit du projet
-//! où deux langages décrivent la même structure.
+//! The schema is the exact mirror of `client/src/domain/collab/crdt.ts`. The two
+//! must agree down to the name of each key: this is the only place in the project
+//! where two languages describe the same structure.
 //!
 //! ```text
 //!  writer:meta    Map    title, author, createdAt, updatedAt
 //!  writer:setup   Map    id, pageSetup, defaults, furniture
-//!  writer:blocks  Array  un Map par bloc
+//!  writer:blocks  Array  one Map per block
 //!      ├─ id, type
-//!      ├─ text   Text    texte du paragraphe, formatage porté par les attributs
-//!      ├─ attrs  Map     attributs de paragraphe ou de tableau
-//!      └─ rows   Array   tableaux : lignes → cellules → blocs
+//!      ├─ text   Text    paragraph text, formatting carried by attributes
+//!      ├─ attrs  Map     paragraph or table attributes
+//!      └─ rows   Array   tables: rows → cells → blocks
 //! ```
 
 use std::collections::HashMap;
@@ -42,23 +42,23 @@ use yrs::{
 
 use crate::error::{AppError, AppResult};
 
-/// Noms des racines partagées avec le client. Les changer d'un seul côté
-/// rendrait illisibles tous les partages déjà créés.
+/// Names of the shared roots, also used by the client. Changing them on one side
+/// only would make every share already created unreadable.
 pub const BLOCKS_ROOT: &str = "writer:blocks";
 pub const META_ROOT: &str = "writer:meta";
 pub const SETUP_ROOT: &str = "writer:setup";
 
-/// Identifiant du paragraphe de secours d'un document vide. Fixe, et partagé
-/// avec le client : deux pairs qui ouvrent un document vide ne doivent pas
-/// fabriquer deux paragraphes différents.
+/// Id of the fallback paragraph of an empty document. It is fixed and shared with
+/// the client: two peers that open an empty document must not each make up a
+/// different paragraph.
 const EMPTY_BLOCK_ID: &str = "p-vide";
 
-/// Bornes de l'amorçage. Un document fourni par un client reste une entrée : il
-/// est borné comme n'importe quelle autre.
+/// Limits for seeding. A document supplied by a client is still an input, so it is
+/// bounded like any other.
 pub const MAX_BLOCKS: usize = 20_000;
 pub const MAX_BLOCK_CHARS: usize = 200_000;
 
-/// Attributs de paragraphe répliqués — miroir de `PARAGRAPH_ATTRS` côté client.
+/// Replicated paragraph attributes: mirror of `PARAGRAPH_ATTRS` on the client side.
 const PARAGRAPH_ATTRS: &[&str] = &[
     "headingLevel",
     "styleName",
@@ -92,7 +92,7 @@ const CELL_ATTRS: &[&str] = &[
     "paddingPt",
 ];
 
-/// Clés de formatage de caractère — miroir de `RUN_FORMAT_KEYS` côté client.
+/// Character formatting keys: mirror of `RUN_FORMAT_KEYS` on the client side.
 const RUN_FORMAT_KEYS: &[&str] = &[
     "bold",
     "italic",
@@ -119,11 +119,11 @@ const META_KEYS: &[&str] = &["title", "author", "createdAt", "updatedAt"];
 
 /* ------------------------------------------------------------- validation */
 
-/// Refuse ce qui ne tient pas dans les bornes, avec un message par champ.
+/// Rejects what does not fit within the limits, with one message per field.
 pub fn validate(document: &Value) -> AppResult<()> {
     let blocks = document.get("blocks").and_then(Value::as_array);
     let Some(blocks) = blocks else {
-        // Un document sans tableau de blocs n'est pas un document Writer.
+        // A document without a block array is not a Writer document.
         return match document.get("blocks") {
             None => Ok(()),
             Some(_) => Err(AppError::BadRequest(
@@ -164,13 +164,12 @@ pub fn validate(document: &Value) -> AppResult<()> {
     Ok(())
 }
 
-/* --------------------------------------------------------------- amorçage */
+/* --------------------------------------------------------------- seeding */
 
-/// Construit l'update CRDT qui amorce un document vide avec `document`.
+/// Builds the CRDT update that seeds an empty document with `document`.
 ///
-/// Le résultat est une update ordinaire : elle est appliquée puis journalisée
-/// par le même chemin que n'importe quelle frappe, donc durable avant toute
-/// connexion.
+/// The result is an ordinary update: it is applied and logged through the same path
+/// as any keystroke, so it is durable before anybody connects.
 pub fn seed_update(document: &Value) -> AppResult<Vec<u8>> {
     validate(document)?;
 
@@ -207,8 +206,8 @@ pub fn seed_update(document: &Value) -> AppResult<Vec<u8>> {
             .unwrap_or_default();
 
         if blocs.is_empty() {
-            // Un document Writer n'est jamais vide : sans bloc, le curseur
-            // n'aurait nulle part où se poser.
+            // A Writer document is never empty: with no block, the cursor would have
+            // nowhere to land.
             write_paragraph(&mut txn, &yblocks, &json!({ "id": EMPTY_BLOCK_ID }));
         } else {
             for bloc in &blocs {
@@ -217,8 +216,8 @@ pub fn seed_update(document: &Value) -> AppResult<Vec<u8>> {
         }
     }
 
-    // La transaction est liée avant d'être rendue : dans une expression de
-    // queue, l'emprunt survivrait au document et ne compilerait pas.
+    // The transaction is bound to a variable before being returned: in a tail
+    // expression the borrow would outlive the document and would not compile.
     let update = doc
         .transact()
         .encode_state_as_update_v1(&StateVector::default());
@@ -283,8 +282,8 @@ fn write_table(txn: &mut TransactionMut, yblocks: &ArrayRef, block: &Value) {
                         write_paragraph(txn, &yblocs, bloc);
                     }
                 }
-                // Une cellule vide porte quand même un paragraphe : c'est là que
-                // le curseur se pose quand on clique dedans.
+                // An empty cell still holds a paragraph: that is where the cursor lands when
+                // someone clicks inside it.
                 _ => write_paragraph(
                     txn,
                     &yblocs,
@@ -300,11 +299,11 @@ fn write_identity(txn: &mut TransactionMut, ybloc: &MapRef, block: &Value, kind:
     ybloc.insert(txn, "type", Any::from(kind.to_string()));
 }
 
-/// Identifiant du nœud, ou un identifiant fabriqué s'il n'en a pas.
+/// The node's id, or a generated one if it has none.
 ///
-/// Un bloc sans identifiant ne peut pas être suivi d'une réplique à l'autre :
-/// il faut donc lui en donner un ici plutôt que de le laisser anonyme, sinon
-/// chaque pair croirait à un bloc différent.
+/// A block without an id cannot be followed from one replica to the next, so it
+/// must be given one here rather than left anonymous; otherwise every peer would
+/// believe in a different block.
 fn identifier(node: &Value, prefix: &str) -> String {
     match node.get("id").and_then(Value::as_str) {
         Some(id) if !id.is_empty() => id.to_string(),
@@ -333,15 +332,14 @@ fn write_runs(txn: &mut TransactionMut, ytext: &TextRef, runs: &[Value]) {
             continue;
         }
 
-        // La position d'insertion est relue à chaque fois plutôt que comptée :
-        // l'unité d'index de `yrs` (octets ou UTF-16) est un détail de
-        // configuration, et la longueur courante en donne toujours la bonne.
+        // The insertion position is read again each time rather than counted: the index
+        // unit of `yrs` (bytes or UTF-16) is a configuration detail, and the current
+        // length always gives the right one.
         let index = ytext.len(&*txn);
-        // Toujours `insert_with_attributes`, même sans attribut : c'est le seul
-        // appel qui **annule** le formatage encore actif à cet endroit. Un
-        // `insert` nu après une plage en gras se glisserait avant la marque de
-        // fin et hériterait du gras — un paragraphe entier basculait ainsi en
-        // gras dès qu'il commençait par un mot en gras.
+        // Always `insert_with_attributes`, even without attributes: it is the only call
+        // that **cancels** the formatting still active at that spot. A bare `insert` after
+        // a bold range would slip in before the end mark and inherit the bold, so a whole
+        // paragraph would turn bold as soon as it started with a bold word.
         ytext.insert_with_attributes(txn, index, texte, run_attributes(run));
     }
 }
@@ -361,7 +359,7 @@ fn run_attributes(run: &Value) -> Attrs {
 
 /* -------------------------------------------------------------- projection */
 
-/// Relit le document répliqué sous la forme JSON d'un `WriterDocumentState`.
+/// Reads the replicated document back as the JSON form of a `WriterDocumentState`.
 pub fn project(doc: &Doc) -> Value {
     let ymeta = doc.get_or_insert_map(META_ROOT);
     let ysetup = doc.get_or_insert_map(SETUP_ROOT);
@@ -445,8 +443,8 @@ fn read_block<T: ReadTxn>(txn: &T, ybloc: &MapRef) -> Value {
         Some(Out::YText(ytext)) => read_runs(txn, &ytext),
         _ => Vec::new(),
     };
-    // Un paragraphe vide garde **un** run vide : c'est le porteur du formatage
-    // que prendra la prochaine frappe, comme un `SwTxtNode` garde son `SwAttrSet`.
+    // An empty paragraph keeps **one** empty run: it carries the formatting that the
+    // next keystroke will take, just as a `SwTxtNode` keeps its `SwAttrSet`.
     bloc.insert(
         "runs".into(),
         Value::Array(if runs.is_empty() {
@@ -528,8 +526,8 @@ fn read_runs<T: ReadTxn>(txn: &T, ytext: &TextRef) -> Vec<Value> {
     let mut runs = Vec::new();
     for chunk in ytext.diff(txn, YChange::identity) {
         let Out::Any(Any::String(texte)) = chunk.insert else {
-            // Les insertions non textuelles n'existent pas dans ce schéma : une
-            // image est un attribut de run, pas un nœud à part.
+            // Non-text insertions do not exist in this schema: an image is an attribute of a
+            // run, not a separate node.
             continue;
         };
         let mut run = JsonMap::new();
@@ -549,9 +547,9 @@ fn read_runs<T: ReadTxn>(txn: &T, ytext: &TextRef) -> Vec<Value> {
     runs
 }
 
-/* ----------------------------------------------------------- métadonnées */
+/* ----------------------------------------------------------- metadata */
 
-/// Titre courant, tel qu'il vit dans le document répliqué.
+/// The current title, as it lives in the replicated document.
 pub fn title(doc: &Doc) -> Option<String> {
     let ymeta = doc.get_or_insert_map(META_ROOT);
     let txn = doc.transact();
@@ -561,27 +559,27 @@ pub fn title(doc: &Doc) -> Option<String> {
     }
 }
 
-/// Nombre de blocs de premier niveau — pour la fiche du document, sans ouvrir
-/// le contenu.
+/// Number of top-level blocks, for the document's details, without opening the
+/// content.
 pub fn block_count(doc: &Doc) -> usize {
     let yblocks = doc.get_or_insert_array(BLOCKS_ROOT);
     let txn = doc.transact();
     yblocks.len(&txn) as usize
 }
 
-/// Le document répliqué a-t-il déjà un contenu ?
+/// Does the replicated document already have content?
 pub fn is_seeded(doc: &Doc) -> bool {
     block_count(doc) > 0
 }
 
 /* ------------------------------------------------------------ conversions */
 
-/// JSON → `Any`, **sans jamais produire de `BigInt`**.
+/// JSON → `Any`, **never producing a `BigInt`**.
 ///
-/// Ce n'est pas un détail : `Any::BigInt` s'encode dans un type que la
-/// bibliothèque JavaScript relit en `BigInt`, et `12n !== 12`. Le client
-/// comparerait alors sans fin la valeur qu'il vient d'écrire à celle qu'il
-/// relit, et réémettrait une modification à chaque tour.
+/// This is not a detail: `Any::BigInt` is encoded in a type that the JavaScript
+/// library reads back as a `BigInt`, and `12n !== 12`. The client would then compare
+/// the value it has just written with the one it reads back, forever, and re-send
+/// a modification on every round.
 fn to_any(value: &Value) -> Any {
     match value {
         Value::Null => Any::Null,
@@ -604,7 +602,7 @@ fn any_to_json(any: &Any) -> Value {
         Any::Number(n) => nombre(*n),
         Any::BigInt(i) => json!(i),
         Any::String(s) => json!(s.as_ref()),
-        // Un tampon binaire n'a pas de place dans un document Writer.
+        // A binary buffer has no place in a Writer document.
         Any::Buffer(_) => Value::Null,
         Any::Array(items) => Value::Array(items.iter().map(any_to_json).collect()),
         Any::Map(map) => Value::Object(
@@ -615,11 +613,11 @@ fn any_to_json(any: &Any) -> Value {
     }
 }
 
-/// Un entier reste un entier dans le JSON rendu : `12` et non `12.0`.
+/// An integer stays an integer in the JSON that is produced: `12`, not `12.0`.
 ///
-/// Le nombre a fait l'aller-retour par un flottant, seule représentation du
-/// CRDT. L'écrire tel quel donnerait des tailles de police en `12.0` dans les
-/// exports et dans le flux d'observation.
+/// The number made the round trip through a float, the only representation the
+/// CRDT has. Writing it out as it is would give font sizes of `12.0` in the
+/// exports and in the observation feed.
 fn nombre(valeur: f64) -> Value {
     if valeur.fract() == 0.0 && valeur.abs() < 9.007_199_254_740_992e15 {
         json!(valeur as i64)
@@ -679,8 +677,8 @@ mod tests {
 
     #[test]
     fn lamorcage_puis_la_relecture_rendent_le_meme_document() {
-        // La propriété qui compte : ce que le client dépose en partageant est
-        // exactement ce qu'un observateur relit ensuite en JSON.
+        // The property that matters: what the client uploads when sharing is exactly what
+        // an observer later reads back as JSON.
         let source = document_exemple();
         let relu = project(&amorcer(&source));
 
@@ -698,7 +696,7 @@ mod tests {
         assert_eq!(paragraphe["alignment"], "justify");
         assert_eq!(paragraphe["runs"][1]["text"], "gras");
         assert_eq!(paragraphe["runs"][1]["bold"], true);
-        // Un entier doit rester entier : `14.0` se retrouverait dans l'export ODF.
+        // An integer must stay an integer: `14.0` would end up in the ODF export.
         assert_eq!(paragraphe["runs"][1]["fontSizePt"], 14);
     }
 
@@ -735,7 +733,7 @@ mod tests {
 
     #[test]
     fn un_document_sans_bloc_recoit_un_paragraphe() {
-        // Le curseur du client n'aurait nulle part où se poser.
+        // The client's cursor would have nowhere to land.
         let relu = project(&amorcer(&json!({ "blocks": [] })));
         assert_eq!(relu["blocks"].as_array().unwrap().len(), 1);
         assert_eq!(relu["blocks"][0]["id"], EMPTY_BLOCK_ID);
@@ -743,8 +741,8 @@ mod tests {
 
     #[test]
     fn deux_amorcages_concurrents_convergent() {
-        // Propriété fondamentale du relais : l'ordre d'application ne change pas
-        // le résultat.
+        // Fundamental property of the relay: the order in which updates are applied does
+        // not change the result.
         let a = amorcer(&document_exemple());
         let b = Doc::new();
         {
@@ -767,8 +765,8 @@ mod tests {
 
     #[test]
     fn un_bloc_sans_identifiant_en_recoit_un() {
-        // Sans identifiant, deux répliques ne sauraient pas qu'elles parlent du
-        // même paragraphe.
+        // Without an id, two replicas would not know they are talking about the same
+        // paragraph.
         let relu = project(&amorcer(&json!({
             "blocks": [{ "type": "paragraph", "runs": [{ "text": "anonyme" }] }]
         })));

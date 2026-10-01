@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Import OpenDocument. Transposition de `XMLTextImportHelper`
- * (`xmloff/source/text/txtimp.cxx`).
+ * OpenDocument import. (OpenOffice: `XMLTextImportHelper`, `xmloff/source/text/txtimp.cxx`.)
  *
- * Le parcours suit celui du C++ : un contexte par élément, l'état de style
- * hérité du parent, et le texte accumulé au fil des nœuds. Les éléments de
- * substitution d'ODF (`<text:s>`, `<text:tab/>`, `<text:line-break/>`) sont
- * réinjectés dans la chaîne brute — le format XML ne peut pas porter des
- * espaces consécutives, elles y sont comptées dans un attribut.
+ * The walk follows the C++ one: one context per element, the style state inherited from the parent, and the
+ * text accumulated along the nodes. ODF's substitution elements (`<text:s>`, `<text:tab/>`,
+ * `<text:line-break/>`) are put back into the raw string: the XML format cannot carry consecutive spaces, they
+ * are counted in an attribute.
  *
- * Supporte fidèlement l'import des en-têtes et pieds de page OpenOffice (`<style:header>`,
- * `<style:footer>`, `<style:header-left>`, `<style:footer-left>`) et leurs styles.
+ * It faithfully supports the import of OpenOffice headers and footers (`<style:header>`, `<style:footer>`,
+ * `<style:header-left>`, `<style:footer-left>`) and their styles.
  */
 
 import {
@@ -64,30 +62,30 @@ import { mmToPt } from '../document/units';
 
 export interface ImportResult {
   document: WriterDocumentState;
-  /** Ce qui n'a pas pu être transcrit — annoncé, jamais perdu en silence. */
+  /** What could not be transcribed: reported, never lost silently. */
   warnings: string[];
 }
 
 export interface ImportOptions {
   title?: string;
-  /** `styles.xml`, s'il est disponible : il porte les styles nommés et la page. */
+  /** `styles.xml`, if available: it carries the named styles and the page. */
   stylesXml?: string;
   /**
-   * Images extraites de l'archive : `Pictures/…` → `data:`.
+   * Images extracted from the archive: `Pictures/…` → `data:`.
    *
-   * Sans cette table, un `<draw:image xlink:href="Pictures/image1.png"/>` ne
-   * désignerait rien : le chemin n'a de sens qu'à l'intérieur du ZIP.
+   * Without this table, a `<draw:image xlink:href="Pictures/image1.png"/>` would point to nothing: the path only
+   * means something inside the ZIP.
    */
   pictures?: ReadonlyMap<string, string>;
 }
 
-/** Analyse une chaîne XML avec un `DOMParser` standard. */
+/** Parses an XML string with a standard `DOMParser`. */
 function parseXml(xml: string, warnings: string[]): Document | null {
   if (typeof DOMParser === 'undefined') {
     throw new Error("DOMParser indisponible : l'import ODF requiert un environnement DOM.");
   }
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
-  // `DOMParser` ne lève pas : il produit un document contenant `parsererror`.
+  // `DOMParser` does not throw: it produces a document containing `parsererror`.
   const failure = doc.getElementsByTagName('parsererror')[0];
   if (failure) {
     warnings.push(`XML illisible : ${failure.textContent?.trim().slice(0, 200) ?? 'erreur inconnue'}`);
@@ -97,7 +95,7 @@ function parseXml(xml: string, warnings: string[]): Document | null {
 }
 
 /**
- * Importe le `content.xml` d'un document ODF.
+ * Imports the `content.xml` of an ODF document.
  */
 export function importOdfContent(
   contentXml: string,
@@ -147,9 +145,8 @@ export function importOdfContent(
     return { document, warnings };
   }
 
-  // Les révisions se lisent **avant** le corps : un jalon `<text:change>`
-  // rencontré en chemin doit pouvoir restituer aussitôt le texte supprimé que
-  // l'en-tête conserve.
+  // Revisions are read **before** the body: a `<text:change>` milestone met along the way must be able to put back
+  // at once the deleted text that the header keeps.
   const { redlines, deletedText } = readTrackedChanges(body);
 
   const ctx: ImportContext = {
@@ -166,8 +163,8 @@ export function importOdfContent(
   if (document.blocks.length === 0) document.blocks = [createParagraph('')];
 
   if (ctx.comments.length > 0) document.comments = ctx.comments;
-  // Seules les révisions réellement ancrées sont conservées : une région
-  // déclarée sans jalon correspondant dans le corps n'a rien à annuler.
+  // Only the revisions that are really anchored are kept: a region declared with no matching milestone in the body
+  // has nothing to undo.
   const anchored = new Set<string>();
   for (const block of document.blocks) {
     if (isTable(block)) {
@@ -209,7 +206,7 @@ function readMetaTitle(content: Document): string | null {
 }
 
 /**
- * Lit le titre dans `meta.xml`.
+ * Reads the title from `meta.xml`.
  */
 export function readOdfMetaTitle(metaXml: string): string | null {
   const warnings: string[] = [];
@@ -217,7 +214,7 @@ export function readOdfMetaTitle(metaXml: string): string | null {
   return meta ? readMetaTitle(meta) : null;
 }
 
-/** Géométrie de page depuis `<style:page-layout-properties>` de `styles.xml`. */
+/** Page geometry from the `<style:page-layout-properties>` of `styles.xml`. */
 function readPageSetup(stylesDoc: Document): PageSetup | null {
   const properties = findFirst(stylesDoc, 'page-layout-properties');
   if (!properties) return null;
@@ -408,44 +405,41 @@ function readPageFurniture(stylesDoc: Document, setup: PageSetup): PageFurniture
 }
 
 /**
- * Portée de liste courante. Transposition de `XMLTextListBlockContext`
- * (`xmloff/source/text/XMLTextListBlockContext.cxx`).
+ * Current list scope. (OpenOffice: `XMLTextListBlockContext`,
+ * `xmloff/source/text/XMLTextListBlockContext.cxx`.)
  *
- * Une liste ODF est une **structure imbriquée** (`<text:list>` contenant des
- * `<text:list-item>`), là où le modèle — comme `SwTxtNode` — n'a que des
- * attributs de paragraphe. La conversion se fait en descendant : la portée
- * accumule l'identifiant de liste et le niveau, et chaque paragraphe rencontré
- * en hérite.
+ * An ODF list is a **nested structure** (`<text:list>` containing `<text:list-item>`), where the model, like
+ * `SwTxtNode`, only has paragraph attributes. The conversion happens while walking down: the scope accumulates
+ * the list id and the level, and each paragraph met inherits them.
  *
- * L'identifiant est capital et c'est lui que l'ancienne version perdait :
- * sans lui, deux listes séparées par du texte partageraient leur compteur, et
- * la seconde reprendrait à 4 là où elle doit repartir à 1.
+ * The id is crucial, and it is what the old version lost: without it, two lists separated by text would share
+ * their counter, and the second would resume at 4 where it should restart at 1.
  */
 interface ListScope {
   kind: ListKind;
   id: string;
-  /** 0 pour le premier niveau, comme `RES_PARATR_LIST_LEVEL`. */
+  /** 0 for the first level, like `RES_PARATR_LIST_LEVEL`. */
   level: number;
-  /** Valeur de reprise portée par `text:start-value` du premier élément. */
+  /** Restart value carried by the `text:start-value` of the first item. */
   startValue?: number;
 }
 
-/** Ce que le parcours des blocs doit transporter de haut en bas. */
+/** What the walk over the blocks has to carry from top to bottom. */
 interface ImportContext {
   styles: StyleTable;
   warnings: string[];
   pictures: ReadonlyMap<string, string>;
-  /** Nature de chaque niveau des styles de liste, par nom de style. */
+  /** Kind of each level of the list styles, by style name. */
   listStyles: ReadonlyMap<string, ListKind[]>;
-  /** Commentaires collectés en cours de route (`office:annotation`). */
+  /** Comments collected along the way (`office:annotation`). */
   comments: DocumentComment[];
-  /** Révisions déclarées par `<text:tracked-changes>`, par identifiant. */
+  /** Revisions declared by `<text:tracked-changes>`, by id. */
   redlines: ReadonlyMap<string, Redline>;
-  /** Texte supprimé, à réinjecter aux jalons `<text:change>`. */
+  /** Deleted text, to put back at the `<text:change>` milestones. */
   deletedText: ReadonlyMap<string, string>;
 }
 
-/** Parcourt les enfants d'un conteneur de flux et produit les blocs du modèle. */
+/** Walks the children of a flow container and produces the blocks of the model. */
 function readBlocks(
   container: Element,
   ctx: ImportContext,
@@ -472,7 +466,7 @@ function readBlocks(
         break;
       case 'list-item':
       case 'list-header': {
-        // `text:start-value` porté par l'élément redémarre le compteur ici.
+        // A `text:start-value` carried by the element restarts the counter here.
         const startRaw = attr(element, NS.text, 'start-value');
         const start = startRaw !== null ? Number(startRaw) : NaN;
         const scoped =
@@ -490,13 +484,11 @@ function readBlocks(
         break;
       case 'index-body':
       case 'index-title':
-        // Corps **rendu** d'un index : ignoré à l'import, puisque le sommaire
-        // est régénéré à la pagination depuis sa définition. Le lire produirait
-        // un doublon figé de chaque titre.
+        // The **rendered** body of an index: ignored at import, since the table of contents is regenerated at pagination
+        // time from its definition. Reading it would produce a frozen duplicate of every heading.
         break;
       case 'tracked-changes':
-        // Déjà lu en amont : `readTrackedChanges` a besoin du document entier
-        // avant que le corps ne soit parcouru.
+        // Already read upstream: `readTrackedChanges` needs the whole document before the body is walked.
         break;
       case 'section':
       case 'text-box':
@@ -511,12 +503,11 @@ function readBlocks(
 }
 
 /**
- * Ouvre une portée de liste en entrant dans un `<text:list>`.
+ * Opens a list scope on entering a `<text:list>`.
  *
- * L'identifiant vient de `xml:id` quand il existe — ODF s'en sert pour
- * enchaîner deux listes séparées via `text:continue-list` — et est tiré au sort
- * sinon. Deux `<text:list>` frères sans identifiant sont donc deux listes
- * distinctes, ce qui est le comportement attendu.
+ * The id comes from `xml:id` when there is one (ODF uses it to chain two separated lists through
+ * `text:continue-list`) and is drawn at random otherwise. Two sibling `<text:list>`s with no id are therefore two
+ * distinct lists, which is the expected behavior.
  */
 function enterList(
   element: Element,
@@ -536,20 +527,18 @@ function enterList(
 
   return {
     kind,
-    // Un sous-niveau partage l'identifiant de son parent : c'est une seule
-    // liste hiérarchique, pas deux listes indépendantes.
+    // A sub-level shares the id of its parent: it is a single hierarchical list, not two independent lists.
     id: parent ? parent.id : explicitId ?? newId('list'),
     level,
   };
 }
 
 /**
- * Lit la nature de chaque niveau des styles de liste du document.
+ * Reads the kind of each level of the document's list styles.
  *
- * ODF décrit un style de liste par un `<text:list-style>` contenant un élément
- * par niveau : `text:list-level-style-number` pour une numérotation,
- * `-bullet` pour une puce. C'est la seule source qui distingue les deux — la
- * balise `<text:list>` elle-même est identique dans les deux cas.
+ * ODF describes a list style with a `<text:list-style>` containing one element per level:
+ * `text:list-level-style-number` for numbering, `-bullet` for a bullet. It is the only source that tells the two
+ * apart, the `<text:list>` tag itself being identical in both cases.
  */
 function readListStyles(root: Document | Element): Map<string, ListKind[]> {
   const out = new Map<string, ListKind[]>();
@@ -580,13 +569,11 @@ function readListStyles(root: Document | Element): Map<string, ListKind[]> {
 }
 
 /**
- * Lit une table des matières. Transposition d'`XMLIndexTOCContext`
- * (`xmloff/source/text/XMLIndexTOCContext.cxx`).
+ * Reads a table of contents. (OpenOffice: `XMLIndexTOCContext`, `xmloff/source/text/XMLIndexTOCContext.cxx`.)
  *
- * Seule la **définition** est lue : profondeur, titre, présence des numéros de
- * page. Le corps rendu (`<text:index-body>`) est délibérément ignoré, le
- * sommaire étant régénéré à la pagination — le lire figerait des numéros de
- * page qui ne correspondent plus dès la première frappe.
+ * Only the **definition** is read: depth, title, whether page numbers are shown. The rendered body
+ * (`<text:index-body>`) is deliberately ignored, since the table of contents is regenerated at pagination time;
+ * reading it would freeze page numbers that no longer match at the first keystroke.
  */
 function readToc(element: Element): TocNode {
   const source = firstChildNamed(element, 'table-of-content-source');
@@ -599,8 +586,8 @@ function readToc(element: Element): TocNode {
   const titleTemplate = source ? firstChildNamed(source, 'index-title-template') : null;
   const title = titleTemplate?.textContent?.trim() || DEFAULT_TOC_TITLE;
 
-  // La présence des numéros de page se lit dans le modèle de ligne : c'est
-  // `text:index-entry-page-number` qui en décide, pas un attribut dédié.
+  // Whether page numbers are shown is read from the line template: it is `text:index-entry-page-number` that decides,
+  // not a dedicated attribute.
   const template = source ? firstChildNamed(source, 'table-of-content-entry-template') : null;
   const showPageNumbers = template
     ? firstChildNamed(template, 'index-entry-page-number') !== null
@@ -621,10 +608,10 @@ function readToc(element: Element): TocNode {
 const EMPTY_PICTURES: ReadonlyMap<string, string> = new Map();
 
 /**
- * Texte des paragraphes d'un `draw:text-box`, hors cadres imbriqués.
+ * Text of the paragraphs of a `draw:text-box`, outside nested frames.
  *
- * Sert de repli quand la légende vient d'un autre producteur : le texte est
- * alors déjà composé, numéro compris.
+ * Serves as a fallback when the caption comes from another producer: the text is then already composed, number
+ * included.
  */
 function lisibleDuTextBox(textBox: Element): string | null {
   const morceaux: string[] = [];
@@ -636,17 +623,15 @@ function lisibleDuTextBox(textBox: Element): string | null {
   return morceaux.length > 0 ? morceaux.join(' ') : null;
 }
 
-/** Points par millimètre — `svg:width` est donné en unité XSL-FO (cm, mm, in…). */
+/** Points per millimeter: `svg:width` is given in an XSL-FO unit (cm, mm, in...). */
 const PT_PER_MM = mmToPt(1);
 
 /**
- * Transcrit un `<draw:frame>` portant une image.
+ * Transcribes a `<draw:frame>` carrying an image.
  *
- * Seul l'ancrage « comme caractère » est porté par le modèle : un cadre ancré
- * à la page ou au paragraphe est **tout de même** lu, et devient une image dans
- * le flux, à sa position d'ancrage. Le rendu diffère de Writer — pas
- * d'habillage — mais l'image ne disparaît pas du document, ce qui serait la
- * pire des deux issues.
+ * Only "as a character" anchoring is carried by the model: a frame anchored to the page or to the paragraph is
+ * **still** read, and becomes an image in the flow, at its anchor position. The rendering differs from Writer's
+ * (no wrapping), but the image does not disappear from the document, which would be the worse of the two outcomes.
  */
 function readImageFrame(
   frame: Element,
@@ -654,10 +639,9 @@ function readImageFrame(
   styles: StyleTable,
 ): TextRun | null {
   /*
-   * Cadre englobant d'une image légendée : le nôtre à l'export, celui de
-   * Writer à la relecture. L'image vit dans un `draw:text-box`, à l'intérieur
-   * d'un cadre imbriqué. On descend le chercher, puis on lui rend ses réglages
-   * de légende — nos attributs quand ils sont là, à défaut le texte visible.
+   * Enclosing frame of a captioned image: ours when exporting, Writer's when reading back. The image lives in a
+   * `draw:text-box`, inside a nested frame. We go down to find it, then give it back its caption settings: our
+   * attributes when they are there, the visible text otherwise.
    */
   const textBox = firstChildNamed(frame, 'text-box');
   if (textBox) {
@@ -671,8 +655,8 @@ function readImageFrame(
     const align = attr(frame, NS.writer, 'caption-align');
     const manual = attr(frame, NS.writer, 'caption-manual') === 'true';
 
-    // Cadre venu d'ailleurs : on récupère au moins le texte affiché, faute de
-    // quoi la légende disparaîtrait à la relecture.
+    // Frame from elsewhere: we at least recover the displayed text, otherwise the caption would disappear when read
+    // back.
     const visible = texte ?? lisibleDuTextBox(textBox);
     if (visible === null) return base;
 
@@ -681,8 +665,8 @@ function readImageFrame(
       imageCaption: visible,
       imageCaptionPosition: position === 'above' ? 'above' : 'below',
       imageCaptionAlign: align === 'left' || align === 'right' ? align : 'center',
-      // Sans nos attributs, le texte lu contient déjà « Figure n°X : » : le
-      // renuméroter le doublerait. Il est donc repris tel quel, en manuel.
+      // Without our attributes, the text read already contains "Figure n°X:": numbering it again would double it. It is
+      // therefore taken as it is, in manual mode.
       ...(texte === null || manual ? { imageCaptionManual: true } : {}),
     });
   }
@@ -693,18 +677,17 @@ function readImageFrame(
   const href = attr(image, NS.xlink, 'href');
   if (!href) return null;
 
-  // Un chemin interne (`Pictures/…`) n'a de sens que dans l'archive : il est
-  // résolu par la table extraite du ZIP. Une adresse externe passe telle quelle.
+  // An internal path (`Pictures/…`) only means something in the archive: it is resolved by the table extracted from
+  // the ZIP. An external address passes as it is.
   const src = pictures.get(href.replace(/^\.?\//, '')) ?? pictures.get(href) ?? href;
   if (!isSafeImageSrc(src)) return null;
 
   const widthMm = parseLengthMm(attr(frame, NS.svg, 'width'));
   const heightMm = parseLengthMm(attr(frame, NS.svg, 'height'));
 
-  // Cadre sans dimensions : ODF l'autorise (le lecteur prend la taille
-  // naturelle), le moteur non — il calcule la ligne avant de charger l'image.
-  // Une taille par défaut vaut mieux qu'une image invisible ; l'usager la
-  // corrigera dans l'atelier.
+  // Frame with no dimensions: ODF allows it (the reader takes the natural size), the engine does not, since it
+  // computes the line before loading the image. A default size beats an invisible image; the user will fix it in the
+  // workshop.
   const widthPt = clampSize((widthMm ?? 40) * PT_PER_MM);
   const heightPt = clampSize((heightMm ?? 30) * PT_PER_MM);
 
@@ -713,17 +696,15 @@ function readImageFrame(
     firstChildNamed(frame, 'desc')?.textContent?.trim() ||
     '';
 
-  // `fo:clip` est porté par le **style** du cadre, pas par le cadre lui-même :
-  // c'est là qu'ODF range les propriétés graphiques.
+  // `fo:clip` is carried by the frame's **style**, not by the frame itself: that is where ODF puts graphic properties.
   const styleName = attr(frame, NS.draw, 'style-name');
   const graphic = styleName ? resolveStyle(styles, styleName).graphic : undefined;
   const clip = graphic?.clip;
   const crop = clip ? cropFromClip(clip, widthPt, heightPt) : null;
 
-  // Ancrage : `text:anchor-type` distingue le cadre qui coule dans la ligne de
-  // celui qui flotte. Un `char` d'ODF n'est pas `as-char` — il ancre le cadre
-  // *au* caractère mais hors du flux — et se ramène donc à un ancrage au
-  // paragraphe, le plus proche que porte le modèle.
+  // Anchoring: `text:anchor-type` tells a frame that flows in the line from one that floats. An ODF `char` is not
+  // `as-char`: it anchors the frame *to* the character but outside the flow, so it reduces to anchoring to the
+  // paragraph, the closest that the model carries.
   const anchorType = attr(frame, NS.text, 'anchor-type');
   const anchor: FlyAnchor =
     anchorType === 'page' ? 'to-page' : anchorType === 'as-char' || anchorType === null ? 'as-char' : 'to-para';
@@ -743,9 +724,8 @@ function readImageFrame(
           ...(graphic?.wrapMarginPt !== undefined
             ? { imageWrapMarginPt: graphic.wrapMarginPt }
             : {}),
-          // Alignement et calque : absents du style, ils restent absents du
-          // run, qui retombe alors sur `from-left` et le calque du dessous —
-          // exactement ce que valaient les cadres avant qu'ils n'existent.
+          // Alignment and layer: absent from the style, they stay absent from the run, which then falls back on `from-left`
+          // and the layer below, exactly what frames were worth before these existed.
           ...(graphic?.horiOrient !== undefined
             ? { imageHoriOrient: graphic.horiOrient }
             : {}),
@@ -766,15 +746,14 @@ function readImageFrame(
 }
 
 /**
- * Décode `fo:clip="rect(haut droite bas gauche)"`.
+ * Decodes `fo:clip="rect(top right bottom left)"`.
  *
- * ODF donne des longueurs retranchées de l'**original**, le modèle veut des
- * fractions. On ne connaît pas la taille de l'original — seulement celle du
- * cadre, qui montre déjà la partie conservée — mais les deux se déduisent l'une
- * de l'autre : `original = cadre + retraits`.
+ * ODF gives lengths cut from the **original**, the model wants fractions. We do not know the size of the original,
+ * only that of the frame, which already shows the part that is kept, but the two can be deduced from one another:
+ * `original = frame + insets`.
  *
- * Un `rect(auto auto auto auto)`, ou toute valeur illisible, rend `null` : mieux
- * vaut une image entière qu'un cadrage inventé.
+ * A `rect(auto auto auto auto)`, or any unreadable value, returns `null`: better a whole image than an invented
+ * framing.
  */
 function cropFromClip(
   clip: string,
@@ -784,8 +763,7 @@ function cropFromClip(
   const dedans = /^\s*rect\s*\(([^)]*)\)\s*$/i.exec(clip);
   if (!dedans) return null;
 
-  // Les quatre valeurs se séparent par des espaces ou des virgules selon le
-  // producteur : les deux formes existent dans la nature.
+  // The four values are separated by spaces or commas depending on the producer: both forms exist in the wild.
   const parts = dedans[1]!.trim().split(/[\s,]+/).filter(Boolean);
   if (parts.length !== 4) return null;
 
@@ -848,10 +826,9 @@ function readParagraph(
     ...(resolved.paragraph.keepTogether ? { keepTogether: true } : {}),
   };
 
-  // Attributs de liste : c'est ici que la structure imbriquée d'ODF devient un
-  // attribut de paragraphe, comme `SwTxtNode::SetAttr(RES_PARATR_LIST_*)`.
-  // Le retrait n'est **plus** fabriqué à la main : `effectiveIndentLeftPt` le
-  // dérive du niveau, et l'écrire en dur ici le doublerait.
+  // List attributes: this is where ODF's nested structure becomes a paragraph attribute, like
+  // `SwTxtNode::SetAttr(RES_PARATR_LIST_*)`. The indent is **no longer** made by hand: `effectiveIndentLeftPt` derives
+  // it from the level, and writing it out here would double it.
   if (list) {
     paragraph.listKind = list.kind;
     paragraph.listId = list.id;
@@ -875,13 +852,12 @@ function readParagraph(
 }
 
 /**
- * Parcourt le contenu d'un paragraphe et produit ses runs.
+ * Walks the content of a paragraph and produces its runs.
  *
- * Les **jalons** d'ODF — signets, commentaires, révisions — sont des éléments
- * vides qui n'encadrent rien : ils marquent une position entre deux frères.
- * L'état qu'ils ouvrent vaut donc pour la **suite de la fratrie** et non pour
- * des enfants. C'est pourquoi `active` est mutable au fil de la boucle, là où
- * `currentFormatting` reste fixe pour la descente dans un `<text:span>`.
+ * ODF **milestones** (bookmarks, comments, revisions) are empty elements that frame nothing: they mark a position
+ * between two siblings. The state they open therefore applies to **the rest of the siblings** and not to children.
+ * This is why `active` is mutable along the loop, where `currentFormatting` stays fixed for the descent into a
+ * `<text:span>`.
  */
 function collectRuns(
   node: Node,
@@ -889,8 +865,8 @@ function collectRuns(
   currentFormatting: RunFormatting,
   runs: TextRun[],
 ): void {
-  // Formatage courant, jalons compris. Repart de `currentFormatting` : un
-  // signet ouvert hors de ce nœud reste actif dedans.
+  // Current formatting, milestones included. It starts from `currentFormatting`: a bookmark opened outside this node
+  // stays active inside it.
   let active: RunFormatting = { ...currentFormatting };
 
   for (let i = 0; i < node.childNodes.length; i += 1) {
@@ -917,14 +893,12 @@ function collectRuns(
         break;
       }
       case 'a': {
-        // Le `.odt` vient d'un fichier fourni par l'usager, donc d'une source
-        // non fiable : son `xlink:href` passe par la même normalisation que
-        // les liens saisis dans l'éditeur. Sans elle, un `javascript:` importé
-        // ressortait tel quel dans le `<a href>` du rendu — et se rediffusait
-        // à tous les collaborateurs par le CRDT.
+        // The `.odt` comes from a file supplied by the user, so from an untrusted source: its `xlink:href` goes through the
+        // same normalization as the links typed in the editor. Without it, an imported `javascript:` came out as is in the
+        // rendered `<a href>`, and was re-broadcast to every collaborator through the CRDT.
         const raw = attr(element, NS.xlink, 'href') ?? '';
-        // Un renvoi interne `#nom` n'est pas une adresse à normaliser : il ne
-        // sort jamais du document, et `normalizeUrl` le rejetterait.
+        // An internal `#name` reference is not an address to normalize: it never leaves the document, and `normalizeUrl`
+        // would reject it.
         const href = raw.startsWith('#') ? raw : normalizeUrl(raw);
         const linkFormatting: RunFormatting = href ? { ...active, linkHref: href } : { ...active };
         collectRuns(element, ctx, linkFormatting, runs);
@@ -949,7 +923,7 @@ function collectRuns(
       case 'time':
       case 'author-name':
       case 'initial-creator':
-        // Substitutions directes pour le texte dans le corps
+        // Direct substitutions for the text in the body
         runs.push(makeRun(element.textContent ?? '', active));
         break;
       case 'note': {
@@ -971,12 +945,12 @@ function collectRuns(
       case 'frame': {
         const cadre = readImageFrame(element, ctx.pictures, ctx.styles);
         if (cadre) runs.push(cadre);
-        // Un cadre non transcrit ne descend **pas** : son `<svg:desc>` deviendrait
-        // du texte au fil du paragraphe, ce qui n'a jamais été voulu.
+        // A frame that was not transcribed does **not** descend: its `<svg:desc>` would become text inside the paragraph,
+        // which was never intended.
         break;
       }
 
-      /* -- jalons de plage --------------------------------------------- */
+      /* -- range milestones --------------------------------------------- */
 
       case 'bookmark-start': {
         const name = attr(element, NS.text, 'name');
@@ -990,11 +964,9 @@ function collectRuns(
         break;
       }
       case 'bookmark': {
-        // Signet **ponctuel** : il n'a pas de plage à couvrir. On le pose sur
-        // un run vide plutôt que de l'ignorer — c'est la seule façon de lui
-        // survivre à l'aller-retour, et `normalizeRuns` gardera l'attribut si
-        // du texte le rejoint. Les ancres de titre, elles, sont régénérées à
-        // l'export et n'ont pas à être conservées.
+        // **Point** bookmark: it has no range to cover. We put it on an empty run rather than ignore it, which is the only
+        // way to survive the round trip, and `normalizeRuns` will keep the attribute if text joins it. Heading anchors are
+        // regenerated at export and do not have to be kept.
         const name = attr(element, NS.text, 'name');
         if (name && !blockIdFromHeadingAnchor(name)) {
           runs.push(makeRun('', { ...active, bookmarkName: normalizeBookmarkName(name) }));
@@ -1005,8 +977,8 @@ function collectRuns(
         const comment = readAnnotation(element);
         if (comment) {
           ctx.comments.push(comment);
-          // Seule la racine ouvre une plage : une réponse partage l'ancre du
-          // fil, et l'ouvrir une seconde fois dupliquerait le surlignage.
+          // Only the root opens a range: a reply shares the anchor of the thread, and opening it a second time would duplicate
+          // the highlight.
           if (comment.id === comment.threadId) {
             const ids = active.commentIds ? active.commentIds.split(',') : [];
             const joined = joinCommentIds([...ids, comment.threadId]);
@@ -1039,10 +1011,9 @@ function collectRuns(
         break;
       }
       case 'change': {
-        // Jalon d'une suppression : ODF range le texte supprimé dans l'en-tête
-        // `<text:tracked-changes>`, le corps ne porte que ce repère. On
-        // réinjecte le texte ici, marqué supprimé — sans quoi rejeter la
-        // révision n'aurait rien à restaurer.
+        // Milestone of a deletion: ODF puts the deleted text in the `<text:tracked-changes>` header, the body only carries
+        // this marker. We put the text back here, marked as deleted, otherwise rejecting the revision would have nothing to
+        // restore.
         const id = attr(element, NS.text, 'change-id');
         const text = id ? ctx.deletedText.get(id) : undefined;
         if (id && text) {
@@ -1059,12 +1030,11 @@ function collectRuns(
 }
 
 /**
- * Lit une annotation. Transposition d'`XMLAnnotationImportContext`
- * (`xmloff/source/text/XMLTextFrameContext.cxx` pour l'ancrage,
- * `txtfldi.cxx` pour le champ).
+ * Reads an annotation. (OpenOffice: `XMLAnnotationImportContext`, `xmloff/source/text/XMLTextFrameContext.cxx` for
+ * the anchoring, `txtfldi.cxx` for the field.)
  *
- * Le nom `id~rN` marque une réponse au fil `id` : c'est la convention posée à
- * l'export, ODF 1.2 n'ayant pas de fils de discussion.
+ * The name `id~rN` marks a reply to thread `id`: this is the convention set at export, ODF 1.2 having no discussion
+ * threads.
  */
 function readAnnotation(element: Element): DocumentComment | null {
   const name = attr(element, NS.office, 'name');
@@ -1085,7 +1055,7 @@ function readAnnotation(element: Element): DocumentComment | null {
   const text = paragraphs.join('\n').trim();
   if (!text) return null;
 
-  // Fil clos : porté par l'extension LibreOffice, absente d'ODF 1.2.
+  // Closed thread: carried by the LibreOffice extension, absent from ODF 1.2.
   const resolu = attr(element, NS.loext, 'resolved') === 'true';
 
   return {
@@ -1099,12 +1069,11 @@ function readAnnotation(element: Element): DocumentComment | null {
 }
 
 /**
- * Lit `<text:tracked-changes>`. Transposition d'`XMLChangedRegionImportContext`
- * (`xmloff/source/text/XMLChangedRegionImportContext.cxx`).
+ * Reads `<text:tracked-changes>`. (OpenOffice: `XMLChangedRegionImportContext`,
+ * `xmloff/source/text/XMLChangedRegionImportContext.cxx`.)
  *
- * Renvoie les métadonnées **et** le texte supprimé, que le corps ne porte pas :
- * les deux sont nécessaires avant de parcourir le corps, puisqu'un jalon
- * `<text:change>` rencontré en chemin doit pouvoir restituer son texte.
+ * Returns the metadata **and** the deleted text, which the body does not carry: both are needed before walking the
+ * body, since a `<text:change>` milestone met along the way must be able to give back its text.
  */
 function readTrackedChanges(body: Element): {
   redlines: Map<string, Redline>;
@@ -1168,7 +1137,7 @@ function readTable(element: Element, ctx: ImportContext): TableNode {
   const rows: TableRowNode[] = [];
   let headerRows = 0;
 
-  // Lecture des largeurs de colonnes depuis les balises <table:table-column>
+  // Reading the column widths from the <table:table-column> tags
   const columnWidths: number[] = [];
   for (let i = 0; i < element.children.length; i += 1) {
     const child = element.children[i]!;
@@ -1216,8 +1185,7 @@ function readTable(element: Element, ctx: ImportContext): TableNode {
         const colSpan = Number(attr(cellElement, NS.table, 'number-columns-spanned') ?? '1');
         const rowSpan = Number(attr(cellElement, NS.table, 'number-rows-spanned') ?? '1');
 
-        // Une cellule accepte les mêmes blocs que le corps ; seuls les nœuds
-        // de texte y sont retenus, le modèle n'imbriquant pas les tableaux.
+        // A cell accepts the same blocks as the body; only text nodes are kept in it, the model not nesting tables.
         const cellBlocks: ParagraphNode[] = [];
         for (const inner of readBlocks(cellElement, ctx)) {
           if (isParagraph(inner)) cellBlocks.push(inner);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useRef, useState } from 'react';
 import { Popover } from '../../design/components/Popover';
@@ -7,23 +7,22 @@ import { Popover } from '../../design/components/Popover';
 interface UrlDialogProps {
   label: string;
   title: string;
-  /** Valeur initiale (lien déjà appliqué à la sélection). */
+  /** Initial value (link already applied to the selection). */
   initialUrl?: string;
-  /** Champ « texte alternatif », requis pour les images (accessibilité). */
+  /** "Alternative text" field, required for images (accessibility). */
   withAltText?: boolean;
-  /** Champ « texte à afficher », optionnel pour les liens. */
+  /** "Text to display" field, optional for links. */
   withDisplayText?: boolean;
   onSubmit: (url: string, alt: string) => boolean;
   onRemove?: () => void;
   disabled?: boolean;
-  /** Ref externe : permet à un raccourci clavier d'ouvrir ce dialogue. */
+  /** External ref: lets a keyboard shortcut open this dialog. */
   buttonRef?: React.MutableRefObject<HTMLButtonElement | null>;
   children: React.ReactNode;
 }
 
 /**
- * Saisie d'URL (lien ou image) — un formulaire, pas un `window.prompt` :
- * un prompt natif n'est ni stylable, ni annonçable, ni testable.
+ * URL entry (link or image): a form, not a `window.prompt`: a native prompt cannot be styled, announced or tested.
  */
 export function UrlDialog({
   label,

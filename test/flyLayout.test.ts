@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Cadres flottants et habillage — `SwFlyFreeFrm` (`sw/source/core/layout/fly.cxx`)
- * et le calcul de bande utile de `SwTxtFly` (`sw/source/core/text/txtfly.cxx`).
+ * Floating frames and wrapping: `SwFlyFreeFrm` (`sw/source/core/layout/fly.cxx`) and the usable-band computation of `SwTxtFly` (`sw/source/core/text/txtfly.cxx`).
  *
- * La question à laquelle tout se ramène : *pour une ligne allant de `top` à
- * `bottom`, quel intervalle horizontal reste disponible ?* Ces tests l'attaquent
- * d'abord à nu, puis à travers le formateur de lignes et la pagination.
+ * The question everything comes down to: *for a line going from `top` to `bottom`, what horizontal interval is still available?* These tests attack it first on its own, then through the line formatter and pagination.
  *
  * @vitest-environment jsdom
  */
@@ -48,10 +45,10 @@ function docOf(blocks: DocumentBlock[]) {
   return { ...createEmptyDocument(), blocks };
 }
 
-/** Géométrie d'une A4 à marges par défaut, pour résoudre les alignements. */
+/** Geometry of an A4 with default margins, to resolve the alignments. */
 const geometrie = pageGeometry(createEmptyDocument().pageSetup);
 
-/** `collectFlyFrames` sur la géométrie standard — la forme courante des tests. */
+/** `collectFlyFrames` on the standard geometry: the usual shape in tests. */
 function collecte(blocks: DocumentBlock[]) {
   return collectFlyFrames(docOf(blocks), geometrie);
 }
@@ -69,7 +66,7 @@ function flyRun(surround: FlySurround, extra: Record<string, unknown> = {}) {
   });
 }
 
-/** Cadre nu, en pixels, pour tester `usableBand` sans passer par le modèle. */
+/** A bare frame, in pixels, to test `usableBand` without going through the model. */
 function frame(overrides: Partial<FlyFrame> = {}): FlyFrame {
   return {
     anchorBlockId: 'p1',
@@ -130,13 +127,13 @@ describe('Bande utile (SwTxtFly::GetFrm)', () => {
   });
 
   it('un cadre qui s\'arrête juste au haut de la ligne ne la gêne pas', () => {
-    // Chevauchement **strict** : `bottomPx === topPx` n'est pas une collision.
+    // **Strict** overlap: `bottomPx === topPx` is not a collision.
     const e: FlyExclusion = { topPx: 0, bottomPx: 20, leftPx: 0, rightPx: 300 };
     expect(usableBand([e], 20, 40, contenu)).toEqual({ leftPx: 0, rightPx: contenu });
   });
 
   it('retient le plus large des deux côtés d\'un cadre central', () => {
-    // Cadre de 250 à 300 : 250 px à gauche, 300 px à droite.
+    // Frame from 250 to 300: 250 px on the left, 300 px on the right.
     const e: FlyExclusion = { topPx: 0, bottomPx: 50, leftPx: 250, rightPx: 300 };
     expect(usableBand([e], 0, 20, contenu)).toEqual({ leftPx: 300, rightPx: 600 });
   });
@@ -147,7 +144,7 @@ describe('Bande utile (SwTxtFly::GetFrm)', () => {
   });
 
   it('rejette une bande résiduelle trop étroite pour être lisible', () => {
-    // 10 px à gauche : sous le seuil, une lettre par ligne.
+    // 10 px on the left: under the threshold, one letter per line.
     const e: FlyExclusion = { topPx: 0, bottomPx: 50, leftPx: 10, rightPx: contenu };
     expect(usableBand([e], 0, 20, contenu)).toBeNull();
   });
@@ -155,7 +152,7 @@ describe('Bande utile (SwTxtFly::GetFrm)', () => {
   it('soustrait deux cadres qui se chevauchent sans code particulier', () => {
     const gauche: FlyExclusion = { topPx: 0, bottomPx: 50, leftPx: 0, rightPx: 150 };
     const centre: FlyExclusion = { topPx: 0, bottomPx: 50, leftPx: 100, rightPx: 250 };
-    // Les deux réunis bloquent [0, 250] : il reste [250, 600].
+    // Both together block [0, 250]: [250, 600] remains.
     expect(usableBand([gauche, centre], 0, 20, contenu)).toEqual({ leftPx: 250, rightPx: 600 });
   });
 
@@ -173,21 +170,18 @@ describe('Bande utile (SwTxtFly::GetFrm)', () => {
   });
 
   it('nextClearY progresse toujours, même sur un cadre dégénéré', () => {
-    // Un cadre de hauteur nulle *à l'intérieur* de la ligne compte comme une
-    // collision, exactement comme dans `usableBand` : les deux fonctions
-    // partagent le test de chevauchement, et les désaccorder ferait boucler le
-    // formateur entre une bande refusée et une descente jugée inutile.
+    // A frame of zero height *inside* the line counts as a collision, exactly as in `usableBand`: both functions share the overlap test, and making them disagree would make the formatter loop between a refused band and a
+    // descent judged useless.
     const plat: FlyExclusion = { topPx: 10, bottomPx: 10, leftPx: 0, rightPx: 600 };
     const y = nextClearY([plat], 5, 25);
     expect(y).not.toBeNull();
-    // Progression stricte : c'est elle qui garantit la terminaison.
+    // Strict progress: it is what guarantees termination.
     expect(y!).toBeGreaterThan(5);
 
     const minuscule: FlyExclusion = { topPx: 5, bottomPx: 6, leftPx: 0, rightPx: 600 };
     expect(nextClearY([minuscule], 5, 25)!).toBeGreaterThan(5);
 
-    // En pratique le cas ne se présente pas : `collectFlyFrames` écarte déjà
-    // tout cadre sans hauteur.
+    // In practice the case does not occur: `collectFlyFrames` already discards any frame with no height.
     const p = createParagraph('', {
       runs: [makeRun('￼', { imageSrc: 'data:,x', imageAnchor: 'to-para', imageWidthPt: 10, imageHeightPt: 0 })],
     });
@@ -291,7 +285,7 @@ describe('Habillage dans le formateur de lignes', () => {
     });
 
     expect(layout.lines[0]?.topPx).toBeGreaterThanOrEqual(hauteurCadre);
-    // La ligne retrouve sa pleine largeur une fois passée sous le cadre.
+    // The line gets its full width back once it is past the frame.
     expect(layout.lines[0]?.leftPx).toBe(0);
   });
 
@@ -393,13 +387,10 @@ describe('Aller-retour ODF de l\'habillage', () => {
 });
 
 /**
- * `SURROUND_IDEAL` — l'habillage « optimal » de `SwTxtFly::GetSurroundForTextWrap`
- * (`txtfly.cxx:2372-2402`).
+ * `SURROUND_IDEAL`: the "optimal" wrapping of `SwTxtFly::GetSurroundForTextWrap` (`txtfly.cxx:2372-2402`).
  *
- * Il ne décrit pas une géométrie mais un **arbitrage** : la place restant de
- * chaque côté décide du mode réellement appliqué. Les seuils sont ceux du C++ —
- * `TEXT_MIN` (2 cm) sous lequel une colonne ne mérite pas d'exister, `FRAME_MAX`
- * (1,5 cm) au-delà duquel un cadre ne garde que son côté le plus large.
+ * It does not describe a geometry but an **arbitration**: the room left on each side decides the mode that is really applied. The thresholds are those of the C++: `TEXT_MIN` (2 cm), below which a column does not
+ * deserve to exist, and `FRAME_MAX` (1.5 cm), beyond which a frame only keeps its wider side.
  */
 describe('Habillage optimal (SURROUND_IDEAL)', () => {
   const colonne = 600;
@@ -407,13 +398,12 @@ describe('Habillage optimal (SURROUND_IDEAL)', () => {
 
   it('garde les deux côtés quand chacun dépasse le minimum', () => {
     const gauche = minPx + 20;
-    // Cadre étroit : la règle `FRAME_MAX` ne s'applique pas, les deux côtés vivent.
+    // Narrow frame: the `FRAME_MAX` rule does not apply, both sides live.
     expect(resolveIdealSurround(gauche, gauche + 10, colonne)).toBe('parallel');
   });
 
   it('ne garde que le côté le plus large dès que le cadre est large', () => {
-    // Cadre de 200 px, très au-delà de `FRAME_MAX` : un seul côté survit, et
-    // c'est le plus large — ici la gauche.
+    // Frame of 200 px, far beyond `FRAME_MAX`: only one side survives, and it is the wider one, here the left.
     const droite = colonne - (minPx + 10);
     expect(resolveIdealSurround(minPx + 60, droite, colonne)).toBe('left');
   });
@@ -423,8 +413,7 @@ describe('Habillage optimal (SURROUND_IDEAL)', () => {
   });
 
   it('renonce à habiller quand aucun côté n\'atteint le minimum', () => {
-    // Cadre presque aussi large que la colonne : les deux bandes résiduelles
-    // sont sous `TEXT_MIN`, le texte passe donc au-dessus et au-dessous.
+    // Frame almost as wide as the column: the two leftover bands are under `TEXT_MIN`, so the text goes above and below.
     expect(resolveIdealSurround(10, colonne - 10, colonne)).toBe('none');
   });
 
@@ -434,8 +423,7 @@ describe('Habillage optimal (SURROUND_IDEAL)', () => {
   });
 
   it('se résout au moment de calculer l\'exclusion, jamais avant', () => {
-    // Cadre collé au bord gauche : `ideal` doit se comporter comme `right`,
-    // c'est-à-dire n'interdire que la partie gauche de la colonne.
+    // Frame stuck to the left edge: `ideal` must behave like `right`, that is to say only forbid the left part of the column.
     const cadre = frame({ surround: 'ideal', leftPx: 0, widthPx: 120, marginPx: 0 });
     const exclusion = exclusionOf(cadre, colonne);
     expect(exclusion).not.toBeNull();
@@ -445,12 +433,10 @@ describe('Habillage optimal (SURROUND_IDEAL)', () => {
 });
 
 /**
- * Position d'un cadre — `SwFmtHoriOrient` et `text::RelOrientation`.
+ * Position of a frame: `SwFmtHoriOrient` and `text::RelOrientation`.
  *
- * Ce que ces tests vérifient tient en une phrase : un alignement est
- * **recalculé**, un décalage est **lu**. C'est toute la différence entre une
- * image qui reste collée à la marge quand celle-ci bouge et une image qui s'en
- * détache.
+ * What these tests check fits in one sentence: an alignment is **recomputed**, an offset is **read**. That is the whole difference between an image that stays stuck to the margin when the margin moves and an image that
+ * comes away from it.
  */
 describe('Alignement horizontal des cadres', () => {
   const geo = { pageWidthPx: 794, contentLeftPx: 76, contentWidthPx: 642 };
@@ -466,8 +452,7 @@ describe('Alignement horizontal des cadres', () => {
   });
 
   it('mesure sur la feuille entière, marges comprises, en repère « page »', () => {
-    // Aligné à gauche de la **feuille** : le cadre déborde donc dans la marge,
-    // à une abscisse négative dans le repère de la colonne.
+    // Aligned to the left of the **sheet**: the frame therefore overflows into the margin, at a negative x coordinate in the column's frame of reference.
     expect(resolveFlyLeft('left', 'page', 0, 100, geo)).toBe(-76);
     expect(resolveFlyLeft('right', 'page', 0, 100, geo)).toBeCloseTo(-76 + 794 - 100, 5);
   });
@@ -478,8 +463,7 @@ describe('Alignement horizontal des cadres', () => {
     });
     const cadres = collecte([p]);
     expect(cadres).toHaveLength(1);
-    // 100 pt de large, aligné à droite d'une colonne connue : l'abscisse ne
-    // vaut plus zéro, alors que le modèle porte toujours `imageXPt: 0`.
+    // 100 pt wide, aligned to the right of a known column: the x coordinate is no longer zero, whereas the model still carries `imageXPt: 0`.
     expect(cadres[0]!.leftPx).toBeCloseTo(geometrie.contentWidthPx - ptToPx(100), 5);
   });
 
@@ -490,11 +474,9 @@ describe('Alignement horizontal des cadres', () => {
 });
 
 /**
- * Les cinq façons de poser une image sur la page.
+ * The five ways of placing an image on the page.
  *
- * `imageWrapMode` et `wrapFormatting` sont réciproques : c'est ce qui garantit
- * qu'un menu coché sur « Devant le texte » désigne bien l'état qu'on obtient en
- * cliquant « Devant le texte ».
+ * `imageWrapMode` and `wrapFormatting` are reciprocal: that is what guarantees that a menu ticked on "In front of the text" does designate the state you get by clicking "In front of the text".
  */
 describe('Modes d\'intégration au texte', () => {
   it('lit le mode des trois attributs d\'OpenOffice', () => {
@@ -525,8 +507,7 @@ describe('Modes d\'intégration au texte', () => {
   });
 
   it('conserve un ancrage à la page en changeant de mode', () => {
-    // Basculer « derrière » → « devant » ne doit pas ramener au paragraphe un
-    // cadre posé sur la feuille.
+    // Switching "behind" → "in front" must not bring back to the paragraph a frame that was placed on the sheet.
     expect(wrapFormatting('front', 'to-page').imageAnchor).toBe('to-page');
   });
 
@@ -585,8 +566,7 @@ describe('Aller-retour ODF de l\'habillage optimal et du calque', () => {
   });
 
   it('nomme la colonne de texte comme ODF l\'exige selon l\'ancre', () => {
-    // Sous une ancre de page, ODF n'accepte pas `paragraph` : le repère de la
-    // colonne s'y appelle `page-content`.
+    // Under a page anchor, ODF does not accept `paragraph`: the column's frame of reference is called `page-content` there.
     const surPage = buildContentXml(
       docOf([
         createParagraph('', {
@@ -599,24 +579,21 @@ describe('Aller-retour ODF de l\'habillage optimal et du calque', () => {
 });
 
 /**
- * Débordement d'un cadre hors de son ancre — `SwTxtFly` interroge la liste des
- * cadres de la **page**, pas celle du paragraphe.
+ * Overflow of a frame beyond its anchor: `SwTxtFly` queries the list of frames of the **page**, not that of the paragraph.
  *
- * C'est le cas courant et non un cas limite : une image de huit centimètres
- * ancrée à un paragraphe de deux lignes déborde nécessairement sur ce qui suit.
+ * It is the usual case and not an edge case: an eight-centimeter image anchored to a two-line paragraph necessarily overflows onto what follows.
  */
 describe('Cadres débordant de leur paragraphe d\'ancrage', () => {
   const suite = 'Un paragraphe suivant, assez long pour occuper plusieurs lignes de la colonne et se faire couper par un cadre voisin.';
 
-  /** Largeur de la plus large ligne d'un paragraphe posé. */
+  /** Width of the widest line of a laid-out paragraph. */
   function largeurMax(layout: ReturnType<typeof paginateDocument>, blockId: string): number {
     const lignes = layout.paragraphLayouts.get(blockId)?.lines ?? [];
     return Math.max(0, ...lignes.map((ligne) => ligne.widthPx));
   }
 
   it('écarte le texte des paragraphes suivants', () => {
-    // Un cadre haut de 400 pt ancré à un paragraphe d'une seule ligne : il
-    // recouvre nécessairement les paragraphes du dessous.
+    // A frame 400 pt high anchored to a one-line paragraph: it necessarily covers the paragraphs below.
     const porteur = createParagraph('', {
       runs: [flyRun('parallel', { imageHeightPt: 400, imageWidthPt: 200 })],
     });
@@ -630,13 +607,10 @@ describe('Cadres débordant de leur paragraphe d\'ancrage', () => {
 
   it('laisse intact un paragraphe posé sous le bas du cadre', () => {
     /*
-     * Cadre entièrement contenu dans son ancre : le paragraphe suivant commence
-     * plus bas et n'a rien à contourner.
+     * Frame entirely contained in its anchor: the next paragraph starts lower and has nothing to go around.
      *
-     * Le porteur doit avoir sa propre hauteur pour que le cas existe. Un cadre
-     * ancré à un paragraphe **vide** déborde toujours — le paragraphe ne fait
-     * que quelques pixels de haut, le cadre est nécessairement plus grand, et
-     * c'est bien le paragraphe suivant qu'il recouvre.
+     * The carrier must have its own height for the case to exist. A frame anchored to an **empty** paragraph always overflows: the paragraph is only a few pixels high, the frame is necessarily bigger, and it is indeed the
+     * next paragraph that it covers.
      */
     const porteur = createParagraph(suite, {
       runs: [makeRun(suite), flyRun('parallel', { imageHeightPt: 8, imageWidthPt: 40 })],

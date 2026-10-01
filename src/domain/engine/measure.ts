@@ -1,30 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Mesure du texte. Équivalent de `SwFntObj` / `OutputDevice::GetTextWidth`.
+ * Text measurement. (Equivalent of `SwFntObj` / `OutputDevice::GetTextWidth`.)
  *
- * Writer mesure via le périphérique de sortie ; nous mesurons via un contexte
- * Canvas 2D, avec une contrainte de plus : **notre mesure doit être celle que le
- * navigateur rendra**, sinon le curseur, calculé par le moteur, dériverait des
- * glyphes, peints par le navigateur.
+ * Writer measures through the output device; we measure through a Canvas 2D context, with one
+ * more constraint: **our measurement must be the one the browser will render**, otherwise the
+ * cursor, computed by the engine, would drift away from the glyphs, painted by the browser.
  *
- * D'où deux décisions liées :
- *  1. la largeur d'un texte est la **somme des largeurs de ses grappes de
- *     graphèmes**, mises en cache ;
- *  2. le rendu désactive crénage et ligatures (`font-kerning: none`,
- *     `font-variant-ligatures: none`, cf. editor.css).
+ * Hence two linked decisions:
+ *  1. the width of a text is the **sum of the widths of its grapheme clusters**, cached;
+ *  2. the rendering turns off kerning and ligatures (`font-kerning: none`,
+ *     `font-variant-ligatures: none`, see editor.css).
  *
- * Sans (2), la somme des avances individuelles ne vaut pas la largeur rendue et
- * l'écart s'accumule le long de la ligne. Avec, l'égalité est exacte, et le
- * moteur reste seul juge de la géométrie.
+ * Without (2), the sum of the individual advances does not equal the rendered width and the gap
+ * builds up along the line. With it, the equality is exact, and the engine stays the only judge
+ * of the geometry.
  */
 
-/** Fonte résolue, prête à mesurer. */
+/** A resolved font, ready to measure with. */
 export interface FontSpec {
   fontFamily: string;
   fontSizePx: number;
@@ -35,16 +33,16 @@ export interface FontSpec {
 export interface FontMetrics {
   ascentPx: number;
   descentPx: number;
-  /** Interligne naturelle de la fonte, avant application du facteur du paragraphe. */
+  /** Natural line height of the font, before the paragraph's factor is applied. */
   naturalLineHeightPx: number;
 }
 
 export interface TextMeasurer {
-  /** Largeur d'une chaîne, en pixels CSS. */
+  /** Width of a string, in CSS pixels. */
   measure(text: string, font: FontSpec): number;
   /**
-   * Largeurs cumulées : `prefix[i]` = largeur de `text.slice(0, i)`.
-   * Longueur du tableau : `text.length + 1`.
+   * Cumulative widths: `prefix[i]` = width of `text.slice(0, i)`. Array length:
+   * `text.length + 1`.
    */
   prefixWidths(text: string, font: FontSpec): Float64Array;
   metrics(font: FontSpec): FontMetrics;
@@ -54,7 +52,7 @@ export function fontKey(font: FontSpec): string {
   return `${font.bold ? 'b' : ''}${font.italic ? 'i' : ''}|${font.fontSizePx}|${font.fontFamily}`;
 }
 
-/** Chaîne `font` au sens CSS/Canvas. */
+/** `font` string in the CSS/Canvas sense. */
 export function fontToCss(font: FontSpec): string {
   const style = font.italic ? 'italic ' : '';
   const weight = font.bold ? '700 ' : '400 ';
@@ -62,11 +60,11 @@ export function fontToCss(font: FontSpec): string {
 }
 
 /**
- * Découpe en grappes de graphèmes.
+ * Splitting into grapheme clusters.
  *
- * Mesurer par unité de code UTF-16 couperait un emoji en deux moitiés sans
- * largeur propre. `Intl.Segmenter` donne les vraies grappes ; à défaut, itérer
- * par point de code traite déjà correctement les paires de substitution.
+ * Measuring per UTF-16 code unit would cut an emoji into two halves with no width of their own.
+ * `Intl.Segmenter` gives the real clusters; failing that, iterating by code point already handles
+ * surrogate pairs correctly.
  */
 const segmenter =
   typeof Intl !== 'undefined' && 'Segmenter' in Intl
@@ -80,12 +78,11 @@ export function graphemes(text: string): string[] {
 }
 
 /**
- * Frontières de grappes, en offsets d'unités de code UTF-16.
+ * Cluster boundaries, as UTF-16 code-unit offsets.
  *
- * Contient toujours `0` et `text.length`. C'est la seule table dont a besoin la
- * navigation au curseur : se déplacer, c'est sauter d'une frontière à la
- * suivante, ce qui rend impossible de couper un emoji composé — et `👨‍👩‍👧`
- * en est un, huit unités de code liées par des jointeurs sans chasse.
+ * Always contains `0` and `text.length`. It is the only table cursor navigation needs: moving
+ * means jumping from one boundary to the next, which makes it impossible to cut a composite
+ * emoji, and `👨‍👩‍👧` is one: eight code units tied together by zero-width joiners.
  */
 export function graphemeBoundaries(text: string): number[] {
   const bounds = [0];
@@ -98,8 +95,8 @@ export function graphemeBoundaries(text: string): number[] {
     return bounds;
   }
 
-  // Repli sans `Intl.Segmenter` : points de code, marques combinantes et
-  // séquences liées par un jointeur de largeur nulle.
+  // Fallback without `Intl.Segmenter`: code points, combining marks and sequences tied by a
+  // zero-width joiner.
   let at = 0;
   while (at < text.length) {
     const code = text.codePointAt(at) ?? 0;
@@ -108,7 +105,7 @@ export function graphemeBoundaries(text: string): number[] {
       const following = text.codePointAt(next);
       if (following === undefined) break;
       if (following === ZWJ) {
-        // Un jointeur soude ce qui suit à la grappe courante.
+        // A joiner welds what follows to the current cluster.
         const joined = text.codePointAt(next + 1);
         if (joined === undefined) break;
         next += 1 + (joined > 0xffff ? 2 : 1);
@@ -135,7 +132,7 @@ function isCombiningMark(code: number): boolean {
   );
 }
 
-/** Socle commun : cache par fonte puis par grappe, et cumul des largeurs. */
+/** Common base: cache per font then per cluster, and accumulation of widths. */
 abstract class CachingMeasurer implements TextMeasurer {
   private readonly cache = new Map<string, Map<string, number>>();
 
@@ -170,8 +167,8 @@ abstract class CachingMeasurer implements TextMeasurer {
 
     for (const grapheme of graphemes(text)) {
       const next = width + this.widthOf(grapheme, font);
-      // Les positions *à l'intérieur* d'une grappe reçoivent la largeur de son
-      // début : le curseur ne peut donc pas se poser au milieu d'un emoji.
+      // The positions *inside* a cluster get the width of its start: the cursor therefore cannot land
+      // in the middle of an emoji.
       for (let i = 1; i < grapheme.length; i += 1) prefix[cursor + i] = width;
       cursor += grapheme.length;
       prefix[cursor] = next;
@@ -182,7 +179,7 @@ abstract class CachingMeasurer implements TextMeasurer {
   }
 }
 
-/** Mesure réelle, par contexte Canvas 2D. */
+/** Real measurement, through a Canvas 2D context. */
 export class CanvasTextMeasurer extends CachingMeasurer {
   private readonly ctx: CanvasRenderingContext2D;
 
@@ -200,8 +197,8 @@ export class CanvasTextMeasurer extends CachingMeasurer {
 
   override metrics(font: FontSpec): FontMetrics {
     this.ctx.font = fontToCss(font);
-    // Les métriques de la fonte elle-même, pas celles du texte mesuré : on veut
-    // une hauteur de ligne stable, indépendante des glyphes présents.
+    // The metrics of the font itself, not those of the measured text: we want a stable line height,
+    // independent of the glyphs present.
     const probe = this.ctx.measureText('Hxdp');
     const ascentPx = probe.fontBoundingBoxAscent || probe.actualBoundingBoxAscent
       || font.fontSizePx * 0.8;
@@ -219,20 +216,20 @@ function createCanvasContext(): CanvasRenderingContext2D | null {
   if (typeof document === 'undefined') return null;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  // jsdom fournit `getContext` mais pas toujours `measureText` : sans cette
-  // vérification l'échec surviendrait à la première mesure, loin d'ici.
+  // jsdom provides `getContext` but not always `measureText`: without this check the failure would
+  // only appear at the first measurement, far from here.
   return ctx && typeof ctx.measureText === 'function' ? ctx : null;
 }
 
 /**
- * Mesure analytique, sans Canvas.
+ * Analytical measurement, without Canvas.
  *
- * Table d'avances approchant une fonte à empattements. Elle sert aux tests et
- * au Web Worker : le moteur doit rester exécutable là où il n'y a pas de DOM.
- * Les largeurs sont exprimées en fraction de cadratin, donc indépendantes du corps.
+ * A table of advances that approximates a serif font. It serves the tests and the Web Worker: the
+ * engine must stay runnable where there is no DOM. Widths are expressed as a fraction of an em, so
+ * they do not depend on the font size.
  */
 const EM_WIDTHS: Readonly<Record<string, number>> = {
-  ' ': 0.25, '\u00a0': 0.25 /* insécable */, '\t': 1,
+  ' ': 0.25, '\u00a0': 0.25 /* non-breaking */, '\t': 1,
   i: 0.278, j: 0.278, l: 0.278, t: 0.278, f: 0.333, r: 0.333, I: 0.333,
   m: 0.778, w: 0.722, M: 0.889, W: 0.944,
   '.': 0.25, ',': 0.25, ';': 0.278, ':': 0.278, "'": 0.18, '"': 0.4,
@@ -241,7 +238,7 @@ const EM_WIDTHS: Readonly<Record<string, number>> = {
 const EM_DEFAULT_LOWER = 0.5;
 const EM_DEFAULT_UPPER = 0.7;
 const EM_DEFAULT_OTHER = 0.5;
-/** Un idéogramme occupe un cadratin plein. */
+/** An ideograph takes one full em. */
 const EM_WIDE = 1;
 
 export class MetricTextMeasurer extends CachingMeasurer {
@@ -259,7 +256,7 @@ export class MetricTextMeasurer extends CachingMeasurer {
       else em = EM_DEFAULT_OTHER;
     }
 
-    // Le gras élargit légèrement, l'italique ne change pas l'avance.
+    // Bold widens slightly, italic does not change the advance.
     const weight = font.bold ? 1.04 : 1;
     return em * font.fontSizePx * weight;
   }
@@ -271,7 +268,7 @@ export class MetricTextMeasurer extends CachingMeasurer {
   }
 }
 
-/** Mesureur adapté à l'environnement : Canvas si disponible, sinon analytique. */
+/** Measurer suited to the environment: Canvas if available, otherwise analytical. */
 export function createMeasurer(): TextMeasurer {
   const ctx = createCanvasContext();
   return ctx ? new CanvasTextMeasurer(ctx) : new MetricTextMeasurer();

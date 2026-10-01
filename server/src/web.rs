@@ -1,26 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Service du bundle de l'éditeur par le binaire du serveur lui-même.
+//! Serving the editor bundle from the server binary itself.
 //!
-//! L'éditeur appelle son API en RELATIF (`/api/v1/…`) et ouvre son WebSocket de
-//! synchronisation sur l'origine de la page. Page et API doivent donc partager
-//! une origine. Trois montages y parviennent, et un seul ne demande aucune
-//! pièce en plus : celui-ci.
+//! The editor calls its API with RELATIVE addresses (`/api/v1/…`) and opens its
+//! sync WebSocket on the page's origin. The page and the API therefore have to
+//! share one origin. Three setups achieve this, and only one needs no extra piece:
+//! this one.
 //!
-//!   * en développement, le proxy de `vite.config.ts` renvoie `/api` vers ce
-//!     serveur — d'où le `ws: true`, sans lequel la montée en WebSocket échoue ;
-//!   * en production, HAProxy route `writer.<domaine>/api` ici ;
-//!   * désormais, ce processus sert aussi la page, et les deux se rejoignent
-//!     sans proxy du tout.
+//!   * in development, the proxy in `vite.config.ts` sends `/api` to this server,
+//!     hence the `ws: true`, without which upgrading to a WebSocket fails;
+//!   * in production, HAProxy routes `writer.<domain>/api` here;
+//!   * now, this process also serves the page, and the two meet with no proxy at
+//!     all.
 //!
-//! C'est ce qui manquait en conteneur : l'image de la page ne servait que des
-//! fichiers statiques, si bien qu'un `/api/v1/…` y recevait le shell HTML avec
-//! un 200, et que le WebSocket ne montait jamais. Le document s'ouvrait à vide
-//! et rien ne s'enregistrait.
+//! This is what was missing in a container: the page's image only served static
+//! files, so a `/api/v1/…` request received the HTML shell with a 200, and the
+//! WebSocket never came up. The document opened empty and nothing was saved.
 //!
-//! Sans `WRITER_WEB_ROOT`, rien de tout cela ne s'active : le serveur se
-//! comporte comme avant, et c'est Vite ou HAProxy qui sert la page.
+//! Without `WRITER_WEB_ROOT` none of this is active: the server behaves as before,
+//! and Vite or HAProxy serves the page.
 
 use std::path::{Path, PathBuf};
 
@@ -32,11 +31,11 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::state::AppState;
 
-/// Racine du bundle, si elle est configurée ET réellement présente.
+/// Root of the bundle, if it is configured AND really present.
 ///
-/// Un chemin qui ne mène nulle part est signalé au démarrage plutôt que
-/// découvert en produisant des 404 sur chaque page : l'image est construite
-/// avec le bundle dedans, son absence est une erreur de build.
+/// A path that leads nowhere is reported at startup rather than discovered by
+/// producing 404s on every page: the image is built with the bundle inside, so its
+/// absence is a build error.
 pub fn resolve_root(configured: Option<&str>) -> Option<PathBuf> {
     let brut = configured?.trim();
     if brut.is_empty() {
@@ -53,15 +52,15 @@ pub fn resolve_root(configured: Option<&str>) -> Option<PathBuf> {
     Some(racine)
 }
 
-/// Repli du routeur : tout ce qui n'est pas une route connue est une URL de la
-/// SPA — `/doc/<id>` en particulier — donc `index.html`, que le routeur React
-/// résoudra côté navigateur.
+/// Router fallback: anything that is not a known route is a URL of the SPA
+/// (`/doc/<id>` in particular), so it gets `index.html`, which the React router
+/// will resolve in the browser.
 pub async fn spa_fallback(State(state): State<AppState>, requete: Request) -> Response {
-    // Un `/api/...` inconnu doit rester un 404 FRANC. Le faire tomber dans la
-    // SPA renverrait `index.html` avec un 200 : côté client, `res.ok` serait
-    // vrai et l'échec n'apparaîtrait qu'au `JSON.parse`, sous la forme d'un
-    // « Unexpected token < » qui ne désigne rien. C'est exactement le
-    // symptôme qu'avait le conteneur statique, et il a coûté cher à lire.
+    // An unknown `/api/...` must stay a CLEAR 404. Letting it fall into the SPA would
+    // return `index.html` with a 200: on the client, `res.ok` would be true and the
+    // failure would only show up at `JSON.parse`, as an "Unexpected token <" that
+    // points at nothing. That is exactly the symptom the static container had, and it
+    // cost a lot of time to read.
     if requete.uri().path().starts_with("/api") {
         return (StatusCode::NOT_FOUND, "route d'API inconnue").into_response();
     }
@@ -74,20 +73,19 @@ pub async fn spa_fallback(State(state): State<AppState>, requete: Request) -> Re
 }
 
 async fn servir(racine: &Path, requete: Request) -> Response {
-    // Relevé avant de céder la requête au service, qui la consomme.
+    // Read before handing the request to the service, which consumes it.
     let chemin = requete.uri().path().to_string();
 
-    // `.br` / `.gz` précompressés au build (voir le Dockerfile) : servis tels
-    // quels quand le navigateur les accepte, sans une compression à
-    // l'exécution.
+    // Pre-compressed `.br` / `.gz` files made at build time (see the Dockerfile): sent
+    // as they are when the browser accepts them, with no compression at run time.
     let service = ServeDir::new(racine)
         .precompressed_br()
         .precompressed_gzip()
         .fallback(ServeFile::new(racine.join("index.html")));
 
-    // `ServeDir` a `Infallible` pour type d'erreur : le compilateur garantit
-    // que cette branche ne peut pas exister, un fichier manquant étant déjà un
-    // 404 renvoyé par le service lui-même.
+    // `ServeDir` has `Infallible` as its error type: the compiler guarantees this
+    // branch cannot exist, since a missing file is already a 404 returned by the
+    // service itself.
     let reponse = match service.oneshot(requete).await {
         Ok(reponse) => reponse,
         Err(impossible) => match impossible {},
@@ -102,14 +100,14 @@ async fn servir(racine: &Path, requete: Request) -> Response {
     reponse
 }
 
-/// Le fichier porte-t-il un hash de contenu dans son nom ? Vite ne le garantit
-/// que pour ce qu'il émet lui-même, dans `assets/`.
+/// Does the file carry a content hash in its name? Vite only guarantees that for
+/// what it emits itself, in `assets/`.
 fn hashe_par_vite(chemin: &str) -> bool {
     chemin.starts_with("/assets/")
 }
 
-/// Un nom contenant son hash désigne un contenu immuable : le revalider ne peut
-/// rien apprendre au navigateur.
+/// A name that contains its hash designates immutable content: revalidating it can
+/// teach the browser nothing.
 fn figer_dans_le_cache(reponse: &mut Response) {
     reponse.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -117,8 +115,8 @@ fn figer_dans_le_cache(reponse: &mut Response) {
     );
 }
 
-/// Le shell de la SPA est le seul document HTML du bundle : son type suffit à
-/// le reconnaître, quelle que soit l'URL par laquelle on y est arrivé.
+/// The SPA shell is the only HTML document in the bundle: its type is enough to
+/// recognize it, whatever URL it was reached through.
 fn est_le_shell(reponse: &Response) -> bool {
     reponse
         .headers()
@@ -127,9 +125,9 @@ fn est_le_shell(reponse: &Response) -> bool {
         .is_some_and(|t| t.starts_with("text/html"))
 }
 
-/// Interdit cache ET revalidation du shell : son contenu ne change pas d'un
-/// déploiement à l'autre (même `ETag`) alors que ses en-têtes, eux, changent.
-/// Un 304 ne porte pas de `Content-Type` et fait rejouer l'ancien.
+/// Forbid caching AND revalidation of the shell: its content does not change from
+/// one deployment to the next (same `ETag`) while its headers do. A 304 carries no
+/// `Content-Type` and makes the browser replay the old one.
 fn interdire_la_revalidation(reponse: &mut Response) {
     let entetes = reponse.headers_mut();
     entetes.remove(header::ETAG);
@@ -152,7 +150,7 @@ mod tests {
         assert!(resolve_root(Some("/chemin/qui/n/existe/pas")).is_none());
     }
 
-    /// Bundle minimal sur disque : un shell et un asset hashé par Vite.
+    /// Minimal bundle on disk: a shell and an asset hashed by Vite.
     fn bundle_temporaire() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "writer-web-{}",
@@ -179,9 +177,9 @@ mod tests {
         servir(racine, requete).await
     }
 
-    /// Le cœur de la panne corrigée : `/doc/<id>` n'existe pas sur le disque,
-    /// c'est une route du routeur React. Sans repli, l'éditeur répondait 404
-    /// sur sa propre URL d'ouverture.
+    /// The heart of the bug that was fixed: `/doc/<id>` does not exist on disk, it is a
+    /// route of the React router. Without a fallback, the editor answered 404 on its own
+    /// opening URL.
     #[tokio::test]
     async fn une_url_de_la_spa_rend_le_shell() {
         let racine = bundle_temporaire();
@@ -203,8 +201,8 @@ mod tests {
         let reponse = demander(&racine, "/").await;
         let entetes = reponse.headers();
         assert_eq!(entetes.get(header::CACHE_CONTROL).unwrap(), "no-store");
-        // Un 304 ne porte pas de Content-Type : le navigateur rejouerait
-        // l'ancien, et la page se TÉLÉCHARGERAIT au lieu de s'afficher.
+        // A 304 carries no Content-Type: the browser would replay the old one, and the
+        // page would be DOWNLOADED instead of displayed.
         assert!(entetes.get(header::ETAG).is_none());
         assert!(entetes.get(header::LAST_MODIFIED).is_none());
         std::fs::remove_dir_all(&racine).ok();
@@ -225,8 +223,8 @@ mod tests {
     #[test]
     fn seul_ce_que_vite_hashe_est_fige_dans_le_cache() {
         assert!(hashe_par_vite("/assets/index-a1b2c3.js"));
-        // `public/` est copié tel quel, sous un nom stable : le figer pour un
-        // an rendrait impossible d'en corriger un sans le renommer.
+        // `public/` is copied as is, under a stable name: freezing it for a year would make
+        // it impossible to fix one of its files without renaming it.
         assert!(!hashe_par_vite("/favicon.ico"));
         assert!(!hashe_par_vite("/doc/abc"));
         assert!(!hashe_par_vite("/"));

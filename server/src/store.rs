@@ -1,28 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Persistance : journal d'updates en ajout seul + instantanés compactés.
+//! Persistence: an append-only update log plus compacted snapshots.
 //!
-//! Reprise du `FileStore` de `write/server`. Le journal contient désormais des
-//! **updates CRDT binaires** cadrées, et non plus des lignes JSON d'opérations
-//! de bloc : c'est la conséquence directe du passage au relais Yjs, où le
-//! serveur ne connaît plus le contenu de ce qu'il transporte.
+//! Taken over from the `FileStore` of `write/server`. The log now holds framed
+//! **binary CRDT updates**, and no longer JSON lines of block operations. This is
+//! the direct consequence of moving to the Yjs relay, where the server no longer
+//! knows the content of what it carries.
 //!
-//! On y perd la lisibilité d'un `tail -f` sur le journal, et c'est un vrai
-//! regret. On y gagne ce que l'ancien format ne pouvait pas donner : deux
-//! personnes écrivant dans le même paragraphe ne s'effacent plus. Le contenu
-//! reste consultable en JSON par `GET /documents/{id}/snapshot` et par le flux
-//! d'observation, qui projettent le document à la demande (`content.rs`).
+//! We lose the readability of a `tail -f` on the log, and that is a real regret. We
+//! gain what the old format could not give: two people writing in the same
+//! paragraph no longer erase each other. The content can still be read as JSON
+//! through `GET /documents/{id}/snapshot` and through the observation feed, which
+//! project the document on demand (`content.rs`).
 //!
-//! La durabilité ne change pas : `fsync` avant de rendre la main.
+//! Durability does not change: `fsync` before giving control back.
 //!
-//! ## Documents écrits par la version précédente
+//! ## Documents written by the previous version
 //!
-//! Les anciens fichiers (`journal.jsonl`, `snapshot.json`) portent des noms
-//! différents des nouveaux (`journal.bin`, `snapshot.bin`) : ils ne sont donc
-//! jamais lus par erreur. `load_legacy` les relit explicitement au premier
-//! chargement d'un document ancien, pour l'amorcer avec son contenu plutôt que
-//! de le rouvrir vide.
+//! The old files (`journal.jsonl`, `snapshot.json`) have names different from the
+//! new ones (`journal.bin`, `snapshot.bin`), so they are never read by mistake.
+//! `load_legacy` reads them explicitly the first time an old document is loaded,
+//! to seed it with its content rather than reopen it empty.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,37 +29,37 @@ use std::path::{Path, PathBuf};
 use crate::error::{AppError, AppResult};
 use crate::legacy::SequencedOperation;
 
-/// Nombre d'updates journalisées avant compaction en instantané.
+/// Number of updates logged before they are compacted into a snapshot.
 pub const COMPACTION_THRESHOLD: usize = 500;
 
-/// Points de restauration conservés par document.
+/// Restore points kept per document.
 pub const MAX_RESTORE_POINTS: usize = 20;
 
-/// Garde de relecture : un document texte n'atteint jamais cette taille.
+/// Reading guard: a text document never reaches this size.
 const MAX_SNAPSHOT_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Un état daté du document, conservé après compaction.
+/// A dated state of the document, kept after compaction.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RestorePoint {
-    /// Horodatage servant d'identifiant (`20260825T151530.123456`).
+    /// A timestamp that serves as the id (`20260825T151530.123456`).
     pub id: String,
     pub size_bytes: u64,
 }
 
 #[derive(Debug, Default)]
 pub struct LoadedDocument {
-    /// Instantané compacté (update CRDT complète) s'il existe.
+    /// The compacted snapshot (a complete CRDT update), if there is one.
     pub snapshot: Option<Vec<u8>>,
-    /// Updates journalisées après l'instantané, dans l'ordre d'arrivée.
+    /// Updates logged after the snapshot, in order of arrival.
     pub updates: Vec<Vec<u8>>,
-    /// Trames du journal qu'on n'a pas su relire — annoncées, jamais tues.
+    /// Log frames that could not be read: reported, never silenced.
     pub corrupted: usize,
 }
 
-/// Ce qu'un document de l'ancien format porte encore sur le disque.
+/// What a document in the old format still holds on disk.
 #[derive(Debug, Default)]
 pub struct LegacyDocument {
-    /// Instantané JSON et la révision qu'il représentait.
+    /// The JSON snapshot and the revision it represented.
     pub snapshot: Option<(u64, serde_json::Value)>,
     pub operations: Vec<SequencedOperation>,
 }
@@ -77,8 +76,8 @@ impl FileStore {
     }
 
     fn dir(&self, doc_id: &str) -> PathBuf {
-        // `doc_id` est un UUID validé en amont : il ne provient jamais brut du
-        // client, donc aucune traversée de répertoire n'est possible ici.
+        // `doc_id` is a UUID validated upstream: it never comes raw from the client, so no
+        // directory traversal is possible here.
         self.root.join(doc_id)
     }
 
@@ -90,7 +89,7 @@ impl FileStore {
         self.dir(doc_id).join("snapshot.bin")
     }
 
-    // Ancien format : lu une fois, jamais écrit.
+    // Old format: read once, never written.
     fn legacy_journal_path(&self, doc_id: &str) -> PathBuf {
         self.dir(doc_id).join("journal.jsonl")
     }
@@ -124,8 +123,8 @@ impl FileStore {
         self.meta_path(doc_id).is_file()
     }
 
-    /// Documents connus du stockage. `_sessions/` n'a pas de `meta.json` : le
-    /// répertoire des sessions est donc ignoré sans traitement particulier.
+    /// Documents known to the store. `_sessions/` has no `meta.json`, so the sessions
+    /// folder is skipped without any special handling.
     pub fn list(&self) -> AppResult<Vec<String>> {
         let mut out = Vec::new();
         for entry in std::fs::read_dir(&self.root)? {
@@ -139,11 +138,11 @@ impl FileStore {
         Ok(out)
     }
 
-    /// Ajoute une update au journal durable.
+    /// Appends an update to the durable log.
     ///
-    /// `sync_data` avant de rendre la main : sans lui, la modification vivrait
-    /// dans le cache du système, et une coupure de courant la perdrait après
-    /// que les pairs l'ont déjà affichée.
+    /// `sync_data` before giving control back: without it the modification would live in
+    /// the system cache, and a power cut would lose it after the peers had already
+    /// displayed it.
     pub fn append_update(&self, doc_id: &str, update: &[u8]) -> AppResult<()> {
         std::fs::create_dir_all(self.dir(doc_id))?;
         let mut file = std::fs::OpenOptions::new()
@@ -151,8 +150,8 @@ impl FileStore {
             .append(true)
             .open(self.journal_path(doc_id))?;
 
-        // Cadrage longueur (u32 petit-boutiste) puis charge utile : une update
-        // binaire n'a pas de séparateur naturel, contrairement à une ligne JSON.
+        // Length prefix (little-endian u32) then the payload: a binary update has no
+        // natural separator, unlike a JSON line.
         let len = u32::try_from(update.len()).map_err(|_| AppError::PayloadTooLarge)?;
         file.write_all(&len.to_le_bytes())?;
         file.write_all(update)?;
@@ -182,17 +181,16 @@ impl FileStore {
         })
     }
 
-    /// Le document existe-t-il déjà au nouveau format ?
+    /// Does the document already exist in the new format?
     ///
-    /// Sert à décider s'il faut tenter la reprise de l'ancien : un document
-    /// repris une fois porte un instantané binaire, et ne doit plus jamais
-    /// repasser par le journal JSON — l'amorcer une seconde fois y ajouterait
-    /// un exemplaire de plus du contenu.
+    /// Used to decide whether to attempt taking over the old one: a document taken over
+    /// once carries a binary snapshot and must never go through the JSON log again,
+    /// because seeding it a second time would add one more copy of the content.
     pub fn has_crdt_state(&self, doc_id: &str) -> bool {
         self.snapshot_path(doc_id).is_file() || self.journal_path(doc_id).is_file()
     }
 
-    /// Relit un document de l'ancien format. `None` s'il n'y en a pas.
+    /// Reads a document in the old format. Returns `None` if there is none.
     pub fn load_legacy(&self, doc_id: &str) -> AppResult<Option<LegacyDocument>> {
         #[derive(serde::Deserialize)]
         struct AncienInstantane {
@@ -225,7 +223,7 @@ impl FileStore {
         let mut operations: Vec<SequencedOperation> = journal
             .lines()
             .filter(|ligne| !ligne.trim().is_empty())
-            // Ligne tronquée par une coupure en cours d'écriture : ignorée.
+            // Line cut short by a power failure during a write: ignored.
             .filter_map(|ligne| serde_json::from_str(ligne).ok())
             .collect();
         operations.sort_by_key(|operation| operation.revision);
@@ -236,15 +234,15 @@ impl FileStore {
         }))
     }
 
-    // ── Images déposées ──────────────────────────────────────────────────────
+    // ── Uploaded images ──────────────────────────────────────────────────────
 
     fn assets_dir(&self, doc_id: &str) -> PathBuf {
         self.dir(doc_id).join("assets")
     }
 
-    /// `name` a traversé `assets::parse_asset_name` : c'est un UUID suivi d'une
-    /// extension connue, fabriqué par le serveur. Aucun segment de chemin ne
-    /// peut s'y trouver — c'est ce qui rend cette jointure sûre.
+    /// `name` has gone through `assets::parse_asset_name`: it is a UUID followed by a
+    /// known extension, made up by the server. No path segment can be in it, which is
+    /// what makes this join safe.
     fn asset_path(&self, doc_id: &str, name: &str) -> PathBuf {
         self.assets_dir(doc_id).join(name)
     }
@@ -264,13 +262,13 @@ impl FileStore {
         })
     }
 
-    /// Efface toute trace d'un document : métadonnées, instantané, journal,
-    /// points de restauration et images.
+    /// Erases every trace of a document: metadata, snapshot, log, restore points and
+    /// images.
     ///
-    /// C'est ce qui fait de Writer un éditeur **temporaire** quand il travaille
-    /// pour CloudServ : la sauvegarde faite, il ne doit plus rien rester ici.
-    /// Un document déjà absent n'est pas une erreur — la purge est appelée sur
-    /// un chemin de reprise, où elle peut avoir déjà eu lieu.
+    /// This is what makes Writer a **temporary** editor when it works for CloudServ:
+    /// once the save is done, nothing should remain here. A document that is already
+    /// gone is not an error, because the purge is called on a recovery path where it
+    /// may already have happened.
     pub fn purge(&self, doc_id: &str) -> AppResult<()> {
         match std::fs::remove_dir_all(self.dir(doc_id)) {
             Ok(()) => Ok(()),
@@ -281,18 +279,17 @@ impl FileStore {
 
     // ── Sessions ─────────────────────────────────────────────────────────────
     //
-    // Une session vit à part des documents : son identifiant (`token_session`)
-    // est fourni par le client, alors qu'un `doc_id` est généré par le serveur.
-    // Les mélanger dans la même arborescence rendrait `list()` dépendant d'une
-    // entrée dont le nom vient du dehors.
+    // A session lives apart from the documents: its id (`token_session`) is supplied
+    // by the client, whereas a `doc_id` is generated by the server. Mixing them in the
+    // same tree would make `list()` depend on an entry whose name comes from outside.
 
     fn sessions_dir(&self) -> PathBuf {
         self.root.join("_sessions")
     }
 
     fn session_path(&self, token_session: &str) -> PathBuf {
-        // `token_session` est validé en amont (`session::valid_token`) :
-        // alphanumériques, `-` et `_` uniquement. Aucun `/` ni `..` n'arrive ici.
+        // `token_session` is validated upstream (`session::valid_token`): only
+        // alphanumerics, `-` and `_`. No `/` or `..` reaches this point.
         self.sessions_dir().join(format!("{token_session}.json"))
     }
 
@@ -300,9 +297,9 @@ impl FileStore {
         self.session_path(token_session).is_file()
     }
 
-    /// Crée la session. Échoue si elle existe déjà — c'est la vérification
-    /// d'unicité exprimée là où elle est atomique : dans le système de fichiers.
-    /// Un `exists()` suivi d'un `write()` laisserait une fenêtre de course.
+    /// Creates the session. Fails if it already exists: this is the uniqueness check
+    /// expressed where it is atomic, in the file system. An `exists()` followed by a
+    /// `write()` would leave a race window.
     pub fn create_session(&self, token_session: &str, record_json: &str) -> AppResult<()> {
         std::fs::create_dir_all(self.sessions_dir())?;
         let mut file = match std::fs::OpenOptions::new()
@@ -323,11 +320,11 @@ impl FileStore {
         Ok(())
     }
 
-    /// Réécrit une session existante — ajout ou retrait d'un participant.
+    /// Rewrites an existing session, when a participant is added or removed.
     ///
-    /// Écriture par fichier temporaire puis renommage : un `write` direct
-    /// tronquerait le fichier avant de le remplir, et une coupure au mauvais
-    /// moment laisserait une session vide, donc un document inaccessible à tous.
+    /// Written through a temporary file and then renamed: a direct `write` would
+    /// truncate the file before filling it, and a power cut at the wrong moment would
+    /// leave an empty session, so a document nobody can reach.
     pub fn replace_session(&self, token_session: &str, record_json: &str) -> AppResult<()> {
         std::fs::create_dir_all(self.sessions_dir())?;
         let cible = self.session_path(token_session);
@@ -348,8 +345,8 @@ impl FileStore {
         })
     }
 
-    /// Retire une session. Sert au rattrapage : si le document n'a pas pu être
-    /// créé après la prise du jeton, laisser la session condamnerait ce jeton.
+    /// Removes a session. Used for clean-up: if the document could not be created after
+    /// the token was claimed, leaving the session would condemn that token.
     pub fn remove_session(&self, token_session: &str) -> AppResult<()> {
         match std::fs::remove_file(self.session_path(token_session)) {
             Ok(()) => Ok(()),
@@ -374,14 +371,14 @@ impl FileStore {
         Ok(out)
     }
 
-    // ── Compaction et points de restauration ─────────────────────────────────
+    // ── Compaction and restore points ────────────────────────────────────────
 
-    /// Écrit un instantané compacté puis tronque le journal.
+    /// Writes a compacted snapshot, then truncates the log.
     ///
-    /// L'ordre importe : instantané d'abord, journal ensuite. Un arrêt entre les
-    /// deux rejoue au pire des opérations déjà incluses ; comme la révision de
-    /// l'instantané est connue, le rejeu les ignore. L'inverse perdrait tout ce
-    /// que le journal portait.
+    /// The order matters: snapshot first, log afterwards. A stop between the two at
+    /// worst replays operations that are already included; as the snapshot's revision is
+    /// known, the replay ignores them. The reverse order would lose everything the log
+    /// held.
     pub fn write_snapshot(&self, doc_id: &str, snapshot: &[u8]) -> AppResult<()> {
         std::fs::create_dir_all(self.dir(doc_id))?;
         let brut = snapshot;
@@ -390,9 +387,9 @@ impl FileStore {
         std::fs::write(&tmp, brut)?;
         std::fs::rename(&tmp, self.snapshot_path(doc_id))?;
 
-        // L'instantané est conservé comme point de restauration : sans cela, une
-        // suppression massive devient définitive dès la compaction suivante, le
-        // journal qui la contredisait ayant été tronqué.
+        // The snapshot is kept as a restore point: without that, a mass deletion becomes
+        // permanent at the next compaction, since the log that contradicted it has been
+        // truncated.
         self.keep_restore_point(doc_id, brut)?;
 
         truncate_if_exists(&self.journal_path(doc_id))?;
@@ -403,9 +400,9 @@ impl FileStore {
         let dossier = self.restore_dir(doc_id);
         std::fs::create_dir_all(&dossier)?;
 
-        // Identifiant unique : deux compactions dans la même milliseconde
-        // produiraient sinon le même nom, et l'une écraserait l'autre — le point
-        // le plus ancien disparaîtrait sans bruit.
+        // Unique id: two compactions in the same millisecond would otherwise produce the
+        // same name, and one would overwrite the other, so the oldest point would vanish
+        // silently.
         let horodatage = chrono::Utc::now().format("%Y%m%dT%H%M%S%.6f").to_string();
         let mut chemin = dossier.join(format!("{horodatage}.bin"));
         let mut suffixe = 1;
@@ -427,7 +424,7 @@ impl FileStore {
         Ok(())
     }
 
-    /// Points de restauration, du plus ancien au plus récent.
+    /// Restore points, from oldest to newest.
     pub fn list_restore_points(&self, doc_id: &str) -> AppResult<Vec<RestorePoint>> {
         let dossier = self.restore_dir(doc_id);
         let entrees = match std::fs::read_dir(&dossier) {
@@ -454,7 +451,7 @@ impl FileStore {
     }
 
     pub fn read_restore_point(&self, doc_id: &str, point_id: &str) -> AppResult<Vec<u8>> {
-        // `point_id` vient du client : il ne doit jamais composer un chemin.
+        // `point_id` comes from the client: it must never be used to build a path.
         if point_id.is_empty()
             || !point_id
                 .chars()
@@ -483,10 +480,9 @@ impl FileStore {
     }
 }
 
-/// Découpe le journal cadré. Une trame tronquée par une coupure en cours
-/// d'écriture arrête la lecture : les octets qui suivent, s'il y en a, ne sont
-/// plus interprétables — mieux vaut perdre la dernière update que d'appliquer
-/// n'importe quoi.
+/// Splits the framed log. A frame cut short by a power failure during a write stops
+/// the reading: the bytes after it, if any, can no longer be interpreted. Better to
+/// lose the last update than to apply anything at all.
 fn decode_journal(bytes: &[u8]) -> (Vec<Vec<u8>>, usize) {
     let mut updates = Vec::new();
     let mut position = 0usize;
@@ -566,8 +562,8 @@ mod tests {
 
     #[test]
     fn une_trame_tronquee_est_ignoree_sans_condamner_le_document() {
-        // Coupure pendant l'écriture : la dernière trame est incomplète. Le
-        // document doit s'ouvrir quand même, avec l'anomalie annoncée.
+        // Power cut during the write: the last frame is incomplete. The document must
+        // still open, with the anomaly reported.
         let (store, dir) = tmp_store();
         store.create("doc3", "{}").unwrap();
         store.append_update("doc3", b"complete").unwrap();
@@ -587,8 +583,8 @@ mod tests {
 
     #[test]
     fn un_document_de_lancien_format_reste_lisible() {
-        // Sans cette reprise, un partage créé avant le passage au CRDT se
-        // rouvrirait vide alors que son contenu est sur le disque.
+        // Without this takeover, a share created before the move to the CRDT would reopen
+        // empty although its content is on disk.
         let (store, dir) = tmp_store();
         store.create("ancien", "{}").unwrap();
         std::fs::write(

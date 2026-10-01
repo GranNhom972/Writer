@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Construction et parcours du document. Transposition de `SwDoc` / `SwNodes`.
+ * Building and walking the document (OpenOffice: `SwDoc` / `SwNodes`).
  *
- * `SwNodes` est un **tableau ordonné** : c'est cet ordre, et non la hiérarchie,
- * qui définit « le paragraphe suivant ». Les cellules d'un tableau contiennent
- * elles-mêmes des nœuds de texte (`SwTableBox` → `SwStartNode` → `SwTxtNode`),
- * si bien qu'un curseur traverse un tableau sans cas particulier. On reproduit
- * cette propriété avec un index plat de tous les paragraphes, cellules comprises.
+ * `SwNodes` is an **ordered array**: it is that order, not the hierarchy, that
+ * defines "the next paragraph". The cells of a table themselves contain text nodes
+ * (`SwTableBox` → `SwStartNode` → `SwTxtNode`), so a cursor crosses a table with no
+ * special case. We reproduce this property with a flat index of all the paragraphs,
+ * cells included.
  */
 
 import { A4_PORTRAIT } from './pageSetup';
@@ -34,13 +34,13 @@ import {
 
 let idCounter = 0;
 
-/** Identifiant unique de nœud. Équivalent du `SwNodeIndex` stable de Writer. */
+/** Unique id of a node. Equivalent to Writer's stable `SwNodeIndex`. */
 export function newId(prefix = 'n'): string {
   idCounter += 1;
   return `${prefix}${idCounter.toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** Remet le compteur à zéro — réservé aux tests, pour des identifiants stables. */
+/** Resets the counter to zero. Reserved for tests, to get stable ids. */
 export function resetIdCounter(): void {
   idCounter = 0;
 }
@@ -60,7 +60,7 @@ export interface ParagraphOptions {
   runs?: ParagraphNode['runs'];
 }
 
-/** Crée un paragraphe (ou un titre si `headingLevel` est fourni). */
+/** Creates a paragraph (or a heading if `headingLevel` is given). */
 export function createParagraph(text = '', options: ParagraphOptions = {}): ParagraphNode {
   const node: ParagraphNode = {
     id: options.id ?? newId('p'),
@@ -73,7 +73,7 @@ export function createParagraph(text = '', options: ParagraphOptions = {}): Para
   return node;
 }
 
-/** Crée un tableau vide de `rows` × `cols`, chaque cellule portant un paragraphe. */
+/** Creates an empty table of `rows` × `cols`, each cell holding one paragraph. */
 export function createTable(rows: number, cols: number): TableNode {
   const widthPercent = 100 / Math.max(1, cols);
   return {
@@ -101,46 +101,45 @@ export function createEmptyDocument(title = 'Document sans titre'): WriterDocume
   };
 }
 
-/** Où vit un paragraphe : au fil du document, ou dans une cellule. */
+/** Where a paragraph lives: directly in the document flow, or inside a cell. */
 export interface ParagraphLocation {
   paragraph: ParagraphNode;
-  /** Index du bloc de premier niveau. */
+  /** Index of the top-level block. */
   blockIndex: number;
-  /** Chemin dans le tableau, si le paragraphe est dans une cellule. */
+  /** Path inside the table, if the paragraph is in a cell. */
   cell?: { rowIndex: number; cellIndex: number; innerIndex: number };
 }
 
-/** Résultat de `paragraphIndex` — mémoïsé par document. */
+/** Result of `paragraphIndex`, memoized per document. */
 export interface ParagraphIndex {
   order: string[];
   byId: Map<string, ParagraphLocation>;
 }
 
 /**
- * Index mémoïsé, une entrée par version du document.
+ * Memoized index, one entry per version of the document.
  *
- * Un `WeakMap` et non une `Map` : la clé est l'état du document lui-même, et
- * chaque frappe en produit un nouveau. Une `Map` retiendrait indéfiniment tous
- * les états traversés depuis l'ouverture — l'historique complet du document en
- * mémoire. Le `WeakMap` laisse le ramasse-miettes reprendre chaque entrée dès
- * que plus personne ne tient l'état correspondant ; en pratique il ne reste
- * que l'état courant et ceux que la pile d'annulation retient encore.
+ * A `WeakMap` and not a `Map`: the key is the document state itself, and every
+ * keystroke produces a new one. A `Map` would hold on to every state seen since the
+ * document was opened, which means the complete history of the document in memory.
+ * The `WeakMap` lets the garbage collector reclaim each entry as soon as nobody
+ * holds the matching state; in practice only the current state and those the undo
+ * stack still holds remain.
  */
 const indexParDocument = new WeakMap<WriterDocumentState, ParagraphIndex>();
 
 /**
- * Index plat de tous les paragraphes, dans l'ordre de lecture.
+ * Flat index of all the paragraphs, in reading order.
  *
- * Construit à la demande plutôt que maintenu : le document est immuable, donc
- * un index conservé serait périmé dès la première frappe.
+ * Built on demand rather than maintained: the document is immutable, so a kept index
+ * would be out of date at the first keystroke.
  *
- * Le résultat est en revanche **mémoïsé sur l'état du document**, et c'est
- * l'immuabilité qui rend ce cache exact : tant que l'objet `doc` est le même,
- * son index l'est aussi, sans invalidation à écrire. La correction compte —
- * l'index est reconstruit depuis près de quatre-vingts sites d'appel, dont
- * plusieurs sur le chemin de la frappe (`currentParagraph`, les statistiques,
- * la plupart des commandes d'édition), où le coût linéaire était payé
- * plusieurs fois par caractère saisi et non « une fois par transaction ».
+ * The result is, however, **memoized on the document state**, and it is immutability
+ * that makes this cache exact: as long as the `doc` object is the same, so is its
+ * index, with no invalidation to write. Correctness matters here: the index is
+ * rebuilt from nearly eighty call sites, several of them on the typing path
+ * (`currentParagraph`, the statistics, most editing commands), where the linear cost
+ * used to be paid several times per typed character and not "once per transaction".
  */
 export function paragraphIndex(doc: WriterDocumentState): ParagraphIndex {
   const memoise = indexParDocument.get(doc);
@@ -150,9 +149,9 @@ export function paragraphIndex(doc: WriterDocumentState): ParagraphIndex {
   const byId = new Map<string, ParagraphLocation>();
 
   doc.blocks.forEach((block, blockIndex) => {
-    // Un sommaire n'entre pas dans l'index : ses lignes n'existent qu'à la
-    // pagination, et un curseur ne doit pas pouvoir s'y poser — comme dans
-    // Writer, où le contenu d'un `SwTOXBase` est protégé en écriture.
+    // A table of contents does not enter the index: its lines only exist at pagination
+    // time, and a cursor must not be able to land in it, as in Writer where the content
+    // of a `SwTOXBase` is write-protected.
     if (isToc(block)) return;
 
     if (isParagraph(block)) {
@@ -181,32 +180,31 @@ export function paragraphIndex(doc: WriterDocumentState): ParagraphIndex {
 }
 
 /**
- * Numéro de figure de chaque image à numérotation automatique.
+ * Figure number of each image that uses automatic numbering.
  *
- * Dérivé de l'**ordre de lecture** du document — cellules de tableau comprises,
- * puisque `paragraphIndex` les y range — et recalculé à chaque appel. C'est ce
- * qui rend la numérotation juste par construction : ajouter, supprimer ou
- * déplacer une image change l'ordre, donc les numéros, sans qu'aucun code n'ait
- * à renuméroter quoi que ce soit. Aucun doublon n'est possible, un compteur
- * unique attribuant les valeurs.
+ * Derived from the document's **reading order** (table cells included, since
+ * `paragraphIndex` puts them there) and recomputed on every call. That is what makes
+ * the numbering right by construction: adding, deleting or moving an image changes
+ * the order, so the numbers, without any code having to renumber anything. No
+ * duplicate is possible, since a single counter hands out the values.
  *
- * Les images en mode **manuel** ne consomment pas de numéro : elles sont hors
- * séquence, comme un `SwSetExpField` que l'on aurait ôté de sa suite.
+ * Images in **manual** mode do not use up a number: they are outside the sequence,
+ * like a `SwSetExpField` that has been taken out of its series.
  *
- * La clé est `blockId:offset` — l'identité d'une image dans un document
- * immuable, valable le temps d'un rendu, qui part du même état.
+ * The key is `blockId:offset`, the identity of an image in an immutable document,
+ * valid for the duration of one render, which starts from the same state.
  */
 const figuresParDocument = new WeakMap<WriterDocumentState, Map<string, number>>();
 
 /**
- * Dernière table de numéros produite, tous documents confondus.
+ * Last numbering table produced, across all documents.
  *
- * Sert à **canoniser** : une frappe produit un nouvel état de document, donc
- * une nouvelle table — de contenu identique dans l'immense majorité des cas,
- * puisque les numéros de figure ne bougent qu'à l'insertion ou au retrait d'une
- * image légendée. Rendre l'ancienne table quand la nouvelle lui est égale rend
- * son identité stable, et avec elle celle du contexte d'images transmis aux
- * paragraphes — sans quoi chaque frappe ferait échouer leur mémoïsation.
+ * Used to **canonicalize**: a keystroke produces a new document state and therefore
+ * a new table, whose content is identical in the vast majority of cases, since
+ * figure numbers only change when a captioned image is inserted or removed. Returning
+ * the old table when the new one equals it keeps its identity stable, and with it the
+ * identity of the image context handed to the paragraphs; otherwise every keystroke
+ * would defeat their memoization.
  */
 let dernieresFigures: Map<string, number> | null = null;
 
@@ -254,17 +252,16 @@ export function findParagraph(
   return paragraphIndex(doc).byId.get(blockId)?.paragraph ?? null;
 }
 
-/** Texte brut d'un paragraphe — la chaîne qu'indexent les offsets de curseur. */
+/** Plain text of a paragraph: the string that the cursor offsets index into. */
 export function paragraphText(paragraph: ParagraphNode): string {
   return runsText(paragraph.runs);
 }
 
 /**
- * Remplace un paragraphe partout où il se trouve, y compris dans une cellule.
+ * Replaces a paragraph wherever it is, including inside a cell.
  *
- * Le remplacement recopie uniquement le chemin touché : les blocs voisins
- * gardent leur identité de référence, ce qui laisse React ne re-rendre que ce
- * qui a réellement changé.
+ * The replacement only copies the path that was touched: the neighboring blocks keep
+ * their reference identity, which lets React re-render only what really changed.
  */
 export function replaceParagraph(
   doc: WriterDocumentState,
@@ -302,12 +299,12 @@ export function replaceParagraph(
   return changed ? touch({ ...doc, blocks }) : doc;
 }
 
-/** Horodate la dernière modification (`SwDocShell::SetModified`). */
+/** Stamps the time of the last modification (`SwDocShell::SetModified`). */
 export function touch(doc: WriterDocumentState): WriterDocumentState {
   return { ...doc, meta: { ...doc.meta, updatedAt: new Date().toISOString() } };
 }
 
-/** Identifiant du paragraphe suivant dans l'ordre de lecture, ou `null`. */
+/** Id of the next paragraph in reading order, or `null`. */
 export function nextParagraphId(
   doc: WriterDocumentState,
   blockId: string,
@@ -326,15 +323,14 @@ export function previousParagraphId(
   return at > 0 ? order[at - 1]! : null;
 }
 
-/* ------------------------------------------------- manipulation structurelle */
+/* ------------------------------------------------- structural changes */
 
 /**
- * Conteneur d'un paragraphe : le fil du document, ou une cellule.
+ * Container of a paragraph: the document flow, or a cell.
  *
- * Writer interdit de fusionner deux nœuds de texte séparés par une frontière de
- * tableau (`SwNodes::_MoveNodes` refuse de traverser un `SwStartNode`). La clé
- * de conteneur sert exactement à cela : deux paragraphes de conteneurs
- * différents ne se rejoignent jamais.
+ * Writer forbids merging two text nodes separated by a table boundary
+ * (`SwNodes::_MoveNodes` refuses to cross a `SwStartNode`). The container key is used
+ * for exactly that: two paragraphs from different containers never join.
  */
 export const ROOT_CONTAINER = 'root';
 
@@ -348,15 +344,15 @@ export function containerKeyOf(doc: WriterDocumentState, blockId: string): strin
 }
 
 /**
- * Retire des blocs du document, par identifiant.
+ * Removes blocks from the document, by id.
  *
- * Accepte aussi bien des paragraphes que des tableaux : une sélection qui
- * enjambe un tableau l'emporte avec elle, comme dans Writer — laisser derrière
- * soi un tableau vidé de son texte ne correspondrait à aucune intention.
+ * Accepts paragraphs as well as tables: a selection that spans a table takes it away
+ * with it, as in Writer, since leaving behind a table emptied of its text would match
+ * no intention.
  *
- * Un conteneur ne peut pas rester vide : Writer garde toujours un `SwTxtNode`
- * dans une cellule et dans le corps, faute de quoi le curseur n'aurait plus
- * nulle part où se poser. On réinstalle donc un paragraphe vide si besoin.
+ * A container cannot stay empty: Writer always keeps a `SwTxtNode` in a cell and in
+ * the body, otherwise the cursor would have nowhere to land. So an empty paragraph is
+ * put back when needed.
  */
 export function removeBlocks(
   doc: WriterDocumentState,
@@ -387,7 +383,7 @@ export function removeBlocks(
   return touch({ ...doc, blocks });
 }
 
-/** Insère un paragraphe juste après un autre, dans le même conteneur. */
+/** Inserts a paragraph right after another one, in the same container. */
 export function insertParagraphAfter(
   doc: WriterDocumentState,
   afterId: string,
@@ -425,15 +421,15 @@ export function insertParagraphAfter(
   return touch({ ...doc, blocks });
 }
 
-/** Insère un bloc de premier niveau (tableau, paragraphe) après un paragraphe. */
+/** Inserts a top-level block (table, paragraph) after a paragraph. */
 export function insertBlockAfter(
   doc: WriterDocumentState,
   afterId: string,
   block: DocumentBlock,
 ): WriterDocumentState {
   const location = paragraphIndex(doc).byId.get(afterId);
-  // Un tableau ne s'imbrique pas dans une cellule ici : Writer le permet, mais
-  // la mise en page imbriquée n'est pas traitée (cf. README).
+  // A table is not nested inside a cell here: Writer allows it, but nested layout is not
+  // handled (see the README).
   const at = location && !location.cell ? location.blockIndex + 1 : doc.blocks.length;
   const blocks = [...doc.blocks];
   blocks.splice(at, 0, block);
@@ -441,8 +437,8 @@ export function insertBlockAfter(
 }
 
 /**
- * Insère une ligne dans un tableau, au-dessus ou au-dessous de `rowIndex`.
- * Transposition de `SwDoc::InsertRow`.
+ * Inserts a row in a table, above or below `rowIndex`. (OpenOffice:
+ * `SwDoc::InsertRow`.)
  */
 export function insertTableRow(
   doc: WriterDocumentState,
@@ -455,10 +451,10 @@ export function insertTableRow(
     const targetRow = block.rows[rowIndex] ?? block.rows[0];
     if (!targetRow) return block;
 
-    // Les largeurs viennent de la **grille**, pas de la ligne modèle : celle-ci
-    // peut porter une fusion, auquel cas ses `widthPercent` valent deux colonnes
-    // pour l'une et rien pour l'autre. La nouvelle ligne, elle, est simple, et
-    // ses bords doivent tomber sur ceux des lignes voisines.
+    // The widths come from the **grid**, not from the model row: that row may carry a
+    // merge, in which case its `widthPercent` values count for two columns on one cell
+    // and for nothing on the other. The new row, on the other hand, is plain, and its
+    // edges must fall on those of the neighboring rows.
     const columns = tableColumnWidths(block);
     const newCells: TableCellNode[] = targetRow.cells.map((cell, index) => ({
       id: newId('tc'),
@@ -483,8 +479,7 @@ export function insertTableRow(
 }
 
 /**
- * Supprime une ligne d'un tableau.
- * Transposition de `SwDoc::DeleteRow`.
+ * Deletes a row of a table. (OpenOffice: `SwDoc::DeleteRow`.)
  */
 export function deleteTableRow(
   doc: WriterDocumentState,
@@ -515,8 +510,8 @@ export function deleteTableRow(
 }
 
 /**
- * Insère une colonne dans un tableau, à gauche ou à droite de `colIndex`.
- * Transposition de `SwDoc::InsertCol`.
+ * Inserts a column in a table, to the left or right of `colIndex`. (OpenOffice:
+ * `SwDoc::InsertCol`.)
  */
 export function insertTableColumn(
   doc: WriterDocumentState,
@@ -531,11 +526,10 @@ export function insertTableColumn(
     const oldCols = Math.max(1, block.rows[0]?.cells.length ?? 1);
     const newCols = oldCols + 1;
 
-    // La nouvelle colonne prend la part d'une colonne moyenne, et les
-    // anciennes se resserrent **proportionnellement** pour lui faire place.
-    // Les réinitialiser toutes à `100 / newCols` effacerait les largeurs du
-    // document importé comme celles réglées à la souris : ajouter une colonne
-    // ne doit pas être une remise à plat de la grille.
+    // The new column takes the share of an average column, and the existing ones shrink
+    // **proportionally** to make room for it. Resetting them all to `100 / newCols` would
+    // wipe out the widths of an imported document as well as those set with the mouse:
+    // adding a column must not flatten the grid.
     const share = 100 / newCols;
     const shrink = (100 - share) / 100;
 
@@ -562,8 +556,7 @@ export function insertTableColumn(
 }
 
 /**
- * Supprime une colonne d'un tableau.
- * Transposition de `SwDoc::DeleteCol`.
+ * Deletes a column of a table. (OpenOffice: `SwDoc::DeleteCol`.)
  */
 export function deleteTableColumn(
   doc: WriterDocumentState,
@@ -587,9 +580,9 @@ export function deleteTableColumn(
     const rows = block.rows.map((row) => {
       const fallback = 100 / Math.max(1, row.cells.length);
       const cells = row.cells.filter((_, idx) => idx !== colIndex);
-      // La largeur libérée se redistribue **au prorata** sur les colonnes qui
-      // restent, plutôt que de les égaliser : supprimer une colonne étroite ne
-      // doit pas défaire la mise en page des autres.
+      // The width that is freed is redistributed **proportionally** over the columns that
+      // remain, rather than equalizing them: deleting a narrow column must not undo the
+      // layout of the others.
       const total = cells.reduce((sum, c) => sum + (c.widthPercent ?? fallback), 0);
       const scale = total > 0 ? 100 / total : 1;
       return {
@@ -608,14 +601,14 @@ export function deleteTableColumn(
   return touch({ ...doc, blocks });
 }
 
-/* ------------------------------------------------- fusion et scission de cellules */
+/* ------------------------------------------------- merging and splitting cells */
 
 /**
- * Rectangle de cellules, exprimé en indices de ligne et de colonne.
+ * A rectangle of cells, expressed as row and column indices.
  *
- * Les colonnes sont comptées en **colonnes de grille** et non en positions dans
- * `row.cells` : ces deux repères divergent dès qu'une fusion a eu lieu, et
- * confondre les deux est la source d'erreur classique de tout code de tableau.
+ * Columns are counted as **grid columns** and not as positions in `row.cells`: the two
+ * differ as soon as a merge has happened, and mixing them up is the classic source of
+ * errors in any table code.
  */
 export interface CellRect {
   fromRow: number;
@@ -625,28 +618,28 @@ export interface CellRect {
 }
 
 /**
- * Colonne de grille où commence chaque cellule d'une ligne.
+ * Grid column where each cell of a row begins.
  *
- * ## L'invariant de grille, et pourquoi il tient
+ * ## The grid invariant, and why it holds
  *
- * Une fusion **conserve** les cellules absorbées sous forme de porteuses du
- * drapeau `covered` (cf. `mergeTableCells`, transposition de `SwDoc::MergeTbl`).
- * Chaque cellule du tableau — recouverte ou non — occupe donc exactement une
- * colonne de grille, et `row.cells[i]` est la colonne `i`.
+ * A merge **keeps** the absorbed cells, as carriers of the `covered` flag (see
+ * `mergeTableCells`, a transposition of `SwDoc::MergeTbl`). Every cell of the table,
+ * covered or not, therefore occupies exactly one grid column, and `row.cells[i]` is
+ * column `i`.
  *
- * `colSpan` ne sert alors qu'à la **largeur** peinte, jamais à l'arithmétique
- * de grille. Compter les `colSpan` ici doublerait chaque colonne fusionnée :
- * une fois pour la maîtresse, une fois pour sa porteuse.
+ * `colSpan` is then only used for the painted **width**, never for grid arithmetic.
+ * Counting `colSpan` here would double every merged column: once for the master and
+ * once for its carrier.
  *
- * La fonction existe malgré sa simplicité parce que c'est le seul endroit où
- * cet invariant est énoncé : tout code de tableau qui a besoin d'une colonne
- * passe par elle, et la lit du même coup.
+ * The function exists in spite of its simplicity because it is the only place where
+ * this invariant is stated: any table code that needs a column goes through it, and
+ * reads the invariant at the same time.
  */
 export function gridColumnsOf(row: TableRowNode): number[] {
   return row.cells.map((_, index) => index);
 }
 
-/** Nombre de colonnes de grille du tableau — la plus large de ses lignes. */
+/** Number of grid columns of the table: that of its widest row. */
 export function tableColumnCount(table: TableNode): number {
   let max = 0;
   for (const row of table.rows) max = Math.max(max, row.cells.length);
@@ -654,15 +647,14 @@ export function tableColumnCount(table: TableNode): number {
 }
 
 /**
- * Largeur de chaque **colonne de grille**, en pourcentage, normalisée à 100.
+ * Width of each **grid column**, as a percentage, normalized to 100.
  *
- * Une largeur est portée par les cellules, mais appartient à la colonne : dans
- * Writer, c'est `SwTable::GetTabCols` qui fait foi, pas la boîte individuelle.
- * Les cellules fusionnées n'en disent rien d'utile — une maîtresse de `colSpan`
- * 2 mesure deux colonnes, une recouverte n'en mesure aucune — donc seules les
- * cellules simples renseignent leur colonne, et le reste retombe sur la part
- * égale. La normalisation finale garantit l'invariant dont dépend le rendu :
- * la somme des colonnes fait la largeur du tableau, jamais 97 % ni 103 %.
+ * A width is carried by the cells but belongs to the column: in Writer,
+ * `SwTable::GetTabCols` is the authority, not the individual box. Merged cells say
+ * nothing useful about it (a master with `colSpan` 2 measures two columns, a covered
+ * one measures none), so only plain cells report their column, and the rest falls back
+ * on an equal share. The final normalization guarantees the invariant the rendering
+ * depends on: the columns add up to the table's width, never 97 % or 103 %.
  */
 export function tableColumnWidths(table: TableNode): number[] {
   const count = Math.max(1, tableColumnCount(table));
@@ -672,11 +664,10 @@ export function tableColumnWidths(table: TableNode): number[] {
   for (const row of table.rows) {
     row.cells.forEach((cell, index) => {
       if (index >= count) return;
-      // Une maîtresse de fusion mesure plusieurs colonnes : sa largeur ne dit
-      // rien de la sienne propre. Une cellule **recouverte**, en revanche, a
-      // conservé celle de sa colonne au moment de la fusion — c'est par elle
-      // que les largeurs survivent à un `MergeTbl`, et donc que la scission
-      // peut les rendre.
+      // A merge master measures several columns: its width says nothing about its own
+      // column. A **covered** cell, however, kept the width of its column at the time of the
+      // merge. That is how widths survive a `MergeTbl`, and so how a split can give them
+      // back.
       if ((cell.colSpan ?? 1) > 1) return;
       if (cell.widthPercent === undefined) return;
       if (!Number.isNaN(widths[index]!)) return;
@@ -690,11 +681,10 @@ export function tableColumnWidths(table: TableNode): number[] {
 }
 
 /**
- * Réécrit les largeurs de colonne d'un tableau (`SwTable::SetTabCols`).
+ * Rewrites the column widths of a table (`SwTable::SetTabCols`).
  *
- * Une cellule fusionnée reçoit la **somme** des colonnes qu'elle couvre : c'est
- * ce qui maintient l'alignement de ses bords avec ceux des lignes voisines
- * quand l'utilisateur tire une poignée.
+ * A merged cell receives the **sum** of the columns it covers: this keeps its edges
+ * aligned with those of the neighboring rows when the user drags a handle.
  */
 export function setTableColumnWidths(
   doc: WriterDocumentState,
@@ -724,39 +714,39 @@ export function setTableColumnWidths(
   return touch({ ...doc, blocks });
 }
 
-/** Supprime un tableau entier, et le remplace par un paragraphe s'il était seul. */
+/** Deletes a whole table, replacing it with a paragraph if it was the only block. */
 export function deleteTable(doc: WriterDocumentState, tableId: string): WriterDocumentState {
   const blocks = doc.blocks.filter((block) => !(isTable(block) && block.id === tableId));
   if (blocks.length === doc.blocks.length) return doc;
-  // Un document sans aucun nœud de texte n'a nulle part où poser un curseur :
-  // `SwDoc` garde toujours au moins un `SwTxtNode`, on fait de même.
+  // A document with no text node at all has nowhere to put a cursor: `SwDoc` always
+  // keeps at least one `SwTxtNode`, and so do we.
   if (!blocks.some((block) => !isTable(block))) blocks.push(createParagraph(''));
   return touch({ ...doc, blocks });
 }
 
 /**
- * Index dans `row.cells` de la cellule occupant une colonne de grille donnée.
+ * Index in `row.cells` of the cell that occupies a given grid column.
  *
- * Identité, par l'invariant de `gridColumnsOf` — la fonction nomme l'intention
- * plutôt que de laisser un `row.cells[column]` nu dont rien ne dirait pourquoi
- * il est correct.
+ * It is the identity, because of the invariant in `gridColumnsOf`. The function names
+ * the intent instead of leaving a bare `row.cells[column]` with nothing to say why it
+ * is correct.
  */
 function cellIndexAtColumn(row: TableRowNode, column: number): number {
   return column >= 0 && column < row.cells.length ? column : -1;
 }
 
 /**
- * Fusionne un rectangle de cellules. Transposition de `SwDoc::MergeTbl`
- * (`sw/source/core/doc/tblrwcl.cxx`).
+ * Merges a rectangle of cells. (OpenOffice: `SwDoc::MergeTbl`,
+ * `sw/source/core/doc/tblrwcl.cxx`.)
  *
- * Writer ne **supprime** pas les cellules absorbées : il les marque
- * « recouvertes » (`SwTableBox` de `RowSpan` négatif, swtable.hxx:475) et les
- * conserve dans leur ligne. La grille reste ainsi rectangulaire, ce dont
- * dépendent la navigation au curseur, l'insertion ultérieure d'une colonne et
- * la scission. On transpose ce choix avec le drapeau `covered`.
+ * Writer does not **delete** the absorbed cells: it marks them "covered" (a
+ * `SwTableBox` with a negative `RowSpan`, swtable.hxx:475) and keeps them in their
+ * row. The grid therefore stays rectangular, which cursor navigation, a later column
+ * insertion and splitting all depend on. We transpose that choice with the `covered`
+ * flag.
  *
- * Le contenu des cellules absorbées est **concaténé** dans la cellule maîtresse,
- * comme le fait `SwDoc::MergeTbl` : fusionner ne doit jamais perdre du texte.
+ * The content of the absorbed cells is **concatenated** into the master cell, as
+ * `SwDoc::MergeTbl` does: merging must never lose text.
  */
 export function mergeTableCells(
   doc: WriterDocumentState,
@@ -768,7 +758,7 @@ export function mergeTableCells(
   const fromCol = Math.max(0, Math.min(rect.fromCol, rect.toCol));
   const toCol = Math.max(rect.fromCol, rect.toCol);
 
-  // Un rectangle d'une seule cellule n'a rien à fusionner.
+  // A rectangle of a single cell has nothing to merge.
   if (fromRow === toRow && fromCol === toCol) return doc;
 
   let changed = false;
@@ -785,22 +775,20 @@ export function mergeTableCells(
     if (masterIndex < 0) return block;
 
     /*
-     * Largeur de la cellule maîtresse : la **somme** des colonnes absorbées.
+     * Width of the master cell: the **sum** of the absorbed columns.
      *
-     * `colSpan` ne suffit pas. Le moteur lit `widthPercent` en priorité
-     * (`measureRow`), et la maîtresse gardait la sienne : une fusion de trois
-     * colonnes produisait un cadre large d'une seule, et la zone libérée
-     * restait béante à sa droite. C'est aussi la convention qu'applique
-     * `setTableColumnWidths` quand on tire une poignée — les deux chemins
-     * doivent écrire la même chose.
+     * `colSpan` is not enough. The engine reads `widthPercent` first (`measureRow`), and
+     * the master kept its own: merging three columns produced a frame one column wide,
+     * and the freed area stayed gaping to its right. This is also the convention that
+     * `setTableColumnWidths` applies when a handle is dragged, so both paths must write the
+     * same thing.
      */
     const columns = tableColumnWidths(block);
     let mergedWidth = 0;
     for (let c = fromCol; c <= toCol; c += 1) mergedWidth += columns[c] ?? 0;
 
-    // Contenu absorbé, dans l'ordre de lecture : ligne par ligne, colonne par
-    // colonne. Les paragraphes vides sont écartés — une fusion de six cellules
-    // vides ne doit pas produire six lignes blanches.
+    // Absorbed content, in reading order: row by row, column by column. Empty paragraphs
+    // are dropped: merging six empty cells must not produce six blank lines.
     const absorbed: ParagraphNode[] = [];
     for (let r = fromRow; r <= lastRow; r += 1) {
       const row = block.rows[r];
@@ -839,8 +827,8 @@ export function mergeTableCells(
         }
 
         changed = true;
-        // La cellule recouverte garde son identité et un paragraphe vide : le
-        // curseur ne s'y rendra plus, mais une scission ultérieure la retrouve.
+        // The covered cell keeps its identity and an empty paragraph: the cursor will no longer
+        // go there, but a later split finds it again.
         const covered: TableCellNode = {
           ...cell,
           covered: true,
@@ -861,15 +849,15 @@ export function mergeTableCells(
 }
 
 /**
- * Scinde une cellule fusionnée, ou une cellule simple, en `count` parts.
- * Transposition de `SwDoc::SplitTbl` (`tblrwcl.cxx`).
+ * Splits a merged cell, or a plain cell, into `count` parts. (OpenOffice:
+ * `SwDoc::SplitTbl`, `tblrwcl.cxx`.)
  *
- * Scinder une cellule **fusionnée** revient à rendre leur autonomie aux
- * cellules recouvertes : aucune cellule n'est créée, on retire seulement le
- * drapeau. Scinder une cellule **simple** en demande de nouvelles.
+ * Splitting a **merged** cell amounts to giving the covered cells their independence
+ * back: no cell is created, the flag is simply removed. Splitting a **plain** cell
+ * needs new ones.
  *
- * Le contenu reste dans la première part, comme dans Writer : le répartir
- * demanderait de deviner où l'utilisateur voulait couper.
+ * The content stays in the first part, as in Writer: spreading it would mean guessing
+ * where the user wanted to cut.
  */
 export function splitTableCell(
   doc: WriterDocumentState,
@@ -900,16 +888,15 @@ export function splitTableCell(
       const lastRow = Math.min(rowIndex + rowSpan - 1, block.rows.length - 1);
 
       /*
-       * Rendre à la maîtresse la largeur de **sa** colonne, et non celle de
-       * toutes celles qu'elle couvrait.
+       * Give the master the width of **its own** column back, not that of all the columns it
+       * used to cover.
        *
-       * La fusion lui donne la somme des colonnes absorbées ; sans cette
-       * restitution, elle gardait ce total après scission. Redevenue simple aux
-       * yeux de `tableColumnWidths`, elle imposait alors sa largeur à sa seule
-       * colonne, et la normalisation écrasait toutes les autres : scinder une
-       * cellule fusionnée sur trois colonnes faisait passer une grille
-       * régulière à 60 / 20 / 20. Une opération locale ne doit pas redessiner
-       * le tableau entier.
+       * The merge gave it the sum of the absorbed columns; without this restoration it kept
+       * that total after the split. Having become plain again in the eyes of
+       * `tableColumnWidths`, it then imposed its width on its single column, and the
+       * normalization crushed all the others: splitting a cell merged over three columns
+       * turned a regular grid into 60 / 20 / 20. A local operation must not redraw the whole
+       * table.
        */
       const columns = tableColumnWidths(block);
 
@@ -945,16 +932,14 @@ export function splitTableCell(
     changed = true;
 
     if (direction === 'horizontal') {
-      // Scission verticale du trait : la largeur de la cellule se partage entre
-      // les parts, les autres colonnes ne bougent pas.
+      // Vertical split of the cell: its width is shared among the parts, and the other
+      // columns do not move.
       const shareWidth = (cell.widthPercent ?? 100 / Math.max(1, row.cells.length)) / parts;
       const rows = block.rows.map((current, r) => {
         if (r !== rowIndex) {
-          // Les autres lignes gagnent autant de colonnes que la scission en
-          // crée. Elles reçoivent des **porteuses recouvertes** et non un
-          // `colSpan` étendu : sans elles, `row.cells[i]` cesserait d'être la
-          // colonne `i`, et tout le calcul de grille tomberait (cf.
-          // `gridColumnsOf`).
+          // The other rows gain as many columns as the split creates. They get **covered
+          // carriers** and not an extended `colSpan`: without them `row.cells[i]` would stop being
+          // column `i`, and the whole grid calculation would collapse (see `gridColumnsOf`).
           const target = current.cells[cellIndex];
           if (!target) return current;
 
@@ -992,9 +977,8 @@ export function splitTableCell(
       return { ...block, rows };
     }
 
-    // Scission horizontale du trait : de nouvelles lignes s'intercalent, et
-    // toutes les autres cellules de la ligne d'origine s'étendent vers le bas
-    // pour ne pas laisser de trous.
+    // Horizontal split of the cell: new rows are slipped in, and all the other cells of the
+    // original row stretch downwards so as not to leave holes.
     const newRows: TableRowNode[] = [];
     for (let i = 1; i < parts; i += 1) {
       newRows.push({

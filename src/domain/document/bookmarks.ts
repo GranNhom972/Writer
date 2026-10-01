@@ -1,75 +1,74 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Signets et renvois internes. Transposition de `SwBookmark` / `IDocumentMarkAccess`
- * (`sw/source/core/doc/docbm.cxx`, `sw/inc/bookmrk.hxx`).
+ * Bookmarks and internal cross-references (OpenOffice: `SwBookmark` /
+ * `IDocumentMarkAccess`, `sw/source/core/doc/docbm.cxx`, `sw/inc/bookmrk.hxx`).
  *
- * Un signet de Writer est un **repère de position**, pas un nœud : `MarkBase`
- * tient un `SwPosition` de début et, pour un signet de plage, un `SwPosition`
- * de fin. Le repère est mis à jour par le moteur à chaque édition, ce qui lui
- * permet de suivre son texte.
+ * A bookmark is a named place in the text that a link such as `#name` can jump to.
+ * In Writer it is a **position marker**, not a node: `MarkBase` holds a start
+ * `SwPosition` and, for a range bookmark, an end `SwPosition`. The engine updates
+ * the marker on every edit, which is how it follows its text.
  *
- * On obtient le même comportement sans machinerie de mise à jour : le nom du
- * signet est un **attribut de run**, il voyage donc avec le texte par
- * construction. Une insertion au milieu d'un signet l'étend, une suppression le
- * raccourcit, et l'effacement complet du texte ancré le fait disparaître — les
- * trois comportements de `docbm.cxx` sans une ligne de code de maintenance.
+ * We get the same behavior without any update machinery: the bookmark's name is a
+ * **run attribute**, so it travels with the text by construction. Inserting in the
+ * middle of a bookmark extends it, deleting shortens it, and erasing all of the
+ * anchored text makes it disappear, which are the three behaviors of `docbm.cxx`
+ * without a single line of maintenance code.
  *
- * La contrepartie assumée : deux signets ne peuvent pas se chevaucher sur un
- * même run, car `bookmarkName` est scalaire (cf. l'invariant `sameFormatting`
- * documenté dans types.ts). L'interface de Writer ne permet pas non plus de
- * créer un tel chevauchement.
+ * The accepted trade-off: two bookmarks cannot overlap on the same run, because
+ * `bookmarkName` is a scalar (see the `sameFormatting` invariant documented in
+ * types.ts). Writer's interface does not let you create such an overlap either.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
 import { paragraphIndex, replaceParagraph, touch } from './document';
 import { makeRun, mapRunsInRange, normalizeRuns, runFormatting } from './runs';
 import { isParagraph, type HeadingLevel, type TextRun, type WriterDocumentState } from './types';
 
-/** Un signet posé dans le document. */
+/** A bookmark placed in the document. */
 export interface Bookmark {
-  /** Nom unique, celui que vise un lien `#nom` (`::sw::mark::MarkBase::GetName`). */
+  /** Unique name, the one a `#name` link points to (`::sw::mark::MarkBase::GetName`). */
   name: string;
   blockId: string;
-  /** Offsets dans la chaîne brute du paragraphe. Égaux pour un signet ponctuel. */
+  /** Offsets in the paragraph's raw string. Equal for a point bookmark. */
   startOffset: number;
   endOffset: number;
-  /** Texte couvert, vide pour un signet ponctuel. */
+  /** Text covered, empty for a point bookmark. */
   text: string;
 }
 
-/** Cible atteignable par un renvoi interne : signet **ou** titre. */
+/** A target that an internal cross-reference can reach: a bookmark **or** a heading. */
 export interface LinkTarget {
   kind: 'bookmark' | 'heading';
   name: string;
   blockId: string;
-  /** Libellé affichable — le nom du signet, ou le texte du titre. */
+  /** Label to display: the bookmark's name, or the heading's text. */
   label: string;
   headingLevel?: HeadingLevel;
 }
 
 /**
- * Caractères refusés dans un nom de signet : contrôles et délimiteurs XML.
+ * Characters refused in a bookmark name: control characters and XML delimiters.
  *
- * Construit par `new RegExp` à partir d'échappements : un intervalle de
- * caractères de contrôle écrit littéralement dans le source serait invisible à
- * la relecture, et une relecture qui ne voit pas ce qu'elle valide ne vaut rien.
+ * Built with `new RegExp` from escape sequences: a range of control characters
+ * written literally in the source would be invisible when reading it, and a review
+ * that cannot see what it is validating is worth nothing.
  */
 const INVALID_BOOKMARK_CHARS = new RegExp('[\\u0000-\\u001F\\u007F"\'<>&]', 'g');
 
 /**
- * Normalise un nom de signet.
+ * Normalizes a bookmark name.
  *
- * ODF impose un nom non vide et l'utilise tel quel dans `text:name` ; les
- * espaces y sont légales mais rendent les renvois `#nom` fragiles une fois
- * l'ODT converti. On applique donc la même normalisation que Writer à l'export
- * HTML : espaces en tirets bas, caractères de contrôle retirés.
+ * ODF requires a non-empty name and uses it as is in `text:name`; spaces are legal
+ * there but make `#name` links fragile once the ODT has been converted. So we apply
+ * the same normalization Writer applies on HTML export: spaces become underscores
+ * and control characters are removed.
  */
 export function normalizeBookmarkName(raw: string): string {
   return raw
@@ -79,9 +78,9 @@ export function normalizeBookmarkName(raw: string): string {
     .slice(0, 120);
 }
 
-/* ----------------------------------------------------------------- lecture */
+/* ----------------------------------------------------------------- reading */
 
-/** Tous les signets, dans l'ordre du flux. */
+/** All the bookmarks, in document order. */
 export function listBookmarks(doc: WriterDocumentState): Bookmark[] {
   const out: Bookmark[] = [];
   const { order, byId } = paragraphIndex(doc);
@@ -126,26 +125,26 @@ export function listBookmarks(doc: WriterDocumentState): Bookmark[] {
   return out;
 }
 
-/** Retrouve un signet par son nom, ou `null`. */
+/** Finds a bookmark by its name, or `null`. */
 export function findBookmark(doc: WriterDocumentState, name: string): Bookmark | null {
   const wanted = normalizeBookmarkName(name);
   return listBookmarks(doc).find((mark) => mark.name === wanted) ?? null;
 }
 
-/** Préfixe réservé aux ancres de titre, celui qu'emploie Writer à l'export. */
+/** Reserved prefix for heading anchors, the one Writer uses when exporting. */
 const HEADING_ANCHOR_PREFIX = '__RefHeading__';
 
 /**
- * Identifiant d'ancre d'un titre, pour les renvois d'une table des matières.
+ * Anchor id of a heading, used for the cross-references of a table of contents.
  *
- * Writer nomme ces ancres `__RefHeading__<id>` ; on garde le même préfixe
- * réservé, ce qui les distingue à coup sûr d'un signet posé à la main.
+ * Writer names these anchors `__RefHeading__<id>`; we keep the same reserved
+ * prefix, which tells them apart for certain from a bookmark placed by hand.
  */
 export function headingAnchorName(blockId: string): string {
   return `${HEADING_ANCHOR_PREFIX}${blockId}`;
 }
 
-/** Le blockId d'origine d'une ancre de titre, ou `null` si ce n'en est pas une. */
+/** The original blockId of a heading anchor, or `null` if the name is not one. */
 export function blockIdFromHeadingAnchor(name: string): string | null {
   return name.startsWith(HEADING_ANCHOR_PREFIX)
     ? name.slice(HEADING_ANCHOR_PREFIX.length)
@@ -153,11 +152,11 @@ export function blockIdFromHeadingAnchor(name: string): string | null {
 }
 
 /**
- * Toutes les cibles de renvoi : signets posés à la main **et** titres.
+ * All the cross-reference targets: bookmarks placed by hand **and** headings.
  *
- * Writer propose les deux dans son dialogue de renvoi (`SwFldRefPage`), pour la
- * raison évidente qu'un sommaire renvoie à des titres qu'on n'a pas eu à
- * marquer un par un.
+ * Writer offers both in its cross-reference dialog (`SwFldRefPage`), for the
+ * obvious reason that a table of contents points to headings that nobody had to
+ * mark one by one.
  */
 export function linkTargets(doc: WriterDocumentState): LinkTarget[] {
   const out: LinkTarget[] = [];
@@ -187,10 +186,10 @@ export function linkTargets(doc: WriterDocumentState): LinkTarget[] {
 }
 
 /**
- * Résout un `href` de renvoi interne vers le paragraphe visé.
+ * Resolves the `href` of an internal cross-reference to the paragraph it points to.
  *
- * Renvoie `null` pour une adresse externe (`http:`, `mailto:` …) : l'appelant
- * doit alors laisser le navigateur faire son travail.
+ * Returns `null` for an external address (`http:`, `mailto:` ...): the caller must
+ * then let the browser do its job.
  */
 export function resolveInternalLink(
   doc: WriterDocumentState,
@@ -202,8 +201,8 @@ export function resolveInternalLink(
   try {
     decoded = decodeURIComponent(href.slice(1));
   } catch {
-    // Une séquence `%` mal formée n'est pas une raison de faire tomber la
-    // résolution : le lien est simplement traité comme cassé.
+    // A badly formed `%` sequence is no reason to make the resolution fail: the link is
+    // simply treated as broken.
     decoded = href.slice(1);
   }
 
@@ -220,7 +219,7 @@ export function resolveInternalLink(
   return mark ? { blockId: mark.blockId, offset: mark.startOffset } : null;
 }
 
-/** Un lien `#nom` pointant vers une cible qui n'existe plus est cassé. */
+/** A `#name` link that points to a target which no longer exists is broken. */
 export function brokenInternalLinks(doc: WriterDocumentState): string[] {
   const broken = new Set<string>();
   const { order, byId } = paragraphIndex(doc);
@@ -238,7 +237,7 @@ export function brokenInternalLinks(doc: WriterDocumentState): string[] {
   return [...broken].sort();
 }
 
-/* ---------------------------------------------------------------- écriture */
+/* ---------------------------------------------------------------- writing */
 
 export interface BookmarkRange {
   blockId: string;
@@ -247,11 +246,11 @@ export interface BookmarkRange {
 }
 
 /**
- * Pose un signet sur une plage. Transposition de `IDocumentMarkAccess::makeMark`.
+ * Places a bookmark on a range (OpenOffice: `IDocumentMarkAccess::makeMark`).
  *
- * Un nom déjà pris est d'abord libéré : Writer refuse deux signets homonymes,
- * et un renvoi `#nom` ambigu ne pourrait de toute façon viser qu'une des deux
- * positions.
+ * A name that is already taken is released first: Writer refuses two bookmarks with
+ * the same name, and an ambiguous `#name` link could only point to one of the two
+ * positions anyway.
  */
 export function setBookmark(
   doc: WriterDocumentState,
@@ -260,8 +259,8 @@ export function setBookmark(
 ): WriterDocumentState {
   const name = normalizeBookmarkName(rawName);
   if (!name) return doc;
-  // Un nom réservé aux ancres de titre ne peut pas être posé à la main : il
-  // serait écrasé à la prochaine régénération du sommaire.
+  // A name reserved for heading anchors cannot be set by hand: it would be
+  // overwritten the next time the table of contents is regenerated.
   if (blockIdFromHeadingAnchor(name)) return doc;
 
   const cleared = removeBookmark(doc, name);
@@ -272,8 +271,8 @@ export function setBookmark(
   const start = Math.max(0, Math.min(range.startOffset, range.endOffset, length));
   const end = Math.min(length, Math.max(range.startOffset, range.endOffset));
 
-  // Signet ponctuel sur un paragraphe non vide : Writer l'attache au caractère
-  // qui suit, faute de quoi il n'aurait aucun porteur et disparaîtrait.
+  // A point bookmark on a non-empty paragraph: Writer attaches it to the character
+  // that follows, otherwise it would have no carrier and would disappear.
   const from = start;
   const to = end > start ? end : Math.min(length, start + 1);
 
@@ -288,7 +287,7 @@ export function setBookmark(
   return touch(replaceParagraph(cleared, range.blockId, { ...node, runs }));
 }
 
-/** Retire un signet par son nom (`IDocumentMarkAccess::deleteMark`). */
+/** Removes a bookmark by its name (`IDocumentMarkAccess::deleteMark`). */
 export function removeBookmark(doc: WriterDocumentState, rawName: string): WriterDocumentState {
   const name = normalizeBookmarkName(rawName);
   if (!name) return doc;
@@ -311,7 +310,7 @@ export function removeBookmark(doc: WriterDocumentState, rawName: string): Write
   return changed ? touch(next) : doc;
 }
 
-/** Renomme un signet en reportant les renvois `#ancien` qui le visaient. */
+/** Renames a bookmark, carrying over the `#old` links that pointed to it. */
 export function renameBookmark(
   doc: WriterDocumentState,
   fromRaw: string,
@@ -349,7 +348,7 @@ export function renameBookmark(
   return touch(next);
 }
 
-/* ------------------------------------------------------------- utilitaires */
+/* ------------------------------------------------------------- utilities */
 
 function withBookmarkName(run: TextRun, name: string | undefined): TextRun {
   const out = makeRun(run.text, runFormatting(run));

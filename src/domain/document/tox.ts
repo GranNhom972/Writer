@@ -1,37 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Table des matières — modèle. Transposition de `SwTOXBase` / `SwTOXMark`
- * (`sw/source/core/tox/tox.cxx`, `sw/inc/tox.hxx`).
+ * Table of contents: the model. (OpenOffice: `SwTOXBase` / `SwTOXMark`,
+ * `sw/source/core/tox/tox.cxx`, `sw/inc/tox.hxx`.)
  *
- * Writer ne stocke jamais les *entrées* d'un sommaire : `SwTOXBase` ne retient
- * que sa **définition** — quels niveaux de titre retenir, avec ou sans numéro de
- * page — et `SwDoc::UpdateTOX` régénère le contenu à la demande. On transpose ce
- * choix, et pour la même raison : des entrées figées se désynchroniseraient du
- * corps du document dès la première frappe, et un sommaire faux est pire que
- * pas de sommaire.
+ * Writer never stores the *entries* of a table of contents: `SwTOXBase` only keeps its
+ * **definition** (which heading levels to include, with or without page numbers), and
+ * `SwDoc::UpdateTOX` regenerates the content on demand. We transpose that choice, for the
+ * same reason: frozen entries would drift out of sync with the body of the document at the
+ * first keystroke, and a wrong table of contents is worse than none.
  *
- * Ce module tient la partie **indépendante de la mise en page** : quels titres
- * entrent dans la table, dans quel ordre, à quel niveau. Les numéros de page
- * n'y figurent pas — ils n'existent qu'une fois la pagination faite, et c'est
- * `engine/tox.ts` qui les résout.
+ * This module holds the part that is **independent of the layout**: which headings enter
+ * the table, in what order, at what level. Page numbers are not here: they only exist once
+ * pagination is done, and `engine/tox.ts` resolves them.
  *
- * Module pur : aucun import de React, aucun accès au DOM.
+ * Pure module: no React import, no DOM access.
  */
 
 import { newId } from './document';
 import { headingAnchorName } from './bookmarks';
 import { isParagraph, type HeadingLevel, type TocNode, type WriterDocumentState } from './types';
 
-/** Titre par défaut, celui du style « Contents Heading » de Writer. */
+/** Default title, that of Writer's "Contents Heading" style. */
 export const DEFAULT_TOC_TITLE = 'Table des matières';
 
-/** Profondeur par défaut : `SwTOXBase` retient les niveaux 1 à 3. */
+/** Default depth: `SwTOXBase` keeps levels 1 to 3. */
 export const DEFAULT_TOC_MAX_LEVEL: HeadingLevel = 3;
 
 export interface TocOptions {
@@ -42,7 +40,7 @@ export interface TocOptions {
   useDotLeader?: boolean;
 }
 
-/** Crée un bloc de table des matières (`SwTOXBase` de type `TOX_CONTENT`). */
+/** Creates a table-of-contents block (a `SwTOXBase` of type `TOX_CONTENT`). */
 export function createToc(options: TocOptions = {}): TocNode {
   return {
     id: options.id ?? newId('toc'),
@@ -54,27 +52,27 @@ export function createToc(options: TocOptions = {}): TocNode {
   };
 }
 
-/** Une ligne du sommaire, avant résolution du numéro de page. */
+/** One line of the table of contents, before the page number is resolved. */
 export interface TocEntry {
-  /** Paragraphe titre dont l'entrée est dérivée. */
+  /** Heading paragraph the entry is derived from. */
   blockId: string;
-  /** Niveau de titre, de 1 à `maxLevel`. */
+  /** Heading level, from 1 to `maxLevel`. */
   level: HeadingLevel;
-  /** Texte du titre, espaces normalisées. */
+  /** Text of the heading, with whitespace normalized. */
   text: string;
-  /** Ancre de renvoi (`__RefHeading__…`), pour rendre l'entrée cliquable. */
+  /** Cross-reference anchor (`__RefHeading__…`), to make the entry clickable. */
   anchorName: string;
 }
 
 /**
- * Collecte les entrées du sommaire.
+ * Collects the entries of the table of contents.
  *
- * Seuls les titres du **flux principal** sont retenus : un titre placé dans une
- * cellule de tableau n'entre pas dans le sommaire de Writer non plus, sa
- * position n'ayant pas de sens dans une hiérarchie de document.
+ * Only the headings of the **main flow** are kept: a heading placed in a table cell does not
+ * enter Writer's table of contents either, since its position means nothing in a document
+ * hierarchy.
  *
- * Un titre vide est ignoré — il occuperait une ligne de sommaire renvoyant à
- * rien de lisible.
+ * An empty heading is ignored: it would take up a line of the table pointing at nothing
+ * readable.
  */
 export function tocEntries(doc: WriterDocumentState, toc: TocNode): TocEntry[] {
   const out: TocEntry[] = [];
@@ -100,11 +98,11 @@ export function tocEntries(doc: WriterDocumentState, toc: TocNode): TocEntry[] {
 }
 
 /**
- * Texte imprimable d'un titre.
+ * Printable text of a heading.
  *
- * Les runs porteurs d'un objet (image, formule) apportent un caractère de
- * remplacement U+FFFC qui n'a rien à faire dans un sommaire : il est retiré,
- * comme `SwTOXPara::GetText` ignore les portions non textuelles.
+ * Runs carrying an object (image, formula) bring a replacement character U+FFFC that has no
+ * business in a table of contents: it is removed, as `SwTOXPara::GetText` ignores non-text
+ * portions.
  */
 function headingText(runs: readonly { text: string; imageSrc?: string; mathLatex?: string }[]): string {
   let out = '';
@@ -115,17 +113,17 @@ function headingText(runs: readonly { text: string; imageSrc?: string; mathLatex
   return out.replace(/￼/g, '').replace(/\s+/g, ' ').trim();
 }
 
-/** Tous les blocs de sommaire du document, dans l'ordre. */
+/** All the table-of-contents blocks of the document, in order. */
 export function tocNodes(doc: WriterDocumentState): TocNode[] {
   return doc.blocks.filter((block): block is TocNode => block.type === 'toc');
 }
 
-/** Le document contient-il au moins une table des matières ? */
+/** Does the document contain at least one table of contents? */
 export function hasToc(doc: WriterDocumentState): boolean {
   return doc.blocks.some((block) => block.type === 'toc');
 }
 
-/** Modifie la définition d'un sommaire (`SwTOXBase::SetLevel`, `SetCreate`). */
+/** Changes the definition of a table of contents (`SwTOXBase::SetLevel`, `SetCreate`). */
 export function updateToc(
   doc: WriterDocumentState,
   tocId: string,
@@ -141,22 +139,21 @@ export function updateToc(
 }
 
 /**
- * Identifiant du paragraphe engendré pour une ligne de sommaire.
+ * Id of the paragraph generated for a line of the table of contents.
  *
- * Dérivé et non tiré au sort : la pagination tourne à chaque frappe, et un
- * identifiant neuf à chaque passe ferait re-rendre toutes les lignes du
- * sommaire sans qu'aucune ait changé.
+ * Derived and not drawn at random: pagination runs on every keystroke, and a new id on each
+ * pass would make every line of the table re-render although none of them had changed.
  */
 export function tocLineId(tocId: string, index: number): string {
   return `${tocId}__line${index}`;
 }
 
-/** Identifiant du paragraphe portant le titre du sommaire. */
+/** Id of the paragraph that carries the title of the table of contents. */
 export function tocTitleId(tocId: string): string {
   return `${tocId}__title`;
 }
 
-/** Ce paragraphe est-il une ligne engendrée par un sommaire ? */
+/** Is this paragraph a line generated by a table of contents? */
 export function isGeneratedTocParagraph(blockId: string): boolean {
   return blockId.includes('__line') || blockId.endsWith('__title');
 }

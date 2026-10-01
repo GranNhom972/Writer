@@ -1,24 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! SHA-256, HMAC-SHA256 et base64url.
+//! SHA-256, HMAC-SHA256 and base64url.
 //!
-//! Écrits ici plutôt qu'importés, pour la raison qui a déjà fait écrire
-//! `base64_url_decode` à la main dans `auth.rs` : ces trois primitives tiennent
-//! en deux cents lignes entièrement spécifiées (FIPS 180-4, RFC 2104, RFC 4648),
-//! et les faire entrer ferait descendre `sha2`, `hmac`, `digest` et leur suite
-//! dans un projet qui n'a aujourd'hui **aucune** dépendance de cryptographie.
+//! Written here rather than imported, for the same reason `base64_url_decode` was
+//! written by hand in `auth.rs`: these three building blocks fit in two hundred
+//! fully specified lines (FIPS 180-4, RFC 2104, RFC 4648), and importing them would
+//! pull `sha2`, `hmac`, `digest` and their whole family into a project that today
+//! has **no** cryptography dependency.
 //!
-//! Elles ne servent qu'à une chose : vérifier la signature des billets d'accès
-//! émis par CloudServ (`auth.rs`) et signer les rappels que le serveur lui
-//! envoie (`hook.rs`). Aucun secret n'est dérivé ici, aucune clé n'y est
-//! engendrée — c'est de la vérification d'intégrité, pas de la cryptographie
-//! appliquée.
+//! They serve a single purpose: checking the signature of the access tickets issued
+//! by CloudServ (`auth.rs`) and signing the callbacks the server sends to it
+//! (`hook.rs`). No secret is derived here and no key is generated: this is
+//! integrity checking, not applied cryptography.
 //!
-//! Les vecteurs d'essai des RFC sont vérifiés en bas de fichier.
+//! The RFC test vectors are checked at the bottom of the file.
 
-/// Constantes de tour de SHA-256 : les 64 premières décimales binaires des
-/// racines cubiques des 64 premiers nombres premiers (FIPS 180-4, §4.2.2).
+/// SHA-256 round constants: the first 32 bits of the fractional parts of the cube
+/// roots of the first 64 prime numbers (FIPS 180-4, §4.2.2).
 const K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -30,8 +29,8 @@ const K: [u32; 64] = [
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-/// Valeurs initiales : décimales binaires des racines carrées des 8 premiers
-/// nombres premiers (FIPS 180-4, §5.3.3).
+/// Initial values: the fractional parts of the square roots of the first 8 prime
+/// numbers (FIPS 180-4, §5.3.3).
 const H0: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ];
@@ -39,12 +38,12 @@ const H0: [u32; 8] = [
 pub const SHA256_BLOCK_BYTES: usize = 64;
 pub const SHA256_OUTPUT_BYTES: usize = 32;
 
-/// Condensé SHA-256 d'un message.
+/// SHA-256 digest of a message.
 pub fn sha256(message: &[u8]) -> [u8; SHA256_OUTPUT_BYTES] {
     let mut h = H0;
 
-    // Bourrage FIPS 180-4 §5.1.1 : un bit à 1, des zéros, puis la longueur du
-    // message en bits sur 64 bits gros-boutiens.
+    // FIPS 180-4 §5.1.1 padding: a 1 bit, zeros, then the message length in bits as a
+    // 64-bit big-endian number.
     let mut bloc = Vec::with_capacity(message.len() + 72);
     bloc.extend_from_slice(message);
     bloc.push(0x80);
@@ -105,8 +104,8 @@ pub fn sha256(message: &[u8]) -> [u8; SHA256_OUTPUT_BYTES] {
 
 /// HMAC-SHA256 (RFC 2104).
 pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; SHA256_OUTPUT_BYTES] {
-    // Une clé plus longue qu'un bloc est d'abord condensée ; une clé plus courte
-    // est complétée de zéros.
+    // A key longer than one block is hashed first; a shorter key is padded with
+    // zeros.
     let mut cle = [0u8; SHA256_BLOCK_BYTES];
     if key.len() > SHA256_BLOCK_BYTES {
         cle[..SHA256_OUTPUT_BYTES].copy_from_slice(&sha256(key));
@@ -125,12 +124,11 @@ pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; SHA256_OUTPUT_BYTES] {
     sha256(&externe)
 }
 
-/// Comparaison à temps constant.
+/// Constant-time comparison.
 ///
-/// Un `==` ordinaire s'arrête au premier octet différent : le temps de réponse
-/// livre alors, octet par octet, la signature attendue. C'est l'attaque
-/// classique contre une vérification de MAC, et elle est bien réelle sur un
-/// service qu'on peut interroger en boucle.
+/// An ordinary `==` stops at the first differing byte: the response time then gives
+/// away the expected signature, byte by byte. This is the classic attack against a
+/// MAC check, and it is very real on a service that can be queried in a loop.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -142,17 +140,17 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     difference == 0
 }
 
-/// Alphabet base64url. Le serveur ne fait que **vérifier** des jetons, jamais en
-/// émettre : l'encodage correspondant ne sert donc qu'aux tests, où il tient le
-/// rôle de CloudServ et fabrique les billets à examiner.
+/// The base64url alphabet. The server only **verifies** tokens and never issues
+/// them: the matching encoder is only used by the tests, where it plays the role of
+/// CloudServ and builds the tickets to examine.
 #[cfg(test)]
 const BASE64_URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const BASE64_STD: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// Encodage base64 **standard, avec remplissage** — celui des URI `data:`.
+/// **Standard** base64 encoding, **with padding**, as used by `data:` URIs.
 ///
-/// Distinct de `base64_url_encode` : une image inlinée avec l'alphabet URL et
-/// sans remplissage ne se décode pas dans un navigateur.
+/// Not the same as `base64_url_encode`: an image inlined with the URL alphabet and
+/// no padding cannot be decoded by a browser.
 pub fn base64_encode(input: &[u8]) -> String {
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for morceau in input.chunks(3) {
@@ -177,8 +175,8 @@ pub fn base64_encode(input: &[u8]) -> String {
     out
 }
 
-/// Représentation hexadécimale minuscule — la forme sous laquelle voyage la
-/// signature des rappels vers CloudServ.
+/// Lower-case hexadecimal representation: the form in which the signature of the
+/// callbacks travels to CloudServ.
 pub fn to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for octet in bytes {
@@ -187,7 +185,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
     out
 }
 
-/// Encodage base64url **sans remplissage**, tel que l'exige JOSE (RFC 7515 §2).
+/// base64url encoding **without padding**, as JOSE requires (RFC 7515 §2).
 #[cfg(test)]
 pub fn base64_url_encode(input: &[u8]) -> String {
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
@@ -209,7 +207,7 @@ pub fn base64_url_encode(input: &[u8]) -> String {
     out
 }
 
-/// Décodage base64url, avec ou sans remplissage.
+/// base64url decoding, with or without padding.
 pub fn base64_url_decode(input: &str) -> Result<Vec<u8>, ()> {
     let valeur = |c: u8| -> Result<u32, ()> {
         match c {
@@ -226,8 +224,8 @@ pub fn base64_url_decode(input: &str) -> Result<Vec<u8>, ()> {
     let mut out = Vec::with_capacity(brut.len() * 3 / 4);
 
     for morceau in brut.chunks(4) {
-        // Un groupe d'un seul caractère ne porte aucun octet complet : c'est un
-        // encodage invalide, pas un reste tolérable.
+        // A group of a single character holds no complete byte: that is an invalid
+        // encoding, not a tolerable remainder.
         if morceau.len() == 1 {
             return Err(());
         }
@@ -264,8 +262,8 @@ mod tests {
             hex(&sha256(b"abc")),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
-        // Message à cheval sur deux blocs : c'est le cas que rate un bourrage
-        // mal écrit, et il passe inaperçu sur les messages courts.
+        // A message that straddles two blocks: this is the case a badly written padding
+        // gets wrong, and it goes unnoticed on short messages.
         assert_eq!(
             hex(&sha256(
                 b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
@@ -276,8 +274,8 @@ mod tests {
 
     #[test]
     fn sha256_message_long() {
-        // Un million de « a » — vecteur FIPS 180-4 qui exerce le compteur de
-        // longueur bien au-delà d'un octet.
+        // One million "a": a FIPS 180-4 vector that exercises the length counter well
+        // beyond a single byte.
         let message = vec![b'a'; 1_000_000];
         assert_eq!(
             hex(&sha256(&message)),
@@ -287,21 +285,21 @@ mod tests {
 
     #[test]
     fn hmac_vecteurs_rfc4231() {
-        // Cas 1 de la RFC 4231.
+        // RFC 4231 test case 1.
         let cle = [0x0b_u8; 20];
         assert_eq!(
             hex(&hmac_sha256(&cle, b"Hi There")),
             "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
         );
 
-        // Cas 2 : clé et message en clair.
+        // Test case 2: key and message in plain text.
         assert_eq!(
             hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")),
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
         );
 
-        // Cas 6 : clé de 131 octets, donc plus longue qu'un bloc — elle doit
-        // être condensée avant usage, et c'est la branche qu'on oublie d'écrire.
+        // Test case 6: a 131-byte key, so longer than one block. It must be hashed before
+        // use, and it is the branch people forget to write.
         let cle_longue = [0xaa_u8; 131];
         assert_eq!(
             hex(&hmac_sha256(
@@ -331,8 +329,8 @@ mod tests {
 
     #[test]
     fn base64url_encode_sans_caracteres_interdits() {
-        // Les octets 0xFB 0xFF donnent « + » et « / » en base64 standard : ils
-        // doivent sortir en « - » et « _ », sans quoi le jeton casse en URL.
+        // The bytes 0xFB 0xFF give "+" and "/" in standard base64: they must come out as
+        // "-" and "_", otherwise the token breaks in a URL.
         let encode = base64_url_encode(&[0xfb, 0xff, 0xfe]);
         assert!(!encode.contains('+') && !encode.contains('/'));
         assert_eq!(base64_url_decode(&encode).unwrap(), vec![0xfb, 0xff, 0xfe]);
@@ -351,8 +349,8 @@ mod tests {
 
     #[test]
     fn base64_standard_garde_lalphabet_standard() {
-        // Une image inlinée en `data:` doit se décoder dans un navigateur : les
-        // octets qui donnent « + » et « / » ne doivent pas sortir en « - » et « _ ».
+        // An image inlined as `data:` must decode in a browser: the bytes that give "+"
+        // and "/" must not come out as "-" and "_".
         assert_eq!(base64_encode(&[0xfb, 0xff, 0xbf]), "+/+/");
     }
 

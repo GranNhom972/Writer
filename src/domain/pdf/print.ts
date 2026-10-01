@@ -1,30 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Export PDF **par la boîte d'impression du navigateur**.
+ * PDF export **through the browser's print dialog**.
  *
- * Writer possède son propre moteur PDF (`export.ts`, port de `vcl::PDFWriter`),
- * mais celui-ci ne restitue que ce qu'il sait écrire lui-même : polices Base14,
- * images ré-encodées, mise en page recalculée. Le navigateur, lui, a déjà sous
- * les yeux le rendu exact — polices réelles, images décodées, pagination du
- * moteur de mise en page — et sait le transformer en PDF via la destination
- * « Enregistrer au format PDF ». C'est ce chemin-là que prend l'export.
+ * Writer has its own PDF engine (`export.ts`, a port of `vcl::PDFWriter`), but it only reproduces what it knows how to
+ * write itself: Base 14 fonts, re-encoded images, a recomputed layout. The browser, for its part, already has the exact
+ * rendering in front of it (real fonts, decoded images, the layout engine's pagination) and can turn it into a PDF
+ * through the "Save as PDF" destination. This is the path the export takes.
  *
- * Le rendu imprimé est piloté par la feuille `@media print` de `ui/app.css` :
- * l'interface disparaît, seules les pages A4 subsistent, une par feuille.
+ * The printed rendering is driven by the `@media print` stylesheet of `ui/app.css`: the interface disappears and only
+ * the A4 pages remain, one per sheet.
  */
 
 /**
- * Ouvre la boîte d'impression, le titre du document en nom de fichier proposé.
+ * Opens the print dialog, with the document title as the suggested file name.
  *
- * Les navigateurs pré-remplissent le champ « Nom » de l'export PDF avec
- * `document.title`. On l'y place le temps de l'impression, puis on le remet :
- * l'onglet retrouve son titre habituel dès la boîte refermée.
+ * Browsers pre-fill the "Name" field of the PDF export with `document.title`. We put it there for the duration of the
+ * printing, then restore it: the tab gets its usual title back as soon as the dialog is closed.
  */
 export function printDocument(title?: string): void {
   const previousTitle = document.title;
@@ -37,8 +34,8 @@ export function printDocument(title?: string): void {
 
   if (proposed) {
     document.title = proposed;
-    // `afterprint` est le seul signal fiable : selon le navigateur,
-    // `window.print()` rend la main avant ou après la fermeture de la boîte.
+    // `afterprint` is the only reliable signal: depending on the browser, `window.print()` returns before or after the
+    // dialog closes.
     window.addEventListener('afterprint', restore);
   }
 

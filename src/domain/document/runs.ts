@@ -1,31 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Opérations sur les plages de formatage d'un paragraphe.
+ * Operations on the formatting ranges of a paragraph.
  *
- * Équivalent fonctionnel de `SwpHints` (`sw/source/core/txtnode/thints.cxx`) :
- * insertion, suppression et pose d'attribut sur un intervalle, en préservant
- * l'invariant de `SwpHints::MergePortions` — **jamais deux runs adjacents de
- * formatage identique**, et jamais de run vide (hors paragraphe vide).
+ * Functional equivalent of `SwpHints` (`sw/source/core/txtnode/thints.cxx`): insert, delete
+ * and set an attribute on an interval, while preserving the `SwpHints::MergePortions`
+ * invariant: **never two adjacent runs with identical formatting**, and never an empty run
+ * (except in an empty paragraph).
  *
- * Toutes les fonctions sont pures : elles renvoient de nouveaux tableaux et ne
- * modifient jamais leurs arguments.
+ * All the functions are pure: they return new arrays and never modify their arguments.
  */
 
 import { RUN_FORMAT_KEYS, type RunFormatKey, type RunFormatting, type TextRun } from './types';
 
 /**
- * Modification d'attributs à appliquer sur une plage.
+ * Attribute change to apply on a range.
  *
- * `null` **retire** l'attribut : le run repasse au style par défaut du document.
- * C'est la distinction que fait Writer entre `SwTxtNode::SetAttr` et
- * `SwTxtNode::ResetAttr` — retirer n'est pas poser la valeur par défaut, car un
- * style nommé pourrait la redéfinir.
+ * `null` **removes** the attribute: the run goes back to the document's default style.
+ * This is the distinction Writer makes between `SwTxtNode::SetAttr` and
+ * `SwTxtNode::ResetAttr`: removing is not the same as setting the default value, because a
+ * named style could redefine it.
  */
 export type RunFormatPatch = {
   [K in RunFormatKey]?: RunFormatting[K] | null;
@@ -39,21 +38,21 @@ const BOOLEAN_KEYS: ReadonlySet<string> = new Set([
   'mathDisplay',
 ]);
 
-/** Longueur de la chaîne brute du paragraphe (`SwTxtNode::m_Text.Len()`). */
+/** Length of the paragraph's raw string (`SwTxtNode::m_Text.Len()`). */
 export function runsLength(runs: readonly TextRun[]): number {
   let total = 0;
   for (const run of runs) total += run.text.length;
   return total;
 }
 
-/** Chaîne brute du paragraphe : c'est elle qu'indexent les offsets de curseur. */
+/** Raw string of the paragraph: it is the one the cursor offsets index into. */
 export function runsText(runs: readonly TextRun[]): string {
   let out = '';
   for (const run of runs) out += run.text;
   return out;
 }
 
-/** Extrait le jeu d'attributs d'un run, sans son texte. */
+/** Extracts the attribute set of a run, without its text. */
 export function runFormatting(run: TextRun): RunFormatting {
   const out: RunFormatting = {};
   for (const key of RUN_FORMAT_KEYS) {
@@ -64,26 +63,25 @@ export function runFormatting(run: TextRun): RunFormatting {
 }
 
 /**
- * Écrit une clé de formatage en conservant le typage.
+ * Writes a formatting key while keeping its typing.
  *
- * Le passage par une fonction est nécessaire sous `exactOptionalPropertyTypes` :
- * une affectation indexée directe ne prouve pas au compilateur que la valeur
- * correspond bien à *cette* clé-là.
+ * Going through a function is necessary under `exactOptionalPropertyTypes`: a direct
+ * indexed assignment does not prove to the compiler that the value matches *that* key.
  */
 function assignFormat(target: RunFormatting, key: RunFormatKey, value: unknown): void {
   (target as Record<string, unknown>)[key] = value;
 }
 
-/** Deux plages portent-elles exactement le même formatage ? (`*p1 == *p2`) */
+/** Do two ranges carry exactly the same formatting? (`*p1 == *p2`) */
 export function sameFormatting(a: RunFormatting, b: RunFormatting): boolean {
   for (const key of RUN_FORMAT_KEYS) {
-    // `undefined` et clé absente sont le même état : « attribut non posé ».
+    // `undefined` and an absent key are the same state: "attribute not set".
     if ((a[key] ?? undefined) !== (b[key] ?? undefined)) return false;
   }
   return true;
 }
 
-/** Construit un run à partir d'un texte et d'un jeu d'attributs. */
+/** Builds a run from a text and an attribute set. */
 export function makeRun(text: string, formatting: RunFormatting = {}): TextRun {
   const run: TextRun = { text };
   for (const key of RUN_FORMAT_KEYS) {
@@ -94,12 +92,11 @@ export function makeRun(text: string, formatting: RunFormatting = {}): TextRun {
 }
 
 /**
- * Rétablit les invariants : retire les runs vides et fusionne les adjacents
- * de formatage identique. Transposition de `SwpHints::MergePortions`.
+ * Restores the invariants: removes empty runs and merges adjacent ones that have identical
+ * formatting. (OpenOffice: `SwpHints::MergePortions`.)
  *
- * Un paragraphe vide conserve **un** run vide, qui porte le formatage que
- * prendra la prochaine frappe — comme un `SwTxtNode` de texte vide conserve son
- * `SwAttrSet`.
+ * An empty paragraph keeps **one** empty run, which carries the formatting the next
+ * keystroke will take, just as a `SwTxtNode` with empty text keeps its `SwAttrSet`.
  */
 export function normalizeRuns(
   runs: readonly TextRun[],
@@ -118,16 +115,16 @@ export function normalizeRuns(
   }
 
   if (out.length === 0) {
-    // Le formatage du paragraphe vidé lui survit : sans ce porteur, taper à
-    // nouveau dans un paragraphe qu'on vient d'effacer repartirait du style par
-    // défaut au lieu de reprendre celui qu'il avait.
+    // The formatting of the emptied paragraph outlives it: without this carrier, typing again
+    // in a paragraph that has just been erased would start from the default style instead of
+    // resuming the one it had.
     const carrier = fallback ?? (runs[0] ? runFormatting(runs[0]) : {});
     return [makeRun('', carrier)];
   }
   return out;
 }
 
-/** Localise l'offset : index du run le contenant et position dans ce run. */
+/** Locates the offset: index of the run that contains it, and position inside that run. */
 export function locateOffset(
   runs: readonly TextRun[],
   offset: number,
@@ -135,8 +132,8 @@ export function locateOffset(
   let remaining = offset;
   for (let i = 0; i < runs.length; i += 1) {
     const length = runs[i]!.text.length;
-    // `<=` : un offset en fin de run appartient à ce run, ce qui fait hériter
-    // la frappe du formatage de gauche (règle de Writer, cf. formattingAt).
+    // `<=`: an offset at the end of a run belongs to that run, so that typing inherits the
+    // formatting on the left (Writer's rule, see formattingAt).
     if (remaining <= length) return { runIndex: i, inner: remaining };
     remaining -= length;
   }
@@ -144,7 +141,7 @@ export function locateOffset(
   return { runIndex: lastIndex, inner: runs[lastIndex]?.text.length ?? 0 };
 }
 
-/** Coupe la liste de runs en deux à l'offset donné (`SwTxtNode::SplitCntntNode`). */
+/** Splits the list of runs in two at the given offset (`SwTxtNode::SplitCntntNode`). */
 export function splitRunsAt(
   runs: readonly TextRun[],
   offset: number,
@@ -171,13 +168,13 @@ export function splitRunsAt(
     consumed = end;
   }
 
-  // Une moitié vide doit tout de même porter le formatage du point de coupure,
-  // que `normalizeRuns` ne pourrait pas deviner depuis un tableau vide.
+  // An empty half must still carry the formatting of the cut point, which `normalizeRuns`
+  // could not guess from an empty array.
   const atCut = formattingAt(runs, clamped);
   return [normalizeRuns(before, atCut), normalizeRuns(after, atCut)];
 }
 
-/** Extrait la plage `[start, end)` en conservant le formatage local. */
+/** Extracts the range `[start, end)` while keeping the local formatting. */
 export function sliceRuns(
   runs: readonly TextRun[],
   start: number,
@@ -205,11 +202,11 @@ export function sliceRuns(
 }
 
 /**
- * Insère du texte à l'offset donné.
+ * Inserts text at the given offset.
  *
- * Sans formatage explicite, le texte hérite de celui de la position — c'est-à-dire
- * du caractère **à gauche** (cf. `formattingAt`) : taper à la suite d'un mot en
- * gras continue en gras, ce qu'attend l'usager.
+ * With no explicit formatting, the text inherits that of the position, meaning the
+ * character **on the left** (see `formattingAt`): typing right after a bold word keeps
+ * going in bold, which is what the user expects.
  */
 export function insertTextInRuns(
   runs: readonly TextRun[],
@@ -223,7 +220,7 @@ export function insertTextInRuns(
   return normalizeRuns([...before, makeRun(text, format), ...after]);
 }
 
-/** Supprime la plage `[start, end)` (`SwTxtNode::EraseText`). */
+/** Deletes the range `[start, end)` (`SwTxtNode::EraseText`). */
 export function deleteRangeInRuns(
   runs: readonly TextRun[],
   start: number,
@@ -236,17 +233,17 @@ export function deleteRangeInRuns(
 
   const [before] = splitRunsAt(runs, from);
   const [, after] = splitRunsAt(runs, to);
-  // La liste peut devenir vide : `normalizeRuns` réinstalle alors un run vide
-  // portant le formatage d'origine, pour que le paragraphe garde son style.
+  // The list may become empty: `normalizeRuns` then puts back an empty run that carries the
+  // original formatting, so that the paragraph keeps its style.
   return normalizeRuns([...before, ...after], formattingAt(runs, from));
 }
 
 /**
- * Applique un correctif d'attributs sur `[start, end)`.
+ * Applies an attribute patch on `[start, end)`.
  *
- * Sur une plage vide, il n'y a rien à écrire dans le modèle : le formatage
- * « en attente » d'un curseur replié est porté par l'état d'édition, pas par le
- * document (`SwCrsrShell::GetCurAttr` vs les hints du nœud).
+ * On an empty range there is nothing to write into the model: the "pending" formatting of
+ * a collapsed cursor is carried by the editing state, not by the document
+ * (`SwCrsrShell::GetCurAttr` vs the node's hints).
  */
 export function applyFormattingToRange(
   runs: readonly TextRun[],
@@ -288,12 +285,11 @@ export function applyFormattingToRange(
 }
 
 /**
- * Applique un correctif à un jeu d'attributs.
+ * Applies a patch to an attribute set.
  *
- * Forme canonique imposée : un booléen est `true` ou **absent**, jamais `false`.
- * Sans cette règle, « gras » et « pas gras » seraient deux formatages distincts
- * et deux runs voisins ne fusionneraient plus — la liste enflerait à chaque
- * bascule.
+ * Canonical form enforced: a boolean is `true` or **absent**, never `false`. Without this
+ * rule, "bold" and "not bold" would be two distinct formattings and two neighboring runs
+ * would no longer merge, so the list would grow at every toggle.
  */
 export function patchFormatting(
   format: RunFormatting,
@@ -314,12 +310,11 @@ export function patchFormatting(
 }
 
 /**
- * Attributs qu'un objet **ne transmet pas** au texte tapé à côté de lui.
+ * Attributes that an object **does not pass on** to text typed next to it.
  *
- * Une formule et un cadre image sont des objets, pas un style : taper après eux
- * doit produire du texte, pas un second objet identique. Writer fait le même
- * tri, `SwTxtNode::GetAttr` ne rendant jamais un `SwTxtAttr` d'objet comme
- * formatage courant.
+ * A formula and an image frame are objects, not a style: typing after them must produce
+ * text, not a second identical object. Writer makes the same distinction:
+ * `SwTxtNode::GetAttr` never returns an object's `SwTxtAttr` as the current formatting.
  */
 const OBJECT_KEYS = [
   'mathLatex',
@@ -337,10 +332,10 @@ function withoutObjectAttributes(formatting: RunFormatting): RunFormatting {
 }
 
 /**
- * Formatage qui s'applique à une frappe faite à cet offset.
+ * Formatting that applies to a keystroke made at this offset.
  *
- * Writer prend celui du caractère de **gauche** (`SwTxtNode::GetAttr` avec
- * `nStt == nEnd`), sauf en début de paragraphe où il n'y a que la droite.
+ * Writer takes that of the character on the **left** (`SwTxtNode::GetAttr` with
+ * `nStt == nEnd`), except at the start of a paragraph where there is only the right one.
  */
 export function formattingAt(runs: readonly TextRun[], offset: number): RunFormatting {
   if (runs.length === 0) return {};
@@ -354,8 +349,8 @@ export function formattingAt(runs: readonly TextRun[], offset: number): RunForma
 }
 
 /**
- * Attributs communs à toute la plage — pour l'état des boutons de la barre
- * d'outils. Une clé absente du résultat signifie « valeurs mêlées ».
+ * Attributes common to the whole range, for the state of the toolbar buttons. A key that
+ * is missing from the result means "mixed values".
  */
 export function commonFormatting(
   runs: readonly TextRun[],
@@ -382,17 +377,16 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Applique une transformation aux seuls runs couvrant `[start, end)`.
+ * Applies a transformation to only the runs covering `[start, end)`.
  *
- * Les runs à cheval sur une borne sont coupés en deux — l'équivalent de
- * `SwpHints::SplitAttr` (thints.cxx) quand un attribut de caractère est posé au
- * milieu d'une plage existante. C'est l'opération dont dépendent les trois
- * sous-systèmes qui ancrent un repère dans le texte : commentaires, signets et
- * révisions. Elle est ici plutôt que recopiée trois fois, parce que se tromper
- * d'un caractère sur une borne est une erreur silencieuse.
+ * Runs that straddle a boundary are cut in two, the equivalent of `SwpHints::SplitAttr`
+ * (thints.cxx) when a character attribute is set in the middle of an existing range. It is
+ * the operation that the three subsystems anchoring a marker in the text depend on:
+ * comments, bookmarks and revisions. It lives here rather than being copied three times,
+ * because being off by one character on a boundary is a silent error.
  *
- * Le résultat n'est **pas** normalisé : l'appelant décide, car normaliser
- * refuserait le run vide que doit conserver un paragraphe vide.
+ * The result is **not** normalized: the caller decides, because normalizing would remove
+ * the empty run that an empty paragraph must keep.
  */
 export function mapRunsInRange(
   runs: readonly TextRun[],
@@ -412,8 +406,8 @@ export function mapRunsInRange(
     const runEnd = offset + run.text.length;
     offset = runEnd;
 
-    // Hors plage, ou run vide (porteur de formatage d'un paragraphe vidé) :
-    // le transformer poserait un attribut sur du néant.
+    // Outside the range, or an empty run (carrier of the formatting of an emptied paragraph):
+    // transforming it would set an attribute on nothing.
     if (runEnd <= from || runStart >= to || run.text.length === 0) {
       out.push(run);
       continue;

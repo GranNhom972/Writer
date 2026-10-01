@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 import { useCallback, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 interface RulerProps {
   zoom?: number;
-  /** Largeur de la feuille, en centimètres. A4 par défaut. */
+  /** Width of the sheet, in centimeters. A4 by default. */
   pageWidthCm?: number;
   leftMarginCm?: number;
   rightMarginCm?: number;
@@ -29,8 +29,7 @@ export function Ruler({
   onFirstLineIndentChange,
   onOpenMarginsDialog,
 }: RulerProps) {
-  // La règle suit le format réel de la feuille : figée à 21 cm, elle mentirait
-  // sur un document en paysage ou au format Letter.
+  // The ruler follows the real format of the sheet: frozen at 21 cm, it would lie on a landscape or Letter-format document.
   const totalWidthCm = pageWidthCm;
   const divisions = Array.from({ length: Math.floor(totalWidthCm) + 1 }, (_, i) => i);
   const rulerRef = useRef<HTMLDivElement | null>(null);
@@ -103,9 +102,8 @@ export function Ruler({
   };
 
   return (
-    // Mise en page portée par la feuille de style et non en `style` inline :
-    // un style inline l'emporte sur toute règle de classe, et empêchait de
-    // masquer la règle sur téléphone (voir `.ruler` dans app.css).
+    // Layout carried by the stylesheet and not by inline `style`: an inline style wins over any class rule, and kept the ruler from being hidden on phones (see
+    // `.ruler` in app.css).
     <div
       className="ruler ruler-container"
       onDoubleClick={handleDoubleClick}
@@ -134,7 +132,7 @@ export function Ruler({
           } as CSSProperties
         }
       >
-        {/* Zone marge gauche */}
+        {/* Left margin area */}
         <div
           style={{
             position: 'absolute',
@@ -148,7 +146,7 @@ export function Ruler({
           }}
         />
 
-        {/* Zone marge droite */}
+        {/* Right margin area */}
         <div
           style={{
             position: 'absolute',
@@ -162,7 +160,7 @@ export function Ruler({
           }}
         />
 
-        {/* Graduations cm */}
+        {/* Centimeter graduations */}
         {divisions.map((cm) => {
           const leftPercent = (cm / totalWidthCm) * 100;
           return (
@@ -185,7 +183,7 @@ export function Ruler({
           );
         })}
 
-        {/* Curseur retrait 1ère ligne */}
+        {/* First-line indent marker */}
         <div
           title={`Retrait 1ère ligne (${firstLineIndentCm >= 0 ? '+' : ''}${firstLineIndentCm} cm) — Glisser pour ajuster`}
           onPointerDown={(e) => startDrag('first-line', e)}
@@ -213,7 +211,7 @@ export function Ruler({
           />
         </div>
 
-        {/* Curseur marge gauche */}
+        {/* Left margin marker */}
         <div
           title={`Marge gauche (${leftMarginCm.toFixed(1)} cm) — Glisser pour ajuster`}
           onPointerDown={(e) => startDrag('left', e)}
@@ -242,7 +240,7 @@ export function Ruler({
           />
         </div>
 
-        {/* Curseur marge droite */}
+        {/* Right margin marker */}
         <div
           title={`Marge droite (${rightMarginCm.toFixed(1)} cm) — Glisser pour ajuster`}
           onPointerDown={(e) => startDrag('right', e)}
@@ -271,7 +269,7 @@ export function Ruler({
           />
         </div>
 
-        {/* Bulle d'information pendant le glissement */}
+        {/* Information bubble during dragging */}
         {tooltip && (
           <div
             style={{

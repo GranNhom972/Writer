@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Configuration et état partagé du serveur.
+//! Server configuration and shared state.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -15,47 +15,45 @@ use crate::error::{AppError, AppResult};
 use crate::session::SessionRecord;
 use crate::store::FileStore;
 
-/// Taille maximale d'une trame de synchronisation.
+/// Maximum size of a sync frame.
 ///
-/// Une opération porte un paragraphe entier ; 1 Mio laisse largement la place à
-/// un paragraphe long, et coupe net un client qui tenterait d'envoyer un
-/// document complet à chaque frappe.
+/// An operation carries a whole paragraph; 1 MiB leaves plenty of room for a long
+/// paragraph, and cuts off at once a client that tries to send a complete document
+/// on every keystroke.
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_MESSAGES_PER_SECOND: u32 = 100;
 pub const MESSAGE_BURST: u32 = 300;
 pub const MAX_CLIENTS_PER_DOCUMENT: usize = 200;
 
-/// Délai au-delà duquel une connexion muette est fermée.
+/// Time after which a silent connection is closed.
 ///
-/// Un client vivant émet forcément quelque chose bien avant : la présence est
-/// renouvelée toutes les ~15 s. Une connexion silencieuse plus longtemps
-/// appartient à une page morte — la garder afficherait aux autres des
-/// participants fantômes.
+/// A live client always sends something well before this: presence is renewed
+/// about every 15 s. A connection silent for longer belongs to a dead page, and
+/// keeping it would show the others ghost participants.
 pub const IDLE_TIMEOUT_SECS: u64 = 90;
 
-/// Délai de grâce avant de considérer un document réellement abandonné.
+/// Grace period before a document is considered really abandoned.
 ///
-/// Un rechargement de page ferme le WebSocket et en rouvre un aussitôt. Sans ce
-/// délai, chaque `F5` fermerait la session, sauvegarderait dans CloudServ et
-/// créerait une version d'historique — l'historique se remplirait de doublons,
-/// et la réouverture rechargerait un document qu'on n'a jamais quitté.
+/// Reloading a page closes the WebSocket and immediately opens another. Without
+/// this delay every `F5` would close the session, save to CloudServ and create a
+/// history version: the history would fill with duplicates, and reopening would
+/// reload a document that was never left.
 pub const DEFAULT_CLOSE_GRACE_SECS: u64 = 30;
 
-/// Accalmie après laquelle la partie utile du document est déchargée vers
+/// Quiet period after which the useful part of the document is handed over to
 /// CloudServ.
 ///
-/// Le déchargement projette le document entier : le faire à chaque frappe
-/// saturerait le réseau et le disque de CloudServ pour rien. On attend donc que
-/// la frappe s'arrête — dix secondes suffisent à distinguer une pause d'une
-/// hésitation entre deux mots.
+/// Handing it over projects the whole document: doing it on every keystroke would
+/// overload CloudServ's network and disk for nothing. So we wait for typing to stop;
+/// ten seconds is enough to tell a pause from hesitating between two words.
 pub const DEFAULT_CHECKPOINT_QUIET_SECS: u64 = 10;
 
-/// Plafond entre deux déchargements, accalmie ou non.
+/// Upper bound between two hand-overs, quiet period or not.
 ///
-/// Sans lui, une frappe continue ne laisserait jamais venir le calme et le
-/// document ne serait déchargé qu'à la fermeture — exactement ce que ce
-/// mécanisme corrige. Ce plafond borne donc ce qu'un arrêt brutal peut coûter :
-/// au pire deux minutes de travail.
+/// Without it, continuous typing would never let calm arrive and the document would
+/// only be handed over when it closes, which is exactly what this mechanism fixes.
+/// This ceiling bounds what a sudden shutdown can cost: two minutes of work at the
+/// very worst.
 pub const DEFAULT_CHECKPOINT_MAX_SECS: u64 = 120;
 
 #[derive(Debug, Clone)]
@@ -64,15 +62,15 @@ pub struct Config {
     pub data_dir: String,
     pub auth: AuthSettings,
     pub allowed_origins: Vec<String>,
-    /// Adresse de base de CloudServ, quand Writer lui sert d'éditeur temporaire.
-    /// Absente, le serveur fonctionne seul et ne rappelle personne.
+    /// Base address of CloudServ, when Writer acts as its temporary editor. When
+    /// absent, the server runs on its own and calls nobody.
     pub cloudserv_url: Option<String>,
     pub close_grace_secs: u64,
     pub checkpoint_quiet_secs: u64,
     pub checkpoint_max_secs: u64,
-    /// Racine du bundle de l'éditeur, servi par ce même processus quand elle
-    /// est posée (`WRITER_WEB_ROOT`). Absente : seule l'API répond, et c'est
-    /// Vite ou HAProxy qui sert la page. Voir `web.rs`.
+    /// Root folder of the editor bundle, served by this same process when it is set
+    /// (`WRITER_WEB_ROOT`). When absent only the API answers, and Vite or HAProxy
+    /// serves the page. See `web.rs`.
     pub web_root: Option<std::path::PathBuf>,
 }
 
@@ -80,12 +78,11 @@ impl Config {
     pub fn from_env() -> Config {
         let production = std::env::var("WRITER_ENV").as_deref() == Ok("production");
         let mode = match std::env::var("WRITER_AUTH_MODE").as_deref() {
-            // Le mode développement accepte `dev.<qui-veut>.write` : toute
-            // identité, toute portée, sur tout document. Il ne s'obtient plus
-            // par OMISSION — il faut l'écrire, et il reste refusé en
-            // production. `WRITER_ENV` n'était posé nulle part dans la stack :
-            // lancer le serveur par son propre `run.sh` suffisait à retomber
-            // silencieusement dans ce mode.
+            // Development mode accepts `dev.<anyone>.write`: any identity, any scope, on any
+            // document. It is no longer obtained by OMISSION: it has to be written
+            // explicitly, and it is still refused in production. `WRITER_ENV` was not set
+            // anywhere in the stack, so starting the server through its own `run.sh` was
+            // enough to silently fall back into this mode.
             Ok("dev") if !production => AuthMode::Dev,
             _ => AuthMode::Jwt,
         };
@@ -108,8 +105,8 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_CLOSE_GRACE_SECS),
-            // `filter(|v| *v > 0)` : un zéro déchargerait à chaque frappe. Ce
-            // n'est pas un réglage, c'est une panne — on retient le défaut.
+            // `filter(|v| *v > 0)`: a zero would hand over on every keystroke. That is not a
+            // setting, it is a fault, so we keep the default.
             checkpoint_quiet_secs: std::env::var("WRITER_CHECKPOINT_QUIET_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -139,9 +136,9 @@ pub struct AppState {
     pub cfg: Arc<Config>,
     pub store: Arc<FileStore>,
     docs: Arc<DashMap<Uuid, Arc<DocHandle>>>,
-    /// Sessions par `token_session`, et index inverse pour retrouver la session
-    /// d'un document : le WebSocket de synchronisation ne connaît que le
-    /// `doc_id`, et c'est pourtant là que les permissions s'appliquent.
+    /// Sessions by `token_session`, and a reverse index to find the session of a
+    /// document: the sync WebSocket only knows the `doc_id`, yet that is where the
+    /// permissions are applied.
     sessions: Arc<DashMap<String, Arc<SessionRecord>>>,
     doc_sessions: Arc<DashMap<Uuid, String>>,
     next_connection_id: Arc<AtomicU64>,
@@ -167,13 +164,13 @@ impl AppState {
         self.sessions.insert(record.token_session.clone(), record);
     }
 
-    /// Session par jeton : mémoire d'abord, stockage ensuite.
+    /// Session by token: memory first, storage second.
     ///
-    /// Un redémarrage du serveur ne DOIT pas invalider les liens de partage déjà
-    /// distribués — ils vivent dans des courriels que personne ne renverra.
+    /// A server restart MUST NOT invalidate the share links that were already sent
+    /// out: they live in e-mails that nobody will send again.
     pub fn session(&self, token_session: &str) -> AppResult<Arc<SessionRecord>> {
         if !crate::session::valid_token(token_session) {
-            // Un jeton mal formé n'a jamais pu être écrit : inutile de toucher au disque.
+            // A malformed token could never have been written: no need to touch the disk.
             return Err(AppError::SessionNotFound);
         }
         if let Some(existing) = self.sessions.get(token_session) {
@@ -194,15 +191,15 @@ impl AppState {
         Ok(record)
     }
 
-    /// Session à laquelle appartient un document, s'il y en a une. Les documents
-    /// créés par `POST /documents` n'en ont pas : leur comportement est inchangé.
+    /// The session a document belongs to, if there is one. Documents created by
+    /// `POST /documents` have none: their behavior is unchanged.
     pub fn session_for_doc(&self, doc_id: Uuid) -> Option<Arc<SessionRecord>> {
         if let Some(token) = self.doc_sessions.get(&doc_id) {
             return self.sessions.get(token.value()).map(|r| r.clone());
         }
 
-        // Index froid (premier accès après redémarrage) : on le reconstruit
-        // depuis le stockage, une seule fois — `session()` remplit les deux tables.
+        // Cold index (first access after a restart): rebuild it from storage, only once.
+        // `session()` fills both tables.
         let tokens = self.store.list_sessions().ok()?;
         for token in tokens {
             if let Ok(record) = self.session(&token) {
@@ -224,18 +221,18 @@ impl AppState {
         self.docs.insert(handle.id, handle);
     }
 
-    /// Le document est-il déjà chargé en mémoire ? Sert à distinguer « personne
-    /// n'y travaille » de « personne ne s'y est jamais connecté ».
+    /// Is the document already loaded in memory? Used to tell "nobody is working on
+    /// it" from "nobody has ever connected to it".
     pub fn doc_if_loaded(&self, doc_id: Uuid) -> Option<Arc<DocHandle>> {
         self.docs.get(&doc_id).map(|entry| entry.clone())
     }
 
-    /// Oublie tout ce que la mémoire retient d'un document : la copie répliquée
-    /// et, s'il en avait une, sa session de partage.
+    /// Forgets everything memory holds about a document: the replicated copy and, if
+    /// it had one, its share session.
     ///
-    /// Appelé par la purge. Sans le retrait des tables de session, un
-    /// `doc_id` réutilisé — ou simplement un jeton de partage resté en cache —
-    /// continuerait de désigner un document dont les fichiers n'existent plus.
+    /// Called by the purge. Without removing the session tables, a reused `doc_id`
+    /// (or simply a share token left in the cache) would keep designating a document
+    /// whose files no longer exist.
     pub fn forget_doc(&self, doc_id: Uuid) {
         self.docs.remove(&doc_id);
         if let Some((_, token)) = self.doc_sessions.remove(&doc_id) {
@@ -243,13 +240,13 @@ impl AppState {
         }
     }
 
-    /// Charge le document depuis le stockage durable si nécessaire :
-    /// instantané compacté, puis rejeu du journal d'updates.
+    /// Loads the document from durable storage when needed: the compacted snapshot,
+    /// then a replay of the update log.
     ///
-    /// Rejouer est **idempotent** : une update CRDT déjà incluse dans
-    /// l'instantané n'a aucun effet la seconde fois. C'est ce qui rend le
-    /// rechargement sûr même après une compaction interrompue, sans qu'il faille
-    /// comparer des numéros de révision comme le faisait le séquenceur.
+    /// Replaying is **idempotent**: a CRDT update already included in the snapshot has
+    /// no effect the second time. This is what makes reloading safe even after an
+    /// interrupted compaction, without having to compare revision numbers as the old
+    /// sequencer did.
     pub fn load_doc(&self, doc_id: Uuid) -> AppResult<Arc<DocHandle>> {
         if let Some(existing) = self.docs.get(&doc_id) {
             return Ok(existing.clone());
@@ -265,17 +262,17 @@ impl AppState {
 
         if let Some(instantane) = &charge.snapshot {
             if let Err(e) = handle.apply_update(instantane) {
-                // Instantané illisible : on repart du journal, qui contient
-                // encore tout si la compaction n'a pas eu lieu. Refuser
-                // d'ouvrir le document serait pire que de le rouvrir plus ancien.
+                // Unreadable snapshot: start again from the log, which still holds everything if
+                // compaction did not happen. Refusing to open the document would be worse than
+                // reopening it in an older state.
                 tracing::error!(%doc_id, error = %e, "instantané illisible, rejeu du journal seul");
             }
         }
 
         let mut rejouees = 0usize;
         for update in &charge.updates {
-            // Une update isolée qui ne se décode plus ne DOIT pas rendre le
-            // document inouvrable : les autres restent parfaitement valides.
+            // A single update that can no longer be decoded MUST NOT make the document
+            // impossible to open: the others remain perfectly valid.
             if let Err(e) = handle.apply_update(update) {
                 tracing::warn!(%doc_id, error = %e, "update journalisée ignorée");
                 continue;
@@ -287,9 +284,9 @@ impl AppState {
             tracing::warn!(%doc_id, trames = charge.corrupted, "trames de journal illisibles");
         }
 
-        // Document écrit par la version précédente : rien au nouveau format,
-        // mais un journal d'opérations JSON sur le disque. On le rejoue une fois
-        // pour en tirer l'état, et on amorce le document répliqué avec.
+        // Document written by the previous version: nothing in the new format, but a JSON
+        // operation log on disk. We replay it once to obtain the state, and seed the
+        // replicated document with it.
         if !self.store.has_crdt_state(&key) {
             self.reprendre_ancien(&key, doc_id, &handle)?;
         }
@@ -306,15 +303,15 @@ impl AppState {
         Ok(handle)
     }
 
-    /// Reprend un document de l'ancien protocole (opérations de blocs en JSON).
+    /// Takes over a document from the old protocol (block operations in JSON).
     ///
-    /// L'amorçage est journalisé aussitôt : sans cela, la reprise recommencerait
-    /// à chaque redémarrage, et une frappe faite entre-temps se verrait doublée
-    /// par un second exemplaire du contenu d'origine.
+    /// The seed is logged immediately: without that, the takeover would start again at
+    /// every restart, and a keystroke made in between would be doubled by a second copy
+    /// of the original content.
     fn reprendre_ancien(&self, key: &str, doc_id: Uuid, handle: &Arc<DocHandle>) -> AppResult<()> {
-        // Un document déjà porteur d'un contenu répliqué ne doit jamais être
-        // amorcé une seconde fois : un CRDT ne remplace pas, il ajoute, et le
-        // document se retrouverait avec deux exemplaires de tout.
+        // A document that already holds replicated content must never be seeded a second
+        // time: a CRDT does not replace, it adds, and the document would end up with two
+        // copies of everything.
         if handle.is_seeded() {
             return Ok(());
         }
@@ -344,8 +341,8 @@ impl AppState {
 mod auth_mode_tests {
     use super::*;
 
-    /// Sérialise les tests : ils manipulent des variables d'environnement,
-    /// qui sont globales au processus.
+    /// Serializes the tests: they change environment variables, which are global to
+    /// the process.
     static VERROU: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn avec_env<T>(paires: &[(&str, Option<&str>)], f: impl FnOnce() -> T) -> T {
@@ -370,10 +367,10 @@ mod auth_mode_tests {
         resultat
     }
 
-    /// Le mode `dev` accepte `dev.<qui-veut>.write` : toute identité, toute
-    /// portée, sur tout document. Il ne doit jamais s'obtenir par omission —
-    /// or `WRITER_ENV` n'est posé nulle part dans la stack, et lancer le
-    /// serveur par son propre script suffisait à y retomber.
+    /// `dev` mode accepts `dev.<anyone>.write`: any identity, any scope, on any
+    /// document. It must never be obtained by omission, yet `WRITER_ENV` is not set
+    /// anywhere in the stack, and starting the server through its own script was
+    /// enough to fall back into it.
     #[test]
     fn omission_gives_jwt_not_dev() {
         let mode = avec_env(&[("WRITER_AUTH_MODE", None), ("WRITER_ENV", None)], || {

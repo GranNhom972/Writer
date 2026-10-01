@@ -1,24 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Normalisation des adresses.
+ * Normalization of addresses.
  *
- * Un lien posé dans un document est **rediffusé à tous les collaborateurs** et
- * survit à l'export : un schéma exécutable y serait un vecteur d'exécution de
- * code différée, le vecteur XSS classique des traitements de texte en ligne.
- * On n'autorise donc que ce qui a un sens dans un document.
+ * A link placed in a document is **re-sent to every collaborator** and survives the
+ * export: an executable scheme in it would be a way to run code later, the classic XSS
+ * vector of online word processors. So we only allow what makes sense in a document.
  */
 
-/** Schémas admis. Tout le reste est refusé, `javascript:` et `data:` compris. */
+/** Accepted schemes. Everything else is refused, `javascript:` and `data:` included. */
 const SCHEMAS_ADMIS = ['http:', 'https:', 'mailto:'];
 
 /**
- * Renvoie l'adresse normalisée, ou `null` si elle est refusée.
+ * Returns the normalized address, or `null` if it is refused.
  *
- * Une saisie sans schéma reçoit `https://` : c'est ce qu'attend l'usager qui
- * tape « exemple.fr », et cela évite qu'une adresse relative ne devienne un
- * lien vers l'application elle-même.
+ * Input without a scheme gets `https://`: it is what a user who types "example.org"
+ * expects, and it keeps a relative address from becoming a link to the application
+ * itself.
  */
 export function normalizeUrl(input: string): string | null {
   const nettoye = input.trim();
@@ -37,13 +36,13 @@ export function normalizeUrl(input: string): string | null {
 }
 
 /**
- * Adresse sûre à poser dans un `href`, ou `undefined` si elle ne l'est pas.
+ * An address that is safe to put in an `href`, or `undefined` if it is not.
  *
- * `normalizeUrl` garde l'entrée du CLAVIER ; celle-ci garde la SORTIE. Un
- * `linkHref` peut arriver autrement que par la saisie : import ODF, opération
- * CRDT reçue d'un autre participant, document rechargé depuis le Drive.
- * Aucune de ces sources n'est fiable, et React ne bloque pas `javascript:`
- * dans un `href` — il se contente d'un avertissement en console.
+ * `normalizeUrl` guards the KEYBOARD input; this one guards the OUTPUT. A `linkHref`
+ * can arrive in other ways than typing: ODF import, a CRDT operation received from
+ * another participant, a document reloaded from the Drive. None of these sources can be
+ * trusted, and React does not block `javascript:` in an `href`: it only prints a warning
+ * in the console.
  */
 export function safeLinkHref(input: string | undefined | null): string | undefined {
   if (!input) return undefined;

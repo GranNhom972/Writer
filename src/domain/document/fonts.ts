@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Catalogue complet des familles de polices d'Apache OpenOffice Writer.
+ * The complete catalog of font families offered by Apache OpenOffice Writer.
  *
- * Source : Registre VCL d'OpenOffice (`aoo-4.1.16/main/officecfg/registry/data/org/openoffice/VCL.xcu`)
- * et familles standard de StarWriter (Liberation, Thorndale, Albany, Cumberland, OpenSymbol).
+ * Source: OpenOffice's VCL registry
+ * (`aoo-4.1.16/main/officecfg/registry/data/org/openoffice/VCL.xcu`) and the standard
+ * StarWriter families (Liberation, Thorndale, Albany, Cumberland, OpenSymbol).
  */
 
 export interface FontDefinition {
@@ -19,7 +20,7 @@ export interface FontDefinition {
 }
 
 export const OPENOFFICE_FONTS: readonly FontDefinition[] = [
-  // --- Familles phares d'OpenOffice & LibreOffice ---
+  // --- Main OpenOffice & LibreOffice families ---
   {
     label: 'Liberation Serif',
     value: 'Liberation Serif, Tinos, Thorndale, Times New Roman, serif',
@@ -56,7 +57,7 @@ export const OPENOFFICE_FONTS: readonly FontDefinition[] = [
     category: 'openoffice',
   },
 
-  // --- Polices Serif (avec empattement) ---
+  // --- Serif fonts (with serifs) ---
   {
     label: 'Times New Roman',
     value: 'Times New Roman, Times, Liberation Serif, serif',
@@ -108,7 +109,7 @@ export const OPENOFFICE_FONTS: readonly FontDefinition[] = [
     category: 'serif',
   },
 
-  // --- Polices Sans-Serif (sans empattement) ---
+  // --- Sans-serif fonts (without serifs) ---
   {
     label: 'Arial',
     value: 'Arial, Helvetica, Liberation Sans, sans-serif',
@@ -170,7 +171,7 @@ export const OPENOFFICE_FONTS: readonly FontDefinition[] = [
     category: 'sans-serif',
   },
 
-  // --- Polices Monospace (à chasse fixe) ---
+  // --- Monospace fonts (fixed width) ---
   {
     label: 'Courier New',
     value: 'Courier New, Courier, Liberation Mono, monospace',
@@ -202,7 +203,7 @@ export const OPENOFFICE_FONTS: readonly FontDefinition[] = [
     category: 'monospace',
   },
 
-  // --- Polices Spéciales / Décoratives ---
+  // --- Special / decorative fonts ---
   {
     label: 'Impact',
     value: 'Impact, Haettenschweiler, sans-serif',

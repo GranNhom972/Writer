@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Fusion et scission de cellules — `SwDoc::MergeTbl` / `SwDoc::SplitTbl`
- * (`sw/source/core/doc/tblrwcl.cxx`).
+ * Merging and splitting cells: `SwDoc::MergeTbl` / `SwDoc::SplitTbl` (`sw/source/core/doc/tblrwcl.cxx`).
  *
- * L'invariant que ces tests protègent est celui de Writer : une cellule
- * absorbée n'est pas **supprimée** mais marquée recouverte, ce qui garde la
- * grille rectangulaire. C'est de cette propriété que dépendent la navigation au
- * curseur, l'insertion ultérieure d'une colonne et la scission.
+ * The invariant these tests protect is Writer's: an absorbed cell is not **deleted** but marked as covered, which keeps the grid rectangular. Cursor navigation, a later column insertion and splitting all depend on
+ * this property.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -54,12 +51,12 @@ describe('Fusion de cellules (SwDoc::MergeTbl)', () => {
     expect(master?.rowSpan).toBe(2);
     expect(master?.covered).toBeUndefined();
 
-    // Les trois voisines du rectangle sont recouvertes, pas retirées.
+    // The three neighbors in the rectangle are covered, not removed.
     expect(merged.rows[0]?.cells[1]?.covered).toBe(true);
     expect(merged.rows[1]?.cells[0]?.covered).toBe(true);
     expect(merged.rows[1]?.cells[1]?.covered).toBe(true);
 
-    // Hors rectangle : rien n'a bougé.
+    // Outside the rectangle: nothing moved.
     expect(merged.rows[0]?.cells[2]?.covered).toBeUndefined();
     expect(merged.rows[2]?.cells[0]?.covered).toBeUndefined();
   });
@@ -118,8 +115,7 @@ describe('Fusion de cellules (SwDoc::MergeTbl)', () => {
     const merged = tableOf(doc);
     expect(tableColumnCount(merged)).toBe(4);
 
-    // `row.cells[3]` n'occupe plus la colonne 3 côté grille… si ce n'est que
-    // les cellules recouvertes sont conservées, ce qui rétablit l'alignement.
+    // `row.cells[3]` no longer occupies column 3 on the grid side... except that the covered cells are kept, which restores the alignment.
     expect(gridColumnsOf(merged.rows[0]!)).toEqual([0, 1, 2, 3]);
   });
 });
@@ -162,9 +158,9 @@ describe('Scission de cellules (SwDoc::SplitTbl)', () => {
     const doc = splitTableCell(docOf([table]), table.id, 0, 0, 'vertical', 3);
     const split = tableOf(doc);
 
-    // Deux lignes ajoutées sous la ligne 0.
+    // Two rows added under row 0.
     expect(split.rows).toHaveLength(4);
-    // Les voisines de la ligne d'origine s'étendent vers le bas.
+    // The neighbors of the original row stretch downwards.
     expect(split.rows[0]?.cells[1]?.rowSpan).toBe(3);
     expect(split.rows[1]?.cells[1]?.covered).toBe(true);
   });
@@ -255,7 +251,7 @@ describe('Mise en page des cellules fusionnées', () => {
 
   it('donne à la cellule fusionnée la largeur de toutes ses colonnes', () => {
     const table = createTable(1, 4);
-    // Largeurs implicites : la fusion doit cumuler celles des colonnes couvertes.
+    // Implicit widths: the merge must add up those of the columns it covers.
     for (const cell of table.rows[0]!.cells) delete cell.widthPercent;
 
     const doc = mergeTableCells(docOf([table]), table.id, {
@@ -273,15 +269,10 @@ describe('Mise en page des cellules fusionnées', () => {
     const largeurSimple = cells[2]!.widthPx;
 
     /*
-     * La fusion cumule bien deux colonnes, mais l'égalité n'est pas flottante :
-     * les frontières de colonnes sont des cumuls **arrondis** au pixel
-     * (`columnBoundariesPx`), si bien que deux colonnes nominalement égales
-     * peuvent différer d'un pixel. Exiger `2 × largeurSimple` au millième
-     * reviendrait à exiger le contraire de ce que l'arrondi garantit.
+     * The merge does add up two columns, but the equality is not a floating-point one: the column boundaries are **rounded** running totals to the pixel (`columnBoundariesPx`), so two columns that are nominally equal can
+     * differ by a pixel. Requiring `2 × simpleWidth` to a thousandth would amount to requiring the opposite of what rounding guarantees.
      *
-     * Ce qui doit tenir exactement, c'est la **fermeture de la grille** : le
-     * bord droit de la fusion tombe sur le bord gauche de la cellule suivante,
-     * sans trou ni recouvrement.
+     * What must hold exactly is the **closing of the grid**: the right edge of the merge falls on the left edge of the next cell, with no gap or overlap.
      */
     expect(cells[0]!.leftPx + cells[0]!.widthPx).toBe(cells[2]!.leftPx);
     expect(cells[0]!.widthPx).toBeGreaterThanOrEqual(largeurSimple * 2 - 2);
@@ -309,24 +300,20 @@ describe('Mise en page des cellules fusionnées', () => {
     if (placed?.kind !== 'table') throw new Error('tableau non posé');
 
     /*
-     * La grille ferme sur le cumul **arrondi** de la largeur de contenu, et non
-     * sur sa valeur flottante : `columnBoundariesPx` arrondit chaque borne
-     * cumulée, la dernière comprise. L'écart avec le bord du texte est donc
-     * borné par un demi-pixel — et surtout il ne s'accumule pas d'une colonne
-     * à l'autre, ce qui était le défaut visé.
+     * The grid closes on the **rounded** running total of the content width, not on its floating-point value: `columnBoundariesPx` rounds every accumulated boundary, the last one included. The gap with the text edge is
+     * therefore bounded by half a pixel, and above all it does not accumulate from one column to the next, which was the defect aimed at.
      */
     const totalWidth = Math.round(layout.geometry.contentWidthPx);
     for (const row of placed.rows) {
       for (const cell of row.cells) {
         if (cell.covered) continue;
         expect(cell.leftPx + cell.widthPx).toBeLessThanOrEqual(totalWidth);
-        // Bornes entières : c'est ce qui rend les traits nets à tout zoom.
+        // Integer boundaries: that is what makes the lines crisp at any zoom.
         expect(Number.isInteger(cell.leftPx)).toBe(true);
         expect(Number.isInteger(cell.widthPx)).toBe(true);
       }
 
-      // Aucune couture : chaque cellule visible touche exactement la suivante,
-      // et la dernière ferme sur le bord de la zone de texte.
+      // No seam: each visible cell touches the next exactly, and the last one closes on the edge of the text area.
       const visibles = row.cells.filter((cell) => !cell.covered);
       visibles.forEach((cell, i) => {
         const suivante = visibles[i + 1];
@@ -335,13 +322,10 @@ describe('Mise en page des cellules fusionnées', () => {
     }
 
     /*
-     * Ligne 0 : la fusion L1C1+L1C2 et la cellule L1C3 se joignent.
+     * Row 0: the merge L1C1+L1C2 and the cell L1C3 join up.
      *
-     * Chaque borne est à moins d'un demi-pixel de sa position idéale — c'est
-     * exactement la garantie d'un cumul arrondi, et c'est tout ce qu'un arrondi
-     * au pixel peut promettre. Le contrôle porte donc sur cette borne d'erreur,
-     * et non sur une égalité décimale que l'arrondi rend inatteignable ; la
-     * jointure exacte, elle, est déjà vérifiée plus haut.
+     * Each boundary is within half a pixel of its ideal position: that is exactly the guarantee of a rounded running total, and all that rounding to the pixel can promise. The check therefore targets that error bound,
+     * and not a decimal equality that rounding makes unreachable; the exact join, for its part, was already verified above.
      */
     const DEMI_PIXEL = 0.5;
     const row0 = placed.rows[0]!;
@@ -363,7 +347,7 @@ describe('Mise en page des cellules fusionnées', () => {
     doc = insertTableColumn(doc, table.id, 1, 'right');
     const after = tableOf(doc);
 
-    // Chaque ligne a bien gagné une cellule : la grille reste rectangulaire.
+    // Every row did gain a cell: the grid stays rectangular.
     expect(after.rows[0]?.cells).toHaveLength(3);
     expect(after.rows[1]?.cells).toHaveLength(3);
   });

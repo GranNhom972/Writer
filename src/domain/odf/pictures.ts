@@ -1,35 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Images d'une archive OpenDocument — le dossier `Pictures/`.
+ * Images of an OpenDocument archive: the `Pictures/` folder.
  *
- * ODF ne met jamais les octets d'une image dans le XML. `content.xml` porte un
- * `<draw:image xlink:href="Pictures/…"/>`, et les octets vivent dans une entrée
- * distincte du ZIP, déclarée au manifeste. C'est exactement ce que fait
- * `SvXMLGraphicHelper` (`xmloff/source/core/XMLEmbeddedObjectExportFilter`).
+ * ODF never puts the bytes of an image in the XML. `content.xml` carries a
+ * `<draw:image xlink:href="Pictures/…"/>`, and the bytes live in a separate ZIP entry declared in the
+ * manifest. This is exactly what `SvXMLGraphicHelper` does
+ * (`xmloff/source/core/XMLEmbeddedObjectExportFilter`).
  *
- * Notre modèle, lui, porte des adresses `data:` quand le document est hors
- * ligne. Ce module fait donc la traduction dans les deux sens :
+ * Our model carries `data:` addresses when the document is offline. This module therefore translates in
+ * both directions:
  *
- *   export : `data:image/png;base64,…`  →  `Pictures/nom.png` + octets
- *   import : `Pictures/nom.png` + octets  →  `data:image/png;base64,…`
+ *   export: `data:image/png;base64,…`  →  `Pictures/name.png` + bytes
+ *   import: `Pictures/name.png` + bytes  →  `data:image/png;base64,…`
  *
- * Une image déjà servie par une adresse (le dépôt du serveur, une URL) n'est
- * **pas** rapatriée dans l'archive : la télécharger demanderait un accès réseau
- * depuis un module pur, et l'adresse reste valide pour un lecteur ODF.
+ * An image already served by an address (the server's store, a URL) is **not** brought into the archive:
+ * downloading it would need network access from a pure module, and the address stays valid for an ODF
+ * reader.
  */
 
 import { collectImageRuns } from '../document/images';
 import { isParagraph, isTable, type TableNode, type WriterDocumentState } from '../document/types';
 
-/** Une entrée binaire du dossier `Pictures/`. */
+/** A binary entry of the `Pictures/` folder. */
 export interface OdfPicture {
-  /** Chemin dans l'archive, `Pictures/xxxx.png`. */
+  /** Path inside the archive, `Pictures/xxxx.png`. */
   path: string;
   mediaType: string;
   bytes: Uint8Array;
@@ -55,7 +55,7 @@ export function mediaTypeForPath(path: string): string {
   return TYPE_BY_EXTENSION[extension] ?? 'application/octet-stream';
 }
 
-/** Une entrée de ZIP est-elle une image du document ? */
+/** Is a ZIP entry an image of the document? */
 export function isPicturePath(path: string): boolean {
   return path.startsWith('Pictures/') && mediaTypeForPath(path) !== 'application/octet-stream';
 }
@@ -65,7 +65,7 @@ interface ParsedDataUrl {
   bytes: Uint8Array;
 }
 
-/** Décode une `data:` base64. Rend `null` sur toute autre forme. */
+/** Decodes a base64 `data:` URL. Returns `null` for any other form. */
 export function parseDataUrl(src: string): ParsedDataUrl | null {
   const match = /^data:([^;,]+);base64,([\s\S]*)$/i.exec(src.trim());
   if (!match) return null;
@@ -83,11 +83,10 @@ export function toDataUrl(mediaType: string, bytes: Uint8Array): string {
 }
 
 /**
- * Table de correspondance des images d'un document, prête pour l'export.
+ * Lookup table of a document's images, ready for export.
  *
- * Deux runs portant la **même** source ne produisent qu'une entrée : dupliquer
- * les octets d'un logo répété en tête de chaque section doublerait le poids de
- * l'archive pour rien.
+ * Two runs carrying the **same** source only produce one entry: duplicating the bytes of a logo repeated at
+ * the top of every section would double the weight of the archive for nothing.
  */
 export function collectPictures(doc: WriterDocumentState): {
   pictures: OdfPicture[];
@@ -103,14 +102,14 @@ export function collectPictures(doc: WriterDocumentState): {
 
       const decoded = parseDataUrl(src);
       if (!decoded) {
-        // Adresse servie : elle passe telle quelle dans `xlink:href`.
+        // Served address: it goes into `xlink:href` as it is.
         hrefBySrc.set(src, src);
         continue;
       }
 
       const extension = EXTENSION_BY_TYPE[decoded.mediaType] ?? 'png';
-      // Nom déterministe, tiré du rang : deux exports du même document donnent
-      // deux archives identiques, ce qui rend les tests d'aller-retour possibles.
+      // Deterministic name, derived from the rank: two exports of the same document give two identical archives,
+      // which makes round-trip tests possible.
       const path = `Pictures/image${pictures.length + 1}.${extension}`;
       pictures.push({ path, mediaType: decoded.mediaType, bytes: decoded.bytes });
       hrefBySrc.set(src, path);
@@ -122,8 +121,7 @@ export function collectPictures(doc: WriterDocumentState): {
       visiterTableau(block, visiter);
       continue;
     }
-    // Un sommaire ne porte pas d'image : ses lignes n'existent qu'à la
-    // pagination et sont toujours du texte pur.
+    // A table of contents carries no image: its lines only exist at pagination time and are always plain text.
     if (isParagraph(block)) visiter(block.runs);
   }
 
@@ -146,10 +144,10 @@ function visiterTableau(
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 /**
- * Base64 écrit à la main.
+ * Hand-written base64.
  *
- * `btoa` n'existe pas partout où tourne la couche 2 — le moteur doit rester
- * exécutable dans un Web Worker et dans un test sans DOM (cf. `MetricTextMeasurer`).
+ * `btoa` does not exist everywhere layer 2 runs: the engine must stay runnable in a Web Worker and in a test
+ * with no DOM (see `MetricTextMeasurer`).
  */
 export function bytesToBase64(bytes: Uint8Array): string {
   let out = '';

@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Export OpenDocument. Transposition de `XMLTextParagraphExport`
- * (`xmloff/source/text/txtparae.cxx`, appelé depuis `txtexp.cxx`).
+ * OpenDocument export. (OpenOffice: `XMLTextParagraphExport`, `xmloff/source/text/txtparae.cxx`,
+ * called from `txtexp.cxx`.)
  *
- * L'export inverse exactement l'import : le formatage porté par les runs est
- * **factorisé** en styles automatiques, et les caractères qu'XML ne sait pas
- * transporter tels quels — espaces consécutives, tabulations, sauts de ligne —
- * reprennent leur forme d'éléments ODF.
+ * The export is exactly the inverse of the import: the formatting carried by the runs is **factored** into
+ * automatic styles, and the characters that XML cannot carry as they are (consecutive spaces, tabs, line
+ * breaks) go back to their ODF element form.
  *
- * Supporte fidèlement l'export des en-têtes et pieds de page OpenOffice (`<style:header>`,
- * `<style:footer>`, `<style:header-left>`, `<style:footer-left>`) et leurs styles.
+ * It faithfully supports the export of OpenOffice headers and footers (`<style:header>`, `<style:footer>`,
+ * `<style:header-left>`, `<style:footer-left>`) and their styles.
  */
 
 import { figureNumbering, paragraphText } from '../document/document';
@@ -53,11 +52,11 @@ import { AutomaticStyles } from './styles';
 import { formatMmAsCm, formatPt } from './units';
 
 const XML_HEADER = '<?xml version="1.0" encoding="UTF-8"?>';
-/** Version d'ODF produite — celle que lit Writer 4.1 comme les suites modernes. */
+/** ODF version produced: the one that Writer 4.1 reads as well as modern suites. */
 const ODF_VERSION = '1.2';
 
 /**
- * Sérialise le texte d'un run.
+ * Serializes the text of a run.
  */
 function serializeText(text: string, atParagraphStart: boolean): string {
   let out = '';
@@ -171,15 +170,14 @@ function serializeBandToOdf(furniture: PageFurniture, band: FurnitureBand, isEve
 }
 
 /**
- * Cadre d'une image ancrée « comme caractère ».
+ * Frame of an image anchored "as a character".
  *
- * `text:anchor-type="as-char"` est la traduction ODF de `FLY_AS_CHAR` : c'est
- * l'attribut qui dit au lecteur de faire couler le cadre dans la ligne plutôt
- * que de le poser en flottant. Sans lui, Writer rouvre le document avec toutes
- * les images ancrées au paragraphe, décalées dans la marge.
+ * `text:anchor-type="as-char"` is the ODF translation of `FLY_AS_CHAR`: it is the attribute that tells the
+ * reader to make the frame flow in the line rather than place it as a floating one. Without it, Writer
+ * reopens the document with every image anchored to the paragraph and pushed into the margin.
  *
- * `svg:width`/`svg:height` sont obligatoires : un cadre sans dimensions est
- * dessiné à zéro par Writer, l'image devient invisible.
+ * `svg:width`/`svg:height` are mandatory: a frame with no dimensions is drawn at zero size by Writer, and the
+ * image becomes invisible.
  */
 function serializeImage(
   run: TextRun,
@@ -193,10 +191,9 @@ function serializeImage(
   const href = hrefBySrc.get(attributs.src) ?? attributs.src;
   const clip = clipDe(attributs.widthPt, attributs.heightPt, run);
 
-  // Cadre flottant : l'ancrage et l'habillage se déclarent, et la position
-  // devient absolue dans son ancre. `text:anchor-type` porte l'ancrage,
-  // `style:wrap` du style porte l'habillage — ODF les sépare, contrairement au
-  // modèle où les deux voyagent sur le même run.
+  // Floating frame: the anchoring and the wrapping are declared, and the position becomes absolute within its
+  // anchor. `text:anchor-type` carries the anchoring, `style:wrap` of the style carries the wrapping: ODF
+  // separates them, unlike the model where both travel on the same run.
   const floating = isFloatingFly(run);
   const anchorType = !floating
     ? 'as-char'
@@ -235,15 +232,13 @@ function serializeImage(
   if (!legende || !hasCaption(run)) return cadre;
 
   /*
-   * Image légendée : la structure d'ODF est un cadre **englobant** qui porte un
-   * `draw:text-box`, lequel contient un paragraphe où voisinent l'image et son
-   * texte. C'est ce que produit Writer, et c'est ce que tout lecteur sait
-   * afficher.
+   * Captioned image: the ODF structure is an **enclosing** frame that carries a `draw:text-box`, which contains a
+   * paragraph where the image and its text sit side by side. This is what Writer produces, and what every reader
+   * knows how to display.
    *
-   * Le numéro y est écrit **en clair**, résolu au moment de l'export : ODF le
-   * porterait par un `text:sequence`, que nous ne savons pas relire. Nos
-   * propres attributs, à côté, gardent le mode et l'alignement pour que la
-   * relecture ici soit sans perte — un lecteur tiers les ignore.
+   * The number is written **in plain text**, resolved at export time: ODF would carry it as a `text:sequence`,
+   * which we cannot read back. Our own attributes, alongside, keep the mode and the alignment so that reading it
+   * back here loses nothing, and a third-party reader ignores them.
    */
   const texte = escapeXml(captionText(legende, figureNumber));
   const reglages =
@@ -268,16 +263,14 @@ function serializeImage(
 }
 
 /**
- * `fo:clip="rect(haut droite bas gauche)"` — le rognage au format ODF.
+ * `fo:clip="rect(top right bottom left)"`: the crop in ODF format.
  *
- * ODF exprime les quatre retraits en **longueurs**, retranchées de l'image
- * d'origine, alors que le modèle les porte en fractions. La conversion passe par
- * la taille qu'aurait l'image **non rognée** au facteur d'échelle courant : le
- * cadre montre la fraction visible, donc l'original mesurerait
- * `largeur / fractionVisible`.
+ * ODF expresses the four insets as **lengths**, cut from the original image, whereas the model carries them as
+ * fractions. The conversion goes through the size the **uncropped** image would have at the current scale
+ * factor: the frame shows the visible fraction, so the original would measure `width / visibleFraction`.
  *
- * L'ordre des quatre valeurs est celui de CSS — haut, droite, bas, gauche — et
- * l'inverser ferait pivoter le cadrage d'un quart de tour à la relecture.
+ * The order of the four values is the CSS one (top, right, bottom, left), and reversing it would rotate the
+ * framing by a quarter turn when read back.
  */
 function clipDe(widthPt: number, heightPt: number, run: TextRun): string | undefined {
   const crop = imageCrop(run);
@@ -296,42 +289,38 @@ function clipDe(widthPt: number, heightPt: number, run: TextRun): string | undef
 }
 
 /**
- * Contexte d'export des repères ancrés dans le texte.
+ * Export context for the markers anchored in the text.
  *
- * Trois sous-systèmes déposent des **jalons** (« milestones ») autour de leurs
- * plages : signets, commentaires et révisions. ODF les représente tous les trois
- * par des éléments vides appariés — `text:bookmark-start`/`-end`,
- * `office:annotation`/`office:annotation-end`, `text:change-start`/`-end` — et
- * non par des conteneurs. C'est ce qui les autorise à se chevaucher librement,
- * là où un balisage imbriqué l'interdirait.
+ * Three subsystems drop **milestones** around their ranges: bookmarks, comments and revisions. ODF represents
+ * all three as paired empty elements (`text:bookmark-start`/`-end`, `office:annotation`/`office:annotation-end`,
+ * `text:change-start`/`-end`) and not as containers. That is what lets them overlap freely, where nested markup
+ * would forbid it.
  */
 interface MarkerContext {
   comments: ReadonlyMap<string, DocumentComment[]>;
-  /** Révisions de suppression : leur texte part dans l'en-tête, pas dans le corps. */
+  /** Deletion revisions: their text goes into the header, not into the body. */
   deletions: ReadonlySet<string>;
-  /** Révisions déjà jalonnées, pour n'émettre qu'un `text:change` par coupure. */
+  /** Revisions already marked with milestones, to emit only one `text:change` per cut. */
   emittedDeletions: Set<string>;
   /**
-   * Numéros de figure du document, par `blockId:offset`.
+   * Figure numbers of the document, by `blockId:offset`.
    *
-   * Résolus à l'export : ODF les porterait par un `text:sequence`, mais un
-   * numéro écrit en clair est lisible par tout le monde, y compris par les
-   * lecteurs qui ne recalculent pas les champs.
+   * Resolved at export: ODF would carry them as a `text:sequence`, but a number written in plain text is readable
+   * by everyone, including readers that do not recompute fields.
    */
   figureNumbers?: ReadonlyMap<string, number> | undefined;
 }
 
-/** Sérialise l'annotation d'un fil de commentaires et ses réponses. */
+/** Serializes the annotation of a comment thread and its replies. */
 function serializeAnnotation(threadId: string, thread: readonly DocumentComment[]): string {
   let out = '';
   thread.forEach((comment, index) => {
-    // Les réponses sont des annotations ponctuelles nommées `id~rN` : ODF 1.2
-    // ne connaît pas les fils, et un identifiant dérivé les rattache au fil
-    // d'origine à la relecture sans étendre le format.
+    // Replies are point annotations named `id~rN`: ODF 1.2 has no threads, and a derived id ties them to the
+    // original thread when reading back, without extending the format.
     const name = index === 0 ? threadId : `${threadId}~r${index}`;
-    // `loext:resolved` : ODF 1.2 ignore la notion de fil clos, elle n'arrive
-    // qu'en 1.3. On écrit l'attribut d'extension de LibreOffice — un lecteur
-    // qui ne le connaît pas l'ignore simplement, et le fil reste lisible.
+    // `loext:resolved`: ODF 1.2 ignores the notion of a closed thread, which only arrives in 1.3. We write
+    // LibreOffice's extension attribute: a reader that does not know it simply ignores it, and the thread stays
+    // readable.
     const clos = comment.resolved ? ' loext:resolved="true"' : '';
     out +=
       `<office:annotation office:name="${escapeXml(name)}"${clos}>` +
@@ -343,7 +332,7 @@ function serializeAnnotation(threadId: string, thread: readonly DocumentComment[
   return out;
 }
 
-/** Jalons ouvrants et fermants entre deux runs voisins. */
+/** Opening and closing milestones between two neighboring runs. */
 function serializeMarkers(
   previous: TextRun | null,
   current: TextRun | null,
@@ -358,8 +347,8 @@ function serializeMarkers(
 
   let out = '';
 
-  // Fermetures d'abord : une plage close puis une plage ouverte au même point
-  // se lisent dans cet ordre, et l'inverse produirait un chevauchement fictif.
+  // Closings first: a range that closes and a range that opens at the same point are read in that order, and the
+  // reverse would produce a fictitious overlap.
   if (wasBookmark && wasBookmark !== isBookmark) {
     out += `<text:bookmark-end text:name="${escapeXml(wasBookmark)}"/>`;
   }
@@ -370,7 +359,7 @@ function serializeMarkers(
     out += `<text:change-end text:change-id="${escapeXml(wasChange)}"/>`;
   }
 
-  // Ouvertures ensuite.
+  // Openings next.
   if (isChange && isChange !== wasChange && !ctx.deletions.has(isChange)) {
     out += `<text:change-start text:change-id="${escapeXml(isChange)}"/>`;
   }
@@ -396,15 +385,15 @@ function serializeParagraph(
   const styleName = styles.paragraph(node);
   const styleAttr = styleName ? ` text:style-name="${styleName}"` : '';
 
-  // Ancre de renvoi d'un titre : c'est elle que vise une ligne de sommaire, et
-  // elle doit exister dans le fichier pour que le lien survive à l'aller-retour.
+  // Cross-reference anchor of a heading: it is what a line of a table of contents points to, and it must exist in
+  // the file for the link to survive the round trip.
   const headingAnchor =
     node.type === 'heading' && paragraphText(node).trim().length > 0
       ? `<text:bookmark text:name="${escapeXml(headingAnchorName(node.id))}"/>`
       : '';
 
-  // Le test de vacuité regarde le **texte** : un paragraphe ne portant qu'une
-  // image n'a pour texte que le caractère de substitution, mais il n'est pas vide.
+  // The emptiness test looks at the **text**: a paragraph that only carries an image has nothing but the
+  // replacement character as text, yet it is not empty.
   const porteUneImage = node.runs.some(isImageRun);
   if (!porteUneImage && (node.runs.length === 0 || paragraphText(node).length === 0)) {
     const marqueurs = serializeMarkers(null, node.runs[0] ?? null, ctx) + serializeMarkers(node.runs[0] ?? null, null, ctx);
@@ -426,10 +415,9 @@ function serializeParagraph(
     body += serializeMarkers(previous, run, ctx);
     previous = run;
 
-    // Texte marqué supprimé : son contenu part dans `<text:deletion>` de
-    // l'en-tête, comme l'exige ODF 1.2 (§5.5.4). Le corps ne garde qu'un jalon,
-    // faute de quoi un lecteur tiers afficherait le texte supprimé comme
-    // présent — l'inverse exact de ce qu'une révision veut dire.
+    // Text marked as deleted: its content goes into the header's `<text:deletion>`, as ODF 1.2 requires (§5.5.4).
+    // The body only keeps a milestone, otherwise a third-party reader would show the deleted text as present, the
+    // exact opposite of what a revision means.
     if (run.redlineId && ctx.deletions.has(run.redlineId)) {
       if (!ctx.emittedDeletions.has(run.redlineId)) {
         ctx.emittedDeletions.add(run.redlineId);
@@ -533,15 +521,13 @@ function serializeTable(
 }
 
 /**
- * Sérialise une table des matières. Transposition d'`XMLTextSectionExport`
- * pour `TOX_CONTENT` (`xmloff/source/text/txtparae.cxx`).
+ * Serializes a table of contents. (OpenOffice: `XMLTextSectionExport` for `TOX_CONTENT`,
+ * `xmloff/source/text/txtparae.cxx`.)
  *
- * ODF sépare la **définition** (`text:table-of-content-source`) du **rendu**
- * (`text:index-body`), et impose les deux : la définition permet à Writer de
- * régénérer la table, le rendu permet à un lecteur qui n'en est pas capable
- * d'afficher tout de même quelque chose. On écrit donc les deux, avec les
- * entrées telles qu'elles sont connues sans pagination — un lecteur tiers
- * verra les titres, et Writer recalculera les numéros à l'ouverture.
+ * ODF separates the **definition** (`text:table-of-content-source`) from the **rendering** (`text:index-body`),
+ * and requires both: the definition lets Writer regenerate the table, the rendering lets a reader that cannot do
+ * so still display something. So we write both, with the entries as they are known without pagination: a
+ * third-party reader will see the headings, and Writer will recompute the numbers when it opens the file.
  */
 function serializeToc(doc: WriterDocumentState, toc: TocNode): string {
   const entries = tocEntries(doc, toc)
@@ -590,13 +576,11 @@ function serializeToc(doc: WriterDocumentState, toc: TocNode): string {
 }
 
 /**
- * En-tête `<text:tracked-changes>`. Transposition de `XMLRedlineExport`
- * (`xmloff/source/text/XMLRedlineExport.cxx`).
+ * Header `<text:tracked-changes>`. (OpenOffice: `XMLRedlineExport`, `xmloff/source/text/XMLRedlineExport.cxx`.)
  *
- * ODF exige que **tout** le texte supprimé vive ici et non dans le corps : le
- * corps ne garde qu'un jalon `text:change`. C'est ce qui permet à un lecteur
- * qui ignore les révisions d'afficher le document *tel qu'il serait accepté*,
- * sans montrer par erreur du texte que quelqu'un a demandé de retirer.
+ * ODF requires **all** the deleted text to live here and not in the body: the body only keeps a `text:change`
+ * milestone. That is what lets a reader that ignores revisions show the document *as it would be accepted*,
+ * without wrongly displaying text that somebody asked to remove.
  */
 function serializeTrackedChanges(
   doc: WriterDocumentState,
@@ -635,7 +619,7 @@ function serializeTrackedChanges(
   return `<text:tracked-changes>${regions}</text:tracked-changes>`;
 }
 
-/** Texte couvert par chaque révision de suppression, dans l'ordre du flux. */
+/** Text covered by each deletion revision, in flow order. */
 function collectDeletedText(doc: WriterDocumentState): Map<string, string> {
   const out = new Map<string, string>();
   const visit = (paragraphs: readonly ParagraphNode[]): void => {
@@ -658,25 +642,21 @@ function collectDeletedText(doc: WriterDocumentState): Map<string, string> {
 }
 
 /**
- * Sérialise une suite de paragraphes de liste en structure ODF.
+ * Serializes a sequence of list paragraphs into the ODF structure.
  *
- * Transposition d'`XMLTextParagraphExport::exportListChange`
- * (`xmloff/source/text/txtparae.cxx`).
+ * Counterpart of `XMLTextParagraphExport::exportListChange` (`xmloff/source/text/txtparae.cxx`).
  *
- * ## Le problème de forme
+ * ## The shape problem
  *
- * Le modèle porte la liste comme un **attribut de paragraphe** — c'est le choix
- * de `SwTxtNode`, où changer le niveau d'un élément ne déplace aucun nœud. ODF,
- * lui, exige une **structure imbriquée** : `<text:list>` contenant des
- * `<text:list-item>`, eux-mêmes pouvant contenir un `<text:list>` de plus.
+ * The model carries the list as a **paragraph attribute**: that is the choice of `SwTxtNode`, where changing an
+ * item's level moves no node. ODF, on the other hand, requires a **nested structure**: a `<text:list>` containing
+ * `<text:list-item>`s, which can themselves contain one more `<text:list>`.
  *
- * La conversion est donc une reconstruction d'arbre à partir d'une suite plate.
- * L'algorithme tient dans une pile de niveaux ouverts : on ferme ce qui dépasse,
- * on ouvre ce qui manque, et on n'émet le paragraphe qu'une fois la profondeur
- * atteinte.
+ * The conversion is therefore a rebuild of a tree from a flat sequence. The algorithm fits in a stack of open
+ * levels: close what goes beyond, open what is missing, and only emit the paragraph once the depth is reached.
  *
- * Sans cette étape, une liste s'exportait en paragraphes indentés — visuellement
- * proches, mais définitivement perdus comme liste à la relecture.
+ * Without this step, a list was exported as indented paragraphs: visually close, but definitively lost as a list
+ * when read back.
  */
 function serializeList(
   paragraphs: readonly ParagraphNode[],
@@ -689,27 +669,27 @@ function serializeList(
 
   const styleName = styles.list(premier.listKind);
   let out = '';
-  /** Niveaux de `<text:list>` actuellement ouverts. */
+  /** Levels of `<text:list>` currently open. */
   let profondeur = 0;
 
   for (const paragraph of paragraphs) {
     const niveau = Math.max(0, paragraph.listLevel ?? 0);
 
-    // Fermer les niveaux devenus trop profonds.
+    // Close the levels that have become too deep.
     while (profondeur > niveau + 1) {
       out += '</text:list-item></text:list>';
       profondeur -= 1;
     }
 
     if (profondeur === niveau + 1) {
-      // Même niveau : on clôt l'élément courant et on en ouvre un neuf.
+      // Same level: close the current item and open a new one.
       out += '</text:list-item>';
       out += ouvrirElement(paragraph);
     } else {
-      // Descendre : chaque cran ouvre une liste **dans** l'élément courant.
+      // Going down: each step opens a list **inside** the current item.
       while (profondeur < niveau + 1) {
-        // Le style ne se pose que sur la liste racine : ODF le fait hériter,
-        // et le répéter ferait redémarrer la numérotation à chaque sous-niveau.
+        // The style is only set on the root list: ODF makes it inherited, and repeating it would restart the numbering at
+        // every sub-level.
         out += profondeur === 0 ? `<text:list text:style-name="${styleName}">` : '<text:list>';
         out += ouvrirElement(paragraph);
         profondeur += 1;
@@ -728,11 +708,10 @@ function serializeList(
 }
 
 /**
- * Ouvre un `<text:list-item>`, avec sa reprise de compteur s'il en porte une.
+ * Opens a `<text:list-item>`, with its counter restart if it carries one.
  *
- * `text:start-value` est ce qui distingue « continuer » de « repartir » : sans
- * lui, un élément marqué `listRestart` reprendrait simplement la numérotation
- * en cours.
+ * `text:start-value` is what tells "continue" from "start over": without it, an item marked `listRestart` would
+ * simply carry on the current numbering.
  */
 function ouvrirElement(paragraph: ParagraphNode): string {
   const reprise =
@@ -743,11 +722,10 @@ function ouvrirElement(paragraph: ParagraphNode): string {
 }
 
 /**
- * Découpe le flux en tranches homogènes : suites de listes et blocs isolés.
+ * Splits the flow into homogeneous slices: runs of lists and isolated blocks.
  *
- * Deux paragraphes appartiennent à la même liste s'ils partagent leur
- * `listId` — c'est `RES_PARATR_LIST_ID`, et c'est lui qui décide qu'une liste
- * séparée par du texte repart à 1 plutôt que de continuer à 4.
+ * Two paragraphs belong to the same list if they share their `listId`: this is `RES_PARATR_LIST_ID`, and it is what
+ * decides that a list separated by text starts again at 1 rather than continuing at 4.
  */
 function groupBlocks(blocks: readonly DocumentBlock[]): (DocumentBlock | ParagraphNode[])[] {
   const out: (DocumentBlock | ParagraphNode[])[] = [];
@@ -772,8 +750,7 @@ function groupBlocks(blocks: readonly DocumentBlock[]): (DocumentBlock | Paragra
     const paragraph = block as ParagraphNode;
     const listId = paragraph.listId;
 
-    // Changement de liste : on ferme la précédente. Deux listes voisines sans
-    // identifiant sont deux listes distinctes, comme dans Writer.
+    // List change: we close the previous one. Two neighboring lists with no id are two distinct lists, as in Writer.
     if (courant.length > 0 && (listId === undefined || listId !== listIdCourant)) {
       clore();
     }
@@ -786,7 +763,7 @@ function groupBlocks(blocks: readonly DocumentBlock[]): (DocumentBlock | Paragra
   return out;
 }
 
-/** Produit le `content.xml` complet. */
+/** Produces the complete `content.xml`. */
 export function buildContentXml(
   doc: WriterDocumentState,
   hrefBySrc: ReadonlyMap<string, string> = new Map(),
@@ -799,8 +776,8 @@ export function buildContentXml(
     list.push(comment);
     commentsByThread.set(comment.threadId, list);
   }
-  // Racine d'abord, puis réponses par ordre de dépôt : c'est l'ordre dans
-  // lequel `serializeAnnotation` dérive les identifiants `~rN`.
+  // Root first, then replies in the order they were posted: this is the order in which `serializeAnnotation` derives
+  // the `~rN` ids.
   for (const list of commentsByThread.values()) {
     list.sort((a, b) => {
       if (a.id === a.threadId) return -1;
@@ -823,7 +800,7 @@ export function buildContentXml(
     serializeTrackedChanges(doc, deletedText) +
     groupBlocks(doc.blocks)
       .map((entree) => {
-        // Une tranche de liste : elle devient un arbre `<text:list>`.
+        // A slice of list: it becomes a `<text:list>` tree.
         if (Array.isArray(entree)) return serializeList(entree, styles, hrefBySrc, ctx);
         if (isTable(entree)) return serializeTable(entree, styles, hrefBySrc);
         if (isToc(entree)) return serializeToc(doc, entree);
@@ -841,7 +818,7 @@ export function buildContentXml(
   );
 }
 
-/** Produit le `styles.xml` : styles nommés, géométrie de la page et en-têtes/pieds. */
+/** Produces `styles.xml`: named styles, page geometry, and headers/footers. */
 export function buildStylesXml(doc: WriterDocumentState): string {
   const { widthMm, heightMm } = sheetSizeMm(doc.pageSetup);
   const setup = doc.pageSetup;
@@ -953,12 +930,11 @@ export function buildMetaXml(doc: WriterDocumentState): string {
 }
 
 /**
- * Manifeste de l'archive.
+ * Manifest of the archive.
  *
- * Chaque entrée du ZIP doit y figurer avec son type — images comprises. Une
- * image absente du manifeste est ignorée par Writer, qui ouvre alors le
- * document avec des cadres vides : le fichier est bien là, mais rien ne dit au
- * lecteur ce qu'il contient.
+ * Every ZIP entry must be listed in it with its type, images included. An image that is missing from the manifest is
+ * ignored by Writer, which then opens the document with empty frames: the file is there, but nothing tells the reader
+ * what it contains.
  */
 export function buildManifestXml(pictures: readonly OdfPicture[] = []): string {
   const entry = (path: string, type = 'text/xml'): string =>
@@ -977,7 +953,7 @@ export function buildManifestXml(pictures: readonly OdfPicture[] = []): string {
   );
 }
 
-/** Les fichiers texte d'une archive `.odt`. */
+/** The text files of an `.odt` archive. */
 export interface OdfPackageFiles {
   mimetype: string;
   'META-INF/manifest.xml': string;
@@ -986,7 +962,7 @@ export interface OdfPackageFiles {
   'meta.xml': string;
 }
 
-/** Une archive complète : ses fichiers XML et ses images binaires. */
+/** A complete archive: its XML files and its binary images. */
 export interface OdfPackage {
   files: OdfPackageFiles;
   pictures: OdfPicture[];
@@ -994,11 +970,10 @@ export interface OdfPackage {
 
 export const ODT_MIMETYPE = 'application/vnd.oasis.opendocument.text';
 
-/** Produit l'arborescence complète des fichiers d'une archive `.odt`. */
+/** Produces the complete file tree of an `.odt` archive. */
 export function buildOdfPackage(doc: WriterDocumentState): OdfPackage {
-  // Les images sont collectées **avant** l'écriture du contenu : c'est cette
-  // passe qui attribue à chaque source son chemin `Pictures/…`, et le XML doit
-  // s'y référer.
+  // Images are collected **before** the content is written: this pass gives each source its `Pictures/…` path, and the
+  // XML has to refer to it.
   const { pictures, hrefBySrc } = collectPictures(doc);
 
   return {
@@ -1014,10 +989,10 @@ export function buildOdfPackage(doc: WriterDocumentState): OdfPackage {
 }
 
 /**
- * Texte brut du document, tableaux compris.
+ * Plain text of the document, tables included.
  *
- * Sert aux tests d'aller-retour et à l'aperçu : deux documents dont le texte
- * brut diffère n'ont pas survécu au passage par le format.
+ * Used by round-trip tests and by the preview: two documents whose plain text differs did not survive going through the
+ * format.
  */
 export function documentPlainText(doc: WriterDocumentState): string {
   const lignes: string[] = [];
@@ -1026,8 +1001,8 @@ export function documentPlainText(doc: WriterDocumentState): string {
       lignes.push(paragraphText(block));
       continue;
     }
-    // Un sommaire n'a pas de texte propre : ses lignes sont dérivées des titres,
-    // qui sont déjà comptés par ailleurs. Les inclure doublerait chaque titre.
+    // A table of contents has no text of its own: its lines are derived from the headings, which are already counted
+    // elsewhere. Including them would double every heading.
     if (!isTable(block)) continue;
     for (const row of block.rows) {
       lignes.push(row.cells.map((cell) => cell.blocks.map(paragraphText).join(' ')).join('\t'));

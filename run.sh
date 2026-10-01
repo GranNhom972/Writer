@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Lance ensemble le serveur de partage (Rust) et l'éditeur Web (Vite).
-# Ouvre automatiquement le document d'exemple OpenOffice complet (doc_test.odt).
+# Starts the sharing server (Rust) and the web editor (Vite) together.
+# Automatically opens the complete OpenOffice sample document (doc_test.odt).
 #
-#   ./run.sh                  lance le serveur, le client et ouvre l'exemple ODT
-#   ./run.sh --release        serveur compilé en mode release optimisé
-#   ./run.sh --sans-navigateur ne lance pas le navigateur automatique
-#   Ctrl+C                    arrête proprement les processus lancés par ce script
+#   ./run.sh                  starts the server and the client, and opens the ODT sample
+#   ./run.sh --release        server built in optimized release mode
+#   ./run.sh --sans-navigateur does not start the browser automatically
+#   Ctrl+C                    cleanly stops the processes started by this script
 
 set -uo pipefail
 
@@ -43,7 +43,7 @@ echec()  { echo "${ROUGE}✗${FIN} $*" >&2; }
 PID_SERVEUR=""
 PID_CLIENT=""
 
-# Préparation de l'exemple ODT dans le dossier public
+# Preparing the ODT sample in the public folder
 mkdir -p "$RACINE/public"
 if [ -f "$RACINE/exemple/doc_test.odt" ]; then
   cp "$RACINE/exemple/doc_test.odt" "$RACINE/public/doc_test.odt"
@@ -82,7 +82,7 @@ qui_occupe() {
   ss -ltnp "sport = :$1" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1
 }
 
-# ── Serveur de partage Rust ───────────────────────────────────────────────────
+# ── Rust sharing server ───────────────────────────────────────────────────────
 
 serveur_repond() {
   curl -sf -m 2 "http://127.0.0.1:$PORT_SERVEUR/healthz" >/dev/null 2>&1
@@ -124,7 +124,7 @@ else
   fi
 fi
 
-# ── Client Vite ───────────────────────────────────────────────────────────────
+# ── Vite client ───────────────────────────────────────────────────────────────
 
 client_repond() {
   curl -sf -m 2 "http://127.0.0.1:$PORT_CLIENT/" 2>/dev/null | grep -q '@vite/client'
@@ -151,7 +151,7 @@ else
   client_repond && succes "client prêt." || { echec "le client n'a pas répondu."; exit 1; }
 fi
 
-# ── Ouverture du navigateur ───────────────────────────────────────────────────
+# ── Opening the browser ───────────────────────────────────────────────────────
 
 URL="http://localhost:$PORT_CLIENT"
 
@@ -167,7 +167,7 @@ if [ "$OUVRIR_NAVIGATEUR" = "1" ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; 
   fi
 fi
 
-# ── Prêt ──────────────────────────────────────────────────────────────────────
+# ── Ready ─────────────────────────────────────────────────────────────────────
 
 cat <<FIN_MSG
 

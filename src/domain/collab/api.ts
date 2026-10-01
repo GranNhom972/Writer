@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Client REST du serveur de partage (`writer/server`).
+ * REST client of the sharing server (`writer/server`).
  *
- * Toute erreur remonte sous la forme normalisée RFC 9457 que le serveur émet, et
- * `ApiError` en conserve le code et le type : l'interface peut ainsi distinguer
- * « serveur injoignable » de « vous n'êtes pas sur la liste », qui n'appellent
- * pas le même message.
+ * Every error comes back in the normalized RFC 9457 form that the server emits, and `ApiError` keeps its code and type:
+ * the interface can therefore tell "server unreachable" from "you are not on the list", which do not call for the same
+ * message.
  */
 
 import type { WriterDocumentState } from '../document/types';
@@ -31,7 +30,7 @@ export interface ParticipantSummary {
   permission: Permission;
 }
 
-/** Ce que renvoient la création d'un partage et sa lecture. */
+/** What creating a share and reading it return. */
 export interface SessionSummary {
   token_session: string;
   doc_id: string;
@@ -43,7 +42,7 @@ export interface SessionSummary {
   events_path: string;
 }
 
-/** Ce que renvoie `POST /sessions/{token_session}/join`. */
+/** What `POST /sessions/{token_session}/join` returns. */
 export interface SessionJoin {
   token_session: string;
   doc_id: string;
@@ -51,7 +50,7 @@ export interface SessionJoin {
   user_id: string;
   email: string;
   permission: Permission;
-  /** Jeton d'accès délivré en mode développement ; `null` en mode JWT. */
+  /** Access token handed out in development mode; `null` in JWT mode. */
   access_token: string | null;
   auth_mode: 'dev' | 'jwt';
   sync_path: string;
@@ -75,7 +74,7 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 
-  /** Le serveur n'a pas répondu — cas nominal hors ligne, pas une anomalie. */
+  /** The server did not answer: the normal case offline, not an anomaly. */
   get isOffline(): boolean {
     return this.status === 0;
   }
@@ -88,8 +87,7 @@ async function request<T>(path: string, token: string | null, init?: RequestInit
       ...init,
       headers: {
         'Content-Type': 'application/json',
-        // Rejoindre un partage est le seul appel sans jeton : c'est précisément
-        // celui qui en délivre un.
+        // Joining a share is the only call without a token: it is precisely the one that hands one out.
         ...(token === null ? {} : { Authorization: `Bearer ${token}` }),
         ...(init?.headers ?? {}),
       },
@@ -112,7 +110,7 @@ async function request<T>(path: string, token: string | null, init?: RequestInit
   return (await response.json()) as T;
 }
 
-/* ------------------------------------------------------------------ partage */
+/* ------------------------------------------------------------------ sharing */
 
 export interface ShareRequest {
   tokenSession: string;
@@ -122,12 +120,10 @@ export interface ShareRequest {
 }
 
 /**
- * Partage un document : crée la session, sa liste de participants et le
- * document sous-jacent.
+ * Shares a document: creates the session, its participant list and the underlying document.
  *
- * Le `token_session` est choisi **ici** et non par le serveur : il voyage dans
- * un lien, et un identifiant qu'on peut composer soi-même (« rapport-q3-… »)
- * reste reconnaissable dans une boîte aux lettres.
+ * The `token_session` is chosen **here** and not by the server: it travels in a link, and an identifier you can compose
+ * yourself ("report-q3-...") stays recognizable in a mailbox.
  */
 export function shareDocument(request_: ShareRequest): Promise<SessionSummary> {
   return request<SessionSummary>('/sessions', null, {
@@ -141,7 +137,7 @@ export function shareDocument(request_: ShareRequest): Promise<SessionSummary> {
   });
 }
 
-/** Le partage existe-t-il ? Lecture publique : les adresses y sont masquées. */
+/** Does the share exist? A public read: the addresses are masked in it. */
 export function getSession(tokenSession: string): Promise<SessionSummary> {
   return request<SessionSummary>(`/sessions/${encodeURIComponent(tokenSession)}`, null);
 }
@@ -151,11 +147,10 @@ export function listSessions(): Promise<{ sessions: (SessionSummary & { particip
 }
 
 /**
- * Rejoint un partage par son jeton et l'adresse du participant.
+ * Joins a share by its token and the participant's address.
  *
- * La permission renvoyée est celle **inscrite dans la session**, jamais celle
- * que le client réclamerait : le WebSocket applique la même règle, et il n'y a
- * donc rien à gagner à mentir ici.
+ * The permission returned is the one **written in the session**, never the one the client would claim: the WebSocket
+ * applies the same rule, so there is nothing to gain by lying here.
  */
 export function joinSession(tokenSession: string, email: string): Promise<SessionJoin> {
   return request<SessionJoin>(`/sessions/${encodeURIComponent(tokenSession)}/join`, null, {
@@ -164,7 +159,7 @@ export function joinSession(tokenSession: string, email: string): Promise<Sessio
   });
 }
 
-/** Ajoute quelqu'un à un partage existant. Réservé aux participants en écriture. */
+/** Adds someone to an existing share. Reserved to participants with write access. */
 export function inviteParticipant(
   token: string,
   tokenSession: string,
@@ -188,11 +183,10 @@ export function getSnapshot(token: string, docId: string): Promise<DocumentSnaps
 }
 
 /**
- * Renomme un document.
+ * Renames a document.
  *
- * Le titre est déjà répliqué par l'opération `set-meta` (visible chez tous
- * immédiatement) ; cet appel le rend durable pour la liste des documents, où il
- * est lu sans ouvrir le contenu.
+ * The title is already replicated by the `set-meta` operation (visible to everyone at once); this call makes it durable for
+ * the document list, where it is read without opening the content.
  */
 export function renameDocument(
   token: string,
@@ -232,7 +226,7 @@ export function restoreDocument(
 /* ------------------------------------------------------------------- images */
 
 export interface UploadedAsset {
-  /** Adresse à ranger dans le run. Relative : elle suit le document. */
+  /** Address to put in the run. Relative: it follows the document. */
   url: string;
   name: string;
   content_type: string;
@@ -240,12 +234,11 @@ export interface UploadedAsset {
 }
 
 /**
- * Dépose une image sur le serveur.
+ * Uploads an image to the server.
  *
- * Le corps part **brut** : le serveur ignore de toute façon le `Content-Type`
- * annoncé et reconnaît le format aux octets — un fichier prétendument PNG mais
- * contenant du HTML serait servi depuis notre origine, c'est-à-dire un XSS
- * stocké. Un multipart n'ajouterait ici qu'un encodage à défaire des deux côtés.
+ * The body goes **raw**: the server ignores the announced `Content-Type` anyway and recognizes the format from the bytes (a
+ * file claimed to be PNG but containing HTML would be served from our origin, which is a stored XSS). A multipart would only
+ * add an encoding to undo on both sides.
  */
 export async function uploadAsset(
   token: string,
@@ -285,12 +278,10 @@ export async function uploadAsset(
 }
 
 /**
- * Convertit une `data:` en `Blob`, pour la déposer.
+ * Converts a `data:` URL to a `Blob`, to upload it.
  *
- * Une image insérée hors ligne vit dans le document sous forme de `data:`. Au
- * moment du partage, la laisser telle quelle la ferait repartir sur le réseau à
- * **chaque frappe** dans son paragraphe — d'où ce transfert, une fois, vers le
- * dépôt du serveur.
+ * An image inserted offline lives in the document as a `data:` URL. At sharing time, leaving it as it is would send it over the
+ * network again on **every keystroke** in its paragraph, hence this transfer, once, to the server's store.
  */
 export function dataUrlToBlob(dataUrl: string): Blob | null {
   const match = /^data:([^;,]+);base64,([\s\S]*)$/i.exec(dataUrl.trim());
@@ -305,7 +296,7 @@ export function dataUrlToBlob(dataUrl: string): Blob | null {
   }
 }
 
-/** Un jeton de session lisible et non devinable — `MIN_TOKEN_LEN` côté serveur. */
+/** A readable, hard-to-guess session token (`MIN_TOKEN_LEN` on the server side). */
 export function generateSessionToken(title: string): string {
   const racine = title
     .toLowerCase()
@@ -315,9 +306,8 @@ export function generateSessionToken(title: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 32);
 
-  // Le hasard est la seule part qui compte : le jeton révèle l'existence d'un
-  // partage, donc la composition d'une équipe. Un suffixe court le rendrait
-  // énumérable, et la partie lisible ne fait qu'aider à s'y retrouver.
+  // Randomness is the only part that matters: the token reveals that a share exists, so the make-up of a team. A short suffix
+  // would make it enumerable, and the readable part only helps people find their way.
   const octets = new Uint8Array(8);
   crypto.getRandomValues(octets);
   const alea = Array.from(octets, (b) => b.toString(16).padStart(2, '0')).join('');

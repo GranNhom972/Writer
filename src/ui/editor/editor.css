@@ -1,13 +1,9 @@
 /*
- * Aucun jeton n'est défini ici : `design/tokens.css` en est la source unique.
+ * No token is defined here: `design/tokens.css` is the single source for them.
  *
- * Ce fichier redéclarait autrefois un `:root` concurrent — mêmes noms, valeurs
- * différentes (`--space-1` valait 4 px contre 2 px). Rien ne se voyait, parce
- * que l'ordre d'injection donnait le dernier mot à `tokens.css` ; mais cet
- * ordre n'est garanti par rien, et le jour où il s'inversait, c'est l'échelle
- * d'espacement de toute l'application qui doublait — et le thème sombre qui
- * repassait en clair, les surcharges sombres de `tokens.css` étant écrasées par
- * un `:root` clair postérieur.
+ * This file used to redeclare a competing `:root`: same names, different values (`--space-1` was 4 px versus 2 px). Nothing showed, because the injection order gave `tokens.css` the last word; but nothing guarantees that
+ * order, and the day it was reversed, the spacing scale of the whole application would have doubled, and the dark theme would have gone back to light, the dark overrides of `tokens.css` being overwritten by a later light
+ * `:root`.
  */
 
 * {
@@ -22,10 +18,8 @@ body {
 }
 
 /*
- * L'application entière tient dans la hauteur de la fenêtre, et **seule** la
- * surface du document défile. Donner `height: 100vh` à l'éditeur alors qu'une
- * barre d'application le surmonte produisait deux barres de défilement
- * imbriquées : celle du document et celle de la page.
+ * The whole application fits in the window's height, and **only** the document surface scrolls. Giving the editor `height: 100vh` while an application bar sits above it produced two nested scrollbars: the document's and
+ * the page's.
  */
 .writer-app {
   display: flex;
@@ -38,12 +32,13 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1;
-  /* Sans cela, un enfant qui déborde empêche l'élément flexible de rétrécir,
-     et c'est la page entière qui défile. */
+  /*
+   * Without this, an overflowing child prevents the flexible element from shrinking, and it is the whole page that scrolls.
+   */
   min-height: 0;
 }
 
-/* --------------------------------------------------------------- barre d'outils */
+/* --------------------------------------------------------------- toolbar */
 
 .writer-toolbar {
   display: flex;
@@ -128,37 +123,26 @@ body {
   flex: 1;
   padding: var(--space-4) 0 48px;
   overflow: auto;
-  /* Le curseur en I sur toute la surface : le document est cliquable partout. */
+  /* The I-beam cursor over the whole surface: the document is clickable everywhere. */
   cursor: text;
   /*
-   * Rangée : la pile de pages et la gouttière de commentaires sont deux frères
-   * **côte à côte**. Sans `display: flex`, la gouttière — qui se dit pourtant
-   * `flex-shrink: 0; align-self: flex-start` — redevenait un bloc et tombait
-   * *sous* la dernière page. Comme sa boîte est plate et ses bulles posées en
-   * absolu, elle ajoutait la hauteur du document en défilement vide sous la
-   * pile : 14 000 px de blanc pour deux commentaires.
+   * Row: the page stack and the comment gutter are two siblings **side by side**. Without `display: flex`, the gutter, which does say `flex-shrink: 0; align-self: flex-start`, became a block again and fell *under* the last
+   * page. Since its box is flat and its bubbles are placed absolutely, it added the height of the document as empty scrolling under the stack: 14,000 px of white space for two comments.
    */
   display: flex;
   align-items: flex-start;
 }
 
 /*
- * Cadre du zoom.
+ * Zoom frame.
  *
- * `transform: scale()` est une opération de peinture : la boîte de mise en page
- * garde sa taille d'origine. Mettre la pile à l'échelle directement laissait
- * donc la surface calculer son défilement sur la pile à 100 % — du vide sous la
- * dernière page en dessous de 100 %, et au-dessus des pages qui débordaient à
- * gauche, là où aucun défilement ne va jamais.
+ * `transform: scale()` is a painting operation: the layout box keeps its original size. Scaling the stack directly therefore left the surface computing its scrolling on the stack at 100 %: empty space under the last page
+ * below 100 %, and above it pages that overflowed to the left, where no scrolling ever goes.
  *
- * Ce cadre porte la taille mise à l'échelle, en pixels ; son enfant porte la
- * transformation. Les deux coïncident exactement, à tout facteur de zoom.
+ * This frame carries the scaled size, in pixels; its child carries the transformation. The two coincide exactly, at any zoom factor.
  *
- * `margin: 0 auto` et non `justify-content: center` sur la surface : les marges
- * automatiques tombent à zéro quand il n'y a plus d'espace libre, ce qui pousse
- * le contenu trop large contre le bord *gauche* et rend tout son débordement
- * atteignable à droite. Un centrage par `justify-content` l'aurait débordé des
- * deux côtés, dont un inatteignable.
+ * `margin: 0 auto` and not `justify-content: center` on the surface: automatic margins fall to zero when there is no free space left, which pushes content that is too wide against the *left* edge and makes all of its
+ * overflow reachable on the right. Centering with `justify-content` would have overflowed it on both sides, one of which is unreachable.
  */
 .writer-zoom {
   position: relative;
@@ -169,9 +153,9 @@ body {
 .writer-zoom__contenu {
   display: flex;
   align-items: flex-start;
-  /* Origine en haut à gauche : c'est ce qui fait que la boîte transformée
-     recouvre exactement le cadre, dont la taille est le produit direct de la
-     taille d'origine par le zoom. */
+  /*
+   * Origin at the top left: this is what makes the transformed box exactly cover the frame, whose size is the direct product of the original size by the zoom.
+   */
   transform-origin: top left;
 }
 
@@ -180,11 +164,10 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* La colonne fait la largeur d'une feuille. Son centrage appartient au cadre
-     de zoom, qui seul connaît la largeur réelle du contenu — gouttière de
-     commentaires comprise. L'écart entre feuilles est posé en style en ligne
-     (cf. PAGE_GAP_PX) : la position de la zone de saisie en dépend, une seconde
-     valeur ici finirait par diverger. */
+  /*
+   * The column is the width of a sheet. Its centering belongs to the zoom frame, which alone knows the real width of the content, comment gutter included. The gap between sheets is set as an inline style (see PAGE_GAP_PX):
+   * the position of the input area depends on it, and a second value here would end up diverging.
+   */
   flex: none;
 }
 
@@ -192,25 +175,18 @@ body {
   position: relative;
   flex: none;
   /*
-   * Groupe de fusion de la teinte de sélection.
+   * Blending group of the selection tint.
    *
-   * `.writer-selection-layer` se fond en `multiply` avec ce qui est peint
-   * sous lui ; `isolation` borne ce « sous lui » à la feuille. Sans elle, le
-   * groupe remonterait jusqu'au plan de travail : le navigateur aurait à
-   * rassembler les vingt-cinq feuilles pour composer une teinte qui ne
-   * concerne qu'une ligne de texte, et la fusion prendrait au passage l'ombre
-   * portée de la page, qui n'appartient pas au document.
+   * `.writer-selection-layer` blends in `multiply` with what is painted under it; `isolation` limits that "under it" to the sheet. Without it, the group would go all the way up to the work surface: the browser would have to
+   * gather the twenty-five sheets to compose a tint that only concerns one line of text, and the blend would take the page's drop shadow along with it, which does not belong to the document.
    *
-   * La contrepartie est un contexte d'empilement par feuille : les calques
-   * d'une page (bandes de mobilier, poignées d'image) ne se classent plus
-   * qu'entre eux. C'est la lecture attendue d'une feuille de papier — aucune
-   * ne se peint par-dessus sa voisine.
+   * The trade-off is a stacking context per sheet: the layers of a page (furniture bands, image handles) are only ranked among themselves. This is the expected reading of a sheet of paper: none is painted over its neighbor.
    */
   isolation: isolate;
   background: var(--paper-bg);
-  /* Couleur de base du texte du document. Sans elle, un run sans couleur
-     propre hérite de `--fg-primary`, qui passe au blanc en thème sombre : le
-     texte disparaissait sur le papier resté blanc. */
+  /*
+   * Base color of the document text. Without it, a run with no color of its own inherits `--fg-primary`, which turns white in the dark theme: the text disappeared on the paper that had stayed white.
+   */
   color: var(--paper-fg);
   box-shadow: var(--shadow-page);
 }
@@ -220,26 +196,21 @@ body {
   overflow: visible;
 }
 
-/* Repères de marge : discrets, non imprimés. */
+/* Margin guides: discreet, not printed. */
 .writer-page__margins {
   position: absolute;
   pointer-events: none;
   border: 1px dashed var(--border-subtle);
 }
 
-/* --------------------------------------------------------------------- texte */
+/* --------------------------------------------------------------------- text */
 
 .writer-line {
   position: absolute;
   white-space: pre;
   /*
-   * Crénage et ligatures désactivés — décision structurante, pas cosmétique.
-   * Le moteur calcule la largeur d'une ligne en additionnant les avances de
-   * chaque grappe. Si le navigateur appliquait un crénage, la somme ne vaudrait
-   * plus la largeur rendue, et l'écart se cumulerait le long de la ligne :
-   * le curseur, placé par le moteur, dériverait des glyphes, peints par le
-   * navigateur. Les désactiver rend les deux calculs identiques par
-   * construction.
+   * Kerning and ligatures turned off: a structural decision, not a cosmetic one. The engine computes the width of a line by adding up the advances of each cluster. If the browser applied kerning, the sum would no longer equal the
+   * rendered width, and the gap would build up along the line: the cursor, placed by the engine, would drift away from the glyphs, painted by the browser. Turning them off makes the two computations identical by construction.
    */
   font-kerning: none;
   font-variant-ligatures: none;
@@ -251,13 +222,13 @@ body {
   display: inline-block;
 }
 
-/* -------------------------------------------------------- formules mathématiques */
+/* -------------------------------------------------------- math formulas */
 
-/* -- Cadre image ancré « comme caractère » (SwFlyCntFrm) -------------------
+/*
+ * -- Image frame anchored "as a character" (SwFlyCntFrm) ---------------------
  *
- * Le cadre reçoit le pointeur pour s'ouvrir au clic, mais rien ici ne décide
- * de sa taille : elle vient du moteur, en pixels, sur l'élément lui-même. Une
- * règle de largeur en CSS ferait diverger le rendu du calcul de ligne.
+ * The frame receives the pointer so it can open on click, but nothing here decides its size: it comes from the engine, in pixels, on the element itself. A width rule in CSS would make the rendering diverge from the line
+ * computation.
  */
 .writer-image {
   cursor: pointer;
@@ -275,11 +246,10 @@ body {
   outline: 2px solid var(--accent);
 }
 
-/* -- Légende de figure ------------------------------------------------------
+/*
+ * -- Figure caption ------------------------------------------------------
  *
- * La hauteur vient du moteur (`captionHeightPx`) et est posée en style en
- * ligne : aucune marge ni interligne ici, qui la ferait diverger de la place
- * réservée dans la ligne et pousserait le texte suivant.
+ * The height comes from the engine (`captionHeightPx`) and is set as an inline style: no margin or line spacing here, which would make it diverge from the room reserved in the line and push the following text.
  */
 .writer-image__caption {
   display: block;
@@ -287,12 +257,12 @@ body {
   overflow: hidden;
   font-family: var(--font-ui);
   color: var(--paper-secondary);
-  /* La légende n'est pas du texte éditable : le clic y sélectionne l'image. */
+  /* The caption is not editable text: a click on it selects the image. */
   pointer-events: none;
   user-select: none;
 }
 
-/* -- Poignées de redimensionnement ----------------------------------------- */
+/* -- Resize handles ----------------------------------------- */
 
 .writer-image__handle {
   position: absolute;
@@ -313,7 +283,7 @@ body.writer-resizing-image * {
   user-select: none !important;
 }
 
-/* -- Barre d'actions de l'image sélectionnée ------------------------------- */
+/* -- Action bar of the selected image ------------------------------- */
 
 .writer-image__bar {
   position: absolute;
@@ -323,12 +293,10 @@ body.writer-resizing-image * {
   gap: var(--space-2);
   padding: var(--space-2);
   /*
-   * Interligne repris en main.
+   * Line spacing taken back in hand.
    *
-   * La barre vit dans une ligne de texte dont l'interligne vaut la hauteur de
-   * l'image — près de cent pixels. Sans cette remise à plat, le `font: inherit`
-   * du bouton héritait de cette valeur et la barre s'étirait à la hauteur de
-   * l'image : un rectangle vide de 145 × 119 px pour un seul bouton.
+   * The bar lives in a line of text whose line spacing equals the height of the image, nearly a hundred pixels. Without this reset, the button's `font: inherit` inherited that value and the bar stretched to the height of the
+   * image: an empty 145 × 119 px rectangle for a single button.
    */
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -349,7 +317,7 @@ body.writer-resizing-image * {
   padding: 0 var(--space-3);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
-  /* Idem : jamais l'interligne du document, qui est celui de l'image. */
+  /* Same: never the document's line spacing, which is that of the image. */
   line-height: normal;
   color: var(--fg-primary);
   background: transparent;
@@ -374,10 +342,11 @@ body.writer-resizing-image * {
   border-color: var(--accent-hover);
 }
 
-/* -- Rognage dans l'éditeur ------------------------------------------------ */
+/* -- Cropping in the editor ------------------------------------------------ */
 
-/* La zone conservée reste claire ; le reste s'assombrit par une ombre portée
-   démesurée, ce qui évite de poser quatre voiles à ajuster séparément. */
+/*
+ * The kept area stays light; the rest darkens with an oversized drop shadow, which avoids placing four overlays to adjust separately.
+ */
 .writer-image__crop-keep {
   position: absolute;
   z-index: 2;
@@ -423,8 +392,9 @@ body.writer-resizing-image * {
 }
 
 .writer-image img {
-  /* Une image cassée ne doit pas afficher l'icône du navigateur par-dessus la
-     page : le cadre reste vide, à la taille que la pagination a réservée. */
+  /*
+   * A broken image must not show the browser's icon over the page: the frame stays empty, at the size that pagination reserved.
+   */
   color: transparent;
   background: var(--paper-sunken);
 }
@@ -540,14 +510,15 @@ body.writer-resizing-image * {
 .writer-caret {
   position: absolute;
   width: 2px;
-  /* Le curseur vit sur le papier : il en suit le contraste, pas celui du thème. */
+  /* The cursor lives on the paper: it follows its contrast, not the theme's. */
   background: var(--paper-fg);
   pointer-events: none;
   animation: writer-blink 1.06s step-end infinite;
 }
 
-/* Le curseur cesse de clignoter quand l'éditeur perd le focus : un curseur qui
-   clignote dans une fenêtre inactive laisse croire qu'on peut y taper. */
+/*
+ * The cursor stops blinking when the editor loses focus: a blinking cursor in an inactive window makes people think they can type in it.
+ */
 .writer-caret--idle {
   animation: none;
   opacity: 0.35;
@@ -563,16 +534,12 @@ body.writer-resizing-image * {
 }
 
 /*
- * Habillage de sélection, posé **par-dessus** le contenu de la page.
+ * Selection overlay, placed **over** the content of the page.
  *
- * La teinte traverse tout ce qu'elle recouvre au lieu d'être recouverte :
- * ligne d'en-tête de tableau, caractère à fond coloré, image ancrée comme
- * caractère. `multiply` garantit la lisibilité — elle ne peut qu'assombrir,
- * donc un glyphe noir reste noir, et sur le blanc du papier le résultat est
- * celui d'une teinte translucide ordinaire (cf. `A4Page`).
+ * The tint goes through everything it covers instead of being covered: table header row, character with a colored background, image anchored as a character. `multiply` guarantees readability, since it can only darken, so a
+ * black glyph stays black, and on the white of the paper the result is that of an ordinary translucent tint (see `A4Page`).
  *
- * `isolation` compose les rectangles entre eux avant la fusion : une
- * occurrence de recherche sous la sélection ne doit pas assombrir deux fois.
+ * `isolation` composes the rectangles among themselves before blending: a search match under the selection must not darken twice.
  */
 .writer-selection-layer {
   position: absolute;
@@ -589,12 +556,10 @@ body.writer-resizing-image * {
 }
 
 /*
- * Occurrences de la recherche.
+ * Search matches.
  *
- * Deux teintes distinctes, et pas seulement deux intensités : distinguer
- * l'occurrence courante par la seule opacité la rendrait invisible aux yeux
- * qui perçoivent mal les contrastes (directive UX §2.1). La courante reçoit en
- * plus un contour, information non chromatique.
+ * Two distinct tints, and not just two intensities: telling the current match apart by opacity alone would make it invisible to eyes that perceive contrasts poorly (UX directive §2.1). The current one also gets an outline, a
+ * non-chromatic cue.
  */
 .writer-search {
   position: absolute;
@@ -608,10 +573,10 @@ body.writer-resizing-image * {
   outline-offset: -1px;
 }
 
-/* Zone de saisie invisible : elle porte le focus, reçoit les frappes et sert
-   d'ancre à la fenêtre de composition des méthodes de saisie asiatiques. D'où
-   sa position au curseur plutôt qu'un `display: none`, qui la rendrait
-   inatteignable. */
+/*
+ * Invisible input area: it holds the focus, receives the keystrokes and serves as the anchor for the composition window of Asian input methods. Hence its position at the cursor rather than a `display: none`, which would make
+ * it unreachable.
+ */
 .writer-input,
 .writer-input:focus,
 .writer-input:focus-visible {
@@ -634,23 +599,21 @@ body.writer-resizing-image * {
   z-index: 2;
 }
 
-/* ---------------------------------------------------------------- tableaux */
+/* ---------------------------------------------------------------- tables */
 
 .writer-table-cell {
   position: absolute;
-  /* Cadre purement décoratif (`aria-hidden`) : le clic doit le traverser pour
-     atteindre la page, qui seule sait convertir un point en position. */
+  /*
+   * Purely decorative frame (`aria-hidden`): the click must go through it to reach the page, which alone knows how to convert a point into a position.
+   */
   pointer-events: none;
   border: 1px solid var(--paper-border);
 }
 
 /*
- * Habillage interactif d'un tableau.
+ * Interactive overlay of a table.
  *
- * Le conteneur ne capte rien : il n'existe que pour poser un repère de
- * positionnement. Ce sont les poignées qui rendent le pointeur, une par une,
- * pour qu'une sélection de texte glissée en travers du tableau les traverse
- * sans accrocher.
+ * The container captures nothing: it only exists to set a positioning reference. It is the handles that take the pointer, one by one, so that a text selection dragged across the table goes through them without catching.
  */
 .writer-table-chrome {
   position: absolute;
@@ -658,28 +621,25 @@ body.writer-resizing-image * {
   pointer-events: none;
 }
 
-/* Cellule portant le curseur : un liseré, pas un fond — voir TableOverlay. */
+/* Cell carrying the cursor: an outline, not a background; see TableOverlay. */
 .writer-table-cell-active {
   position: absolute;
   pointer-events: none;
   /*
-   * Mêmes `left`/`top`/`width`/`height` que `.writer-table-cell`, et le même
-   * `border-box` : les deux bordures d'un pixel se superposent exactement. Tout
-   * décalage — marge négative, rayon, `outline-offset` — ferait déborder le
-   * liseré sur la cellule voisine d'un pixel, et la grille semblerait bouger au
-   * gré du curseur.
+   * Same `left`/`top`/`width`/`height` as `.writer-table-cell`, and the same `border-box`: the two one-pixel borders overlap exactly. Any offset (negative margin, radius, `outline-offset`) would make the outline overflow onto the
+   * neighboring cell by one pixel, and the grid would seem to move as the cursor does.
    */
   border: 1px solid var(--accent);
 }
 
-/* Cellules d'une sélection de bande ou de rectangle. */
+/* Cells of a band or rectangle selection. */
 .writer-table-cell-selected {
   position: absolute;
   pointer-events: none;
   background: var(--selection);
 }
 
-/* -- Poignée de largeur de colonne ----------------------------------------- */
+/* -- Column width handle ----------------------------------------- */
 
 .writer-table-resize {
   position: absolute;
@@ -687,8 +647,9 @@ body.writer-resizing-image * {
   justify-content: center;
   pointer-events: auto;
   cursor: col-resize;
-  /* Zone de saisie large de 8 px pour un trait d'un seul : la cible de Fitts
-     doit être atteignable, le repère visuel doit rester fin. */
+  /*
+   * Grab area 8 px wide for a line only one pixel wide: the Fitts target must be reachable, while the visual marker must stay thin.
+   */
   touch-action: none;
 }
 
@@ -704,8 +665,9 @@ body.writer-resizing-image * {
   opacity: 1;
 }
 
-/* Pendant le glissement, le curseur reste `col-resize` où que la souris aille,
-   et plus rien ne se surligne au passage. */
+/*
+ * During the drag, the cursor stays `col-resize` wherever the mouse goes, and nothing gets highlighted on the way.
+ */
 body.writer-resizing-column,
 body.writer-resizing-column * {
   cursor: col-resize !important;
@@ -716,7 +678,7 @@ body.writer-resizing-column .writer-table-resize__line {
   opacity: 1;
 }
 
-/* -- Réglettes de sélection de ligne et de colonne ------------------------- */
+/* -- Row and column selection guides ------------------------- */
 
 .writer-table-grip {
   position: absolute;
@@ -757,7 +719,7 @@ body.writer-resizing-column .writer-table-resize__line {
   cursor: se-resize;
 }
 
-/* ---------------------------------------------------------------- barre d'état */
+/* ---------------------------------------------------------------- status bar */
 
 .writer-status {
   display: flex;
@@ -774,7 +736,7 @@ body.writer-resizing-column .writer-table-resize__line {
   flex: 1;
 }
 
-/* -------------------------------------------------- en-tête et pied de page */
+/* -------------------------------------------------- page header and footer */
 
 .writer-page__furniture-header,
 .writer-page__furniture-footer {
@@ -838,17 +800,18 @@ body.writer-resizing-column .writer-table-resize__line {
   border-color: #1e429f;
 }
 
-/* ------------------------------------------------------------------ impression */
+/* ------------------------------------------------------------------ printing */
 
 @media print {
-  /* Supprime la marge de page par défaut du navigateur : les marges du document
-     sont déjà dans la géométrie de chaque feuille A4. */
+  /*
+   * Removes the browser's default page margin: the document's margins are already in the geometry of each A4 sheet.
+   */
   @page {
     size: A4 portrait;
     margin: 0;
   }
 
-  /* Masque l'ensemble du chrome applicatif, menus, barres, règle, dialogues et modales */
+  /* Hides all of the application chrome: menus, bars, ruler, dialogs and modals */
   .titlebar,
   .menubar,
   .ribbon,
@@ -881,7 +844,7 @@ body.writer-resizing-column .writer-table-resize__line {
     display: none !important;
   }
 
-  /* Déverrouille les conteneurs scrollables et flex pour l'impression multi-pages */
+  /* Unlocks the scrollable and flex containers for multi-page printing */
   html,
   body,
   .shell,
@@ -907,7 +870,7 @@ body.writer-resizing-column .writer-table-resize__line {
     box-shadow: none !important;
   }
 
-  /* Chaque feuille A4 est imprimée sans ombre et tient sur une seule feuille */
+  /* Each A4 sheet is printed with no shadow and fits on a single sheet */
   .writer-page {
     position: relative !important;
     box-shadow: none !important;
@@ -918,28 +881,26 @@ body.writer-resizing-column .writer-table-resize__line {
     page-break-inside: avoid !important;
   }
 
-  /* Le saut est posé **avant** chaque page sauf la première, et jamais après
-     la dernière : un `break-after` sur la dernière page fait sortir une
-     feuille blanche de plus. On ne peut pas le rattraper avec `:last-child` —
-     la zone de saisie `.writer-input`, masquée à l'impression mais bien
-     présente dans le DOM, reste le dernier enfant de `.writer-pages`. */
+  /*
+   * The break is set **before** every page except the first, and never after the last one: a `break-after` on the last page makes one more blank sheet come out. It cannot be fixed with `:last-child`: the `.writer-input`
+   * input area, hidden when printing but still present in the DOM, remains the last child of `.writer-pages`.
+   */
   .writer-page + .writer-page {
     break-before: page !important;
     page-break-before: always !important;
   }
 
-  /* Désactive les styles interactifs sur les en-têtes et pieds de page */
+  /* Turns off the interactive styles on headers and footers */
   .writer-page__furniture-header,
   .writer-page__furniture-footer {
     cursor: default !important;
   }
 }
 
-/* --------------------------------------------- gouttière de commentaires
+/*
+ * --------------------------------------------- comment gutter
  *
- * `SwPostItMgr` pose ses bulles hors de la feuille, à droite. La bande vit
- * donc à côté de la pile de pages et non dans la marge : un commentaire est un
- * objet de relecture, il ne doit pas s'imprimer.
+ * `SwPostItMgr` places its bubbles outside the sheet, on the right. The band therefore lives next to the page stack and not in the margin: a comment is a review object, it must not be printed.
  */
 
 .writer-comment-gutter {
@@ -948,10 +909,10 @@ body.writer-resizing-column .writer-table-resize__line {
 }
 
 .writer-comment-band {
-  /* La gouttière reçoit la hauteur de la pile en style en ligne ; la bande la
-     reprend. `min-height: 100%` ne le faisait pas : un pourcentage contre un
-     parent de hauteur automatique se résout à zéro, la bande restait plate et
-     ses bulles, posées en absolu, débordaient dans le vide. */
+  /*
+   * The gutter receives the height of the stack as an inline style; the band takes it over. `min-height: 100%` did not do it: a percentage against a parent with automatic height resolves to zero, the band stayed flat and its
+   * bubbles, placed absolutely, overflowed into the void.
+   */
   height: 100%;
 }
 
@@ -963,11 +924,12 @@ body.writer-resizing-column .writer-table-resize__line {
   z-index: 2;
 }
 
-/* ------------------------------------------------------ cadres flottants */
+/* ------------------------------------------------------ floating frames */
 
 .writer-fly {
-  /* Le cadre ne se sélectionne pas comme du texte : c'est un objet, et le
-     glisser doit le déplacer, pas peindre une sélection dessus. */
+  /*
+   * The frame is not selected like text: it is an object, and dragging must move it, not paint a selection over it.
+   */
   user-select: none;
 }
 
@@ -975,25 +937,27 @@ body.writer-resizing-column .writer-table-resize__line {
   pointer-events: none;
 }
 
-/* ---------------------------------------------------- notes de bas de page */
+/* ---------------------------------------------------- footnotes */
 
 .writer-page__footnotes {
-  /* La hauteur vient de la pagination (`footnoteAreaHeightPx`) : le contenu ne
-     doit jamais la dépasser, faute de quoi il déborderait sur la marge basse. */
+  /*
+   * The height comes from pagination (`footnoteAreaHeightPx`): the content must never exceed it, otherwise it would overflow onto the bottom margin.
+   */
   overflow: hidden;
 }
 
-/* --------------------------------------------------------- impression */
+/* --------------------------------------------------------- printing */
 
 @media print {
-  /* Ni les commentaires ni leur bande n'appartiennent au document imprimé. */
+  /* Neither the comments nor their band belong to the printed document. */
   .writer-comment-gutter,
   .writer-comment-band {
     display: none !important;
   }
 
-  /* Le surlignage d'ancre de commentaire non plus : il colorerait le fond d'un
-     texte qui, sur papier, n'a plus de bulle à laquelle renvoyer. */
+  /*
+   * The comment anchor highlighting does not either: it would color the background of a text that, on paper, no longer has a bubble to refer to.
+   */
   .writer-page [style*='--comment-highlight'] {
     background: transparent !important;
   }

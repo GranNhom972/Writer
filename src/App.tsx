@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Application de traitement de texte natif OpenOffice Writer (StarWriter / sw).
+ * OpenOffice Writer native word processing application (StarWriter / sw).
  *
- * Moteur 100 % pur en TypeScript et React 18 sans aucune bibliothèque de rich-text externe.
+ * A 100 % pure engine in TypeScript and React 18, with no external rich-text library.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
@@ -112,7 +112,7 @@ function demoDocument(): WriterDocumentState {
   return doc;
 }
 
-/** Message lisible d'une erreur d'API : les 5xx ne disent jamais leur détail. */
+/** Readable message for an API error: 5xx errors never give their detail. */
 function messageErreur(error: unknown): string {
   if (error instanceof ApiError) {
     return error.isOffline ? 'serveur injoignable' : error.message;
@@ -122,17 +122,13 @@ function messageErreur(error: unknown): string {
 
 export function App(): JSX.Element {
   /**
-   * L'adresse d'ouverture, lue **une seule fois** au premier rendu.
+   * The opening address, read **only once** at the first render.
    *
-   * L'effet d'ouverture CloudServ efface le fragment aussitôt qu'il l'a lu —
-   * un billet n'a rien à faire dans la barre d'adresse ni dans l'historique.
-   * Les effets suivants ne peuvent donc plus interroger `window.location` :
-   * ils y trouveraient une adresse nue et concluraient à tort au mode
-   * autonome, ce qui chargeait le document d'exemple **par-dessus** le
-   * document CloudServ tout juste ouvert.
+   * The CloudServ opening effect clears the fragment as soon as it has read it: a ticket has no business in the address bar or in the
+   * history. The following effects can therefore no longer query `window.location`: they would find a bare address and wrongly conclude
+   * that we are in standalone mode, which loaded the sample document **on top of** the CloudServ document that had just been opened.
    *
-   * Le calcul se fait pendant le rendu, avant tout effet, ce qui garantit de
-   * voir l'adresse d'origine quel que soit l'ordre d'exécution.
+   * The computation is done during render, before any effect, which guarantees seeing the original address whatever the order of execution.
    */
   const [lienInitial] = useState(() => ({
     cloudServ: readCloudServLink(window.location.hash, window.location.pathname, window.location.search),
@@ -140,16 +136,13 @@ export function App(): JSX.Element {
   }));
 
   /**
-   * Document affiché. Le choix de l'état initial n'est pas cosmétique.
+   * Displayed document. The choice of the initial state is not cosmetic.
    *
-   * Ouvert depuis CloudServ ou depuis un partage, l'éditeur part d'un document
-   * **vide** : le contenu réel arrive par la synchronisation collaborative.
-   * Y placer le document de démonstration le ferait apparaître le temps que la
-   * synchronisation s'établisse — et, en écriture, ce contenu local pouvait
-   * être fusionné dans le document partagé, écrasant celui de l'utilisateur.
+   * Opened from CloudServ or from a share, the editor starts from an **empty** document: the real content arrives through collaborative
+   * synchronization. Putting the demo document there would make it appear while synchronization is being established and, in write mode,
+   * that local content could be merged into the shared document, overwriting the user's.
    *
-   * Le document de démonstration reste l'accueil du mode autonome, quand
-   * l'éditeur est ouvert directement et n'a rien d'autre à montrer.
+   * The demo document stays the welcome screen of standalone mode, when the editor is opened directly and has nothing else to show.
    */
   const [doc, setDoc] = useState<WriterDocumentState>(() =>
     lienInitial.cloudServ || lienInitial.partage
@@ -160,16 +153,16 @@ export function App(): JSX.Element {
   const [message, setMessage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  /* ------------------------------------------------------------- partage */
+  /* ------------------------------------------------------------- sharing */
 
   const [join, setJoin] = useState<SessionJoin | null>(null);
   const [session, setSession] = useState<SessionSummary | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
-  /** Adresse locale : celle du lien de partage, ou une valeur de travail. */
+  /** Local address: that of the sharing link, or a working value. */
   const [ownerEmail, setOwnerEmail] = useState('moi@exemple.fr');
 
 
-  // La commande d'application distante vient de l'éditeur, qui possède l'état.
+  // The remote-apply command comes from the editor, which owns the state.
   const applyRemoteRef = useRef<
     | ((
         transform: (doc: WriterDocumentState) => WriterDocumentState,
@@ -179,12 +172,10 @@ export function App(): JSX.Element {
   >(null);
 
   /**
-   * Document **vivant**, tel que l'éditeur le tient à cet instant.
+   * The **live** document, as the editor holds it at this moment.
    *
-   * `doc` n'est que l'état initial : l'éditeur en prend une copie au montage et
-   * ne la relit plus. Partager, exporter ou imprimer en se fiant à `doc`
-   * enverrait le document tel qu'il était à l'ouverture — sans une seule des
-   * frappes qui ont suivi.
+   * `doc` is only the initial state: the editor takes a copy at mount time and does not read it again. Sharing, exporting or printing by
+   * relying on `doc` would send the document as it was when it was opened, without a single one of the keystrokes that followed.
    */
   const liveDocRef = useRef<WriterDocumentState>(doc);
 
@@ -193,7 +184,7 @@ export function App(): JSX.Element {
     onRemoteDocument: (apply, remapSelection) => applyRemoteRef.current?.(apply, remapSelection),
   });
 
-  /** L'éditeur publie à chaque changement : on en profite pour tenir la réf. */
+  /** The editor publishes on every change: we take the opportunity to keep the ref. */
   const publish = useCallback(
     (current: WriterDocumentState) => {
       liveDocRef.current = current;
@@ -203,21 +194,18 @@ export function App(): JSX.Element {
   );
 
   /**
-   * Ouverture par un lien de partage : `?session=…&email=…`.
+   * Opening through a sharing link: `?session=…&email=…`.
    *
-   * On rejoint **avant** d'afficher quoi que ce soit d'autre : le document du
-   * partage remplace celui de démonstration, et le montrer d'abord ferait
-   * clignoter un contenu qui n'est pas le bon.
+   * We join **before** displaying anything else: the share's document replaces the demo one, and showing it first would flash content that
+   * is not the right one.
    */
   /**
-   * Ouverture depuis CloudServ : `/doc/<uuid>#token=<billet>` ou `#doc=<uuid>&token=<billet>`.
+   * Opening from CloudServ: `/doc/<uuid>#token=<ticket>` or `#doc=<uuid>&token=<ticket>`.
    *
-   * Aucun appel réseau préalable — contrairement au partage géré par Writer, où
-   * il faut d'abord rejoindre pour connaître sa permission. Ici c'est CloudServ
-   * qui a tranché : le billet **est** la réponse, signé et lié à ce document.
+   * No prior network call, unlike a share managed by Writer, where you must first join to learn your permission. Here CloudServ has already
+   * decided: the ticket **is** the answer, signed and tied to this document.
    *
-   * Le fragment / paramètre portant le jeton est effacé de la barre d'adresse
-   * tout en conservant la route isolée `/doc/<docId>`.
+   * The fragment / parameter carrying the token is cleared from the address bar while keeping the isolated `/doc/<docId>` route.
    */
   useEffect(() => {
     const lien = lienInitial.cloudServ;
@@ -287,16 +275,14 @@ export function App(): JSX.Element {
   }, [lienInitial]);
 
   /**
-   * Chargement par défaut du document d'exemple ODT (`doc_test.odt`).
+   * Default loading of the sample ODT document (`doc_test.odt`).
    *
-   * En mode autonome (sans fragment `#doc=` CloudServ ni paramètre `?session=`),
-   * l'application charge le document d'exemple OpenOffice de 25 pages pour
-   * offrir d'emblée un banc d'essai complet de tous les sous-systèmes.
+   * In standalone mode (without a CloudServ `#doc=` fragment or a `?session=` parameter), the application loads the 25-page OpenOffice
+   * sample document to offer, right away, a complete test bench for all the subsystems.
    */
   useEffect(() => {
-    // On interroge la capture, pas `window.location` : le fragment a déjà été
-    // effacé par l'effet d'ouverture, et le relire ferait charger l'exemple
-    // par-dessus le document de l'utilisateur.
+    // We query the captured value, not `window.location`: the fragment was already cleared by the opening effect, and reading it again would
+    // load the sample on top of the user's document.
     if (lienInitial.cloudServ || lienInitial.partage) return;
 
     let annule = false;
@@ -369,12 +355,10 @@ export function App(): JSX.Element {
   }, []);
 
   /**
-   * Export PDF et impression empruntent le même chemin : la boîte du
-   * navigateur. L'export choisit la destination « Enregistrer au format
-   * PDF », l'impression une imprimante — le rendu, lui, est identique.
+   * PDF export and printing take the same path: the browser's dialog. The export chooses the "Save as PDF" destination, printing a printer;
+   * the rendering is identical.
    *
-   * Le titre vient du document vivant, pas de l'état initial : renommer le
-   * document doit renommer le fichier proposé.
+   * The title comes from the live document, not from the initial state: renaming the document must rename the suggested file.
    */
   const onExportPdf = useCallback(() => {
     printDocument(liveDocRef.current.meta.title);
@@ -386,17 +370,14 @@ export function App(): JSX.Element {
   }, []);
 
   /**
-   * Dépose sur le serveur toutes les images encore en `data:`.
+   * Uploads to the server all the images that are still `data:` URLs.
    *
-   * Une image insérée hors ligne vit dans le document sous forme de `data:` —
-   * plusieurs centaines de kilooctets dans le corps d'un paragraphe. La laisser
-   * là la ferait repartir sur le réseau **à chaque frappe** dans ce paragraphe,
-   * pour chaque participant. On la transfère donc une fois, et le run ne porte
-   * plus qu'une adresse.
+   * An image inserted offline lives in the document as a `data:` URL, several hundred kilobytes in the body of a paragraph. Leaving it there
+   * would send it over the network again **on every keystroke** in that paragraph, for every participant. So we transfer it once, and the run
+   * only carries an address.
    *
-   * Une image qui refuse de partir reste en `data:` : le partage fonctionne
-   * quand même, il est seulement plus lourd. Refuser tout le partage pour une
-   * image serait disproportionné.
+   * An image that refuses to go stays as a `data:` URL: sharing still works, it is just heavier. Refusing the whole share because of one image
+   * would be out of proportion.
    */
   const televerserImages = useCallback(
     async (source: WriterDocumentState, token: string, docId: string): Promise<WriterDocumentState> => {
@@ -409,8 +390,7 @@ export function App(): JSX.Element {
             }
             continue;
           }
-          // Un sommaire ne porte pas d'image : ses lignes sont engendrées à la
-          // pagination et n'existent pas dans l'AST téléversé.
+          // A table of contents carries no image: its lines are generated at pagination time and do not exist in the uploaded AST.
           if (!isParagraph(block)) continue;
           for (const { run } of collectImageRuns(block.runs)) {
             if (run.imageSrc?.startsWith('data:')) adresses.add(run.imageSrc);
@@ -429,7 +409,7 @@ export function App(): JSX.Element {
             const depose = await uploadAsset(token, docId, blob);
             remplacement.set(dataUrl, depose.url);
           } catch {
-            /* image conservée en data: — le partage reste possible */
+            /* image kept as data: the share remains possible */
           }
         }),
       );
@@ -467,9 +447,8 @@ export function App(): JSX.Element {
 
   const onShare = useCallback(
     async (tokenSession: string, invitations: Invitation[]) => {
-      // Le partage porte le document **tel qu'il est à cet instant**, images
-      // comprises : celui qui rejoint doit voir ce que l'on voit, pas un
-      // document vide qu'il faudrait ensuite rattraper.
+      // The share carries the document **as it is at this moment**, images included: the person who joins must see what we see, not an empty
+      // document that they would then have to catch up.
       const courant = liveDocRef.current;
       const cree = await shareDocument({
         tokenSession,
@@ -483,10 +462,8 @@ export function App(): JSX.Element {
       setSession(cree);
       setShareOpen(false);
 
-      // Les images partent **après** la création : elles ont besoin du `doc_id`,
-      // que seul le partage vient de produire. La réécriture des adresses passe
-      // par l'éditeur, seul détenteur du document vivant — `setDoc` ne ferait
-      // rien, l'éditeur ne relisant pas son document initial.
+      // The images go **after** the creation: they need the `doc_id`, which only the share has just produced. Rewriting the addresses goes through
+      // the editor, the sole holder of the live document: `setDoc` would do nothing, since the editor does not re-read its initial document.
       if (rejoint.access_token) {
         const allege = await televerserImages(courant, rejoint.access_token, rejoint.doc_id);
         if (allege !== courant) {
@@ -494,8 +471,7 @@ export function App(): JSX.Element {
         }
       }
 
-      // L'adresse porte désormais le partage : rafraîchir la page rouvre le
-      // document partagé, et le lien est copiable depuis la barre du navigateur.
+      // The address now carries the share: refreshing the page reopens the shared document, and the link can be copied from the browser bar.
       window.history.replaceState(null, '', rejoint.editor_path);
       setMessage(`Document partagé avec ${invitations.length} personne(s).`);
     },
@@ -528,8 +504,7 @@ export function App(): JSX.Element {
       try {
         return (await uploadAsset(token, docId, blob)).url;
       } catch (error) {
-        // Le dépôt a échoué : l'image reste en `data:`. Elle s'affiche, elle
-        // s'exporte, elle se partage — seulement plus lourdement.
+        // The upload failed: the image stays as a `data:` URL. It displays, it exports, it shares, only more heavily.
         setMessage(`Image conservée dans le document : ${messageErreur(error)}`);
         return null;
       }
@@ -598,7 +573,7 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      {/* Éditeur Writer complet avec Barre de titre intégrée (Titre + MenuBar) */}
+      {/* Complete Writer editor with the integrated Title bar (Title + MenuBar) */}
       <WriterEditor
         key={generation}
         initialDocument={doc}

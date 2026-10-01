@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Géométrie de la page. Transposition de `SwPageDesc` / `SwPageFrm`.
+ * Page geometry (OpenOffice: `SwPageDesc` / `SwPageFrm`).
  *
- * `SwPageFrm` distingue le **cadre** (la feuille entière) et le **Prt**
- * (« print area » : ce qui reste une fois les marges et les bandes d'en-tête et
- * de pied retirées). C'est le second qui borne la pagination — d'où
- * `printableHeightPx`, dont dépend tout le découpage en pages.
+ * `SwPageFrm` distinguishes the **frame** (the whole sheet) from the **Prt** ("print
+ * area": what is left once the margins and the header and footer bands are removed).
+ * The second is what bounds the pagination, hence `printableHeightPx`, on which the
+ * whole split into pages depends.
  */
 
 import { mmToPx } from './units';
@@ -37,7 +37,7 @@ export const LETTER_PORTRAIT: PageSetup = {
   heightMm: 279.4,
 };
 
-/** Dimensions effectives de la feuille, orientation comprise. */
+/** Effective dimensions of the sheet, orientation included. */
 export function sheetSizeMm(setup: PageSetup): { widthMm: number; heightMm: number } {
   return setup.orientation === 'landscape'
     ? { widthMm: setup.heightMm, heightMm: setup.widthMm }
@@ -45,13 +45,13 @@ export function sheetSizeMm(setup: PageSetup): { widthMm: number; heightMm: numb
 }
 
 export interface PageGeometry {
-  /** Feuille entière. */
+  /** The whole sheet. */
   pageWidthPx: number;
   pageHeightPx: number;
-  /** Bord gauche et haut de la zone imprimable. */
+  /** Left and top edge of the printable area. */
   contentLeftPx: number;
   contentTopPx: number;
-  /** Zone imprimable — le `Prt` de `SwPageFrm`. */
+  /** Printable area: the `Prt` of `SwPageFrm`. */
   contentWidthPx: number;
   contentHeightPx: number;
   headerHeightPx: number;
@@ -59,12 +59,13 @@ export interface PageGeometry {
 }
 
 /**
- * Zone imprimable :
- * `hauteur - marge haute - marge basse - en-tête - pied`, conformément aux règles de mise en page A4.
+ * Printable area:
+ * `height - top margin - bottom margin - header - footer`, following the A4 layout
+ * rules.
  *
- * Les valeurs sont bornées à un minimum strictement positif : des marges plus
- * grandes que la feuille donneraient une hauteur nulle ou négative, et la
- * pagination bouclerait sans jamais poser une seule ligne.
+ * The values are clamped to a strictly positive minimum: margins larger than the
+ * sheet would give a zero or negative height, and pagination would loop without ever
+ * placing a single line.
  */
 export function pageGeometry(setup: PageSetup): PageGeometry {
   const { widthMm, heightMm } = sheetSizeMm(setup);

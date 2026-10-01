@@ -1,23 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Hook central de contrôle. Transposition de `SwEditWin` — la fenêtre qui, dans
- * Writer, traduit les événements de saisie en commandes sur le modèle.
+ * The central control hook. (OpenOffice: `SwEditWin`, the window that, in Writer, translates input events into commands on the model.)
  *
- * Principe d'architecture : **rien n'est lu depuis le DOM**. Ni le
- * texte, ni la position du curseur, ni les limites de ligne. Le clavier et la
- * souris produisent des commandes, les commandes transforment l'état, et le
- * moteur recalcule la géométrie. Le DOM n'en est que la projection.
+ * Architectural principle: **nothing is read from the DOM**. Not the text, not the cursor position, not the line boundaries. The keyboard and the mouse produce commands, the commands transform the state, and the
+ * engine recomputes the geometry. The DOM is only the projection.
  *
- * La saisie passe par une zone de texte invisible plutôt que par
- * `contenteditable` : c'est ce qui permet de recevoir les méthodes de saisie
- * asiatiques, la dictée et le collage système sans jamais laisser le navigateur
- * modifier le document de son propre chef.
+ * Input goes through an invisible text area rather than `contenteditable`: that is what lets us receive Asian input methods, dictation and the system paste without ever letting the browser modify the document on
+ * its own.
  */
 
 import {
@@ -169,13 +164,10 @@ import { createMeasurer, type TextMeasurer } from '../../domain/engine/measure';
 import { paginateDocument, type DocumentLayout, type PlacedParagraph } from '../../domain/engine/paginate';
 
 /**
- * Dernier fragment copié depuis cet éditeur.
+ * Last fragment copied from this editor.
  *
- * Le presse-papiers du système ne transporte que du texte et du HTML ; y écrire
- * notre modèle demanderait un type MIME propriétaire, que les navigateurs
- * filtrent. On garde donc le fragment de côté et on le reconnaît au collage par
- * son texte : un copier-coller interne conserve ainsi tout son formatage, et un
- * collage venu d'ailleurs retombe proprement sur le texte brut.
+ * The system clipboard only carries text and HTML; writing our model into it would need a proprietary MIME type, which browsers filter out. So we keep the fragment aside and recognize it on paste by its text: an
+ * internal copy and paste therefore keeps all its formatting, and a paste from elsewhere falls back cleanly on plain text.
  */
 let lastCopied: { text: string; fragment: DocumentFragment } | null = null;
 
@@ -201,7 +193,7 @@ export interface WriterCommands {
   toggleList: (kind: ListKind) => void;
   changeListLevel: (direction: 1 | -1) => void;
   toggleTask: (blockId: string) => void;
-  /** Renvoie `false` si l'adresse est refusée : le dialogue le signale alors. */
+  /** Returns `false` if the address is refused: the dialog then reports it. */
   setLink: (url: string) => boolean;
   removeLink: () => void;
   insertTable: (rows: number, cols: number) => void;
@@ -212,38 +204,38 @@ export interface WriterCommands {
   insertTableColumnRight: () => void;
   deleteTableColumn: () => void;
   deleteTable: () => void;
-  /** Répartit également les colonnes du tableau courant. */
+  /** Spreads the columns of the current table evenly. */
   distributeColumns: () => void;
-  /** Déplace la frontière entre deux colonnes, à la souris. */
+  /** Moves the boundary between two columns, with the mouse. */
   resizeColumnBoundary: (tableId: string, boundaryIndex: number, deltaPercent: number) => void;
   selectRow: (tableId: string, rowIndex: number) => void;
   selectColumn: (tableId: string, columnIndex: number) => void;
   selectTable: (tableId: string) => void;
-  /** Passe à la cellule suivante ou précédente (`Tab` / `Maj+Tab`). */
+  /** Moves to the next or previous cell (`Tab` / `Shift+Tab`). */
   goToAdjacentCell: (forward: boolean) => void;
   insertFootnote: (text: string) => void;
-  /** Fusionne les cellules sélectionnées (`SwDoc::MergeTbl`). */
+  /** Merges the selected cells (`SwDoc::MergeTbl`). */
   mergeCells: () => void;
-  /** Scinde la cellule courante (`SwDoc::SplitTbl`). */
+  /** Splits the current cell (`SwDoc::SplitTbl`). */
   splitCell: (direction: 'horizontal' | 'vertical', count?: number) => void;
-  /** Insère une table des matières après le bloc courant (`SwTOXBase`). */
+  /** Inserts a table of contents after the current block (`SwTOXBase`). */
   insertTableOfContents: (options?: TocOptions) => void;
-  /** Modifie la définition d'un sommaire déjà posé. */
+  /** Modifies the definition of a table of contents already placed. */
   updateToc: (tocId: string, patch: Partial<Omit<TocNode, 'id' | 'type'>>) => void;
 
-  /* -- Commentaires (`SwPostItMgr`) -------------------------------------- */
+  /* -- Comments (`SwPostItMgr`) ------------------------------------------ */
   addComment: (author: string, text: string) => void;
   replyToComment: (threadId: string, author: string, text: string) => void;
   resolveComment: (threadId: string, resolved: boolean) => void;
   deleteComment: (threadId: string) => void;
   editComment: (commentId: string, text: string) => void;
 
-  /* -- Signets (`SwBookmark`) -------------------------------------------- */
+  /* -- Bookmarks (`SwBookmark`) ------------------------------------------ */
   setBookmark: (name: string) => void;
   removeBookmark: (name: string) => void;
 
-  /* -- Suivi des modifications (`SwRedline`) ----------------------------- */
-  /** Active le mode révision au nom d'un auteur, ou le coupe avec `null`. */
+  /* -- Change tracking (`SwRedline`) ------------------------------------- */
+  /** Turns review mode on in an author's name, or off with `null`. */
   setReviewMode: (author: string | null) => void;
   acceptRedline: (redlineId: string) => void;
   rejectRedline: (redlineId: string) => void;
@@ -251,34 +243,25 @@ export interface WriterCommands {
   rejectAllRedlines: () => void;
 
   /**
-   * Intégration au texte du cadre image situé à cet offset.
+   * How the image frame at this offset fits into the text.
    *
-   * Un seul point d'entrée pour les trois attributs d'OpenOffice — ancrage,
-   * habillage et calque : les régler séparément laisserait passer des états
-   * que Writer n'a pas, comme un cadre « devant le texte » resté dans le fil.
+   * A single entry point for the three OpenOffice attributes (anchor, wrapping and layer): setting them separately would let through states that Writer does not have, such as an "in front of the text" frame
+   * left in the flow.
    */
   setImageWrap: (blockId: string, offset: number, mode: ImageWrapMode) => void;
   /**
-   * Déplace un cadre flottant. Les coordonnées sont en points, dans le repère
-   * de son ancre (`SwFmtHoriOrient` / `SwFmtVertOrient`).
+   * Moves a floating frame. The coordinates are in points, in the frame of reference of its anchor (`SwFmtHoriOrient` / `SwFmtVertOrient`).
    *
-   * Bascule l'alignement horizontal en `from-left` : un cadre qu'on déplace à
-   * la main a par définition quitté son alignement, et le laisser aligné
-   * ramènerait l'image à sa place au prochain calcul.
+   * Switches the horizontal alignment to `from-left`: a frame moved by hand has by definition left its alignment, and leaving it aligned would bring the image back to its place at the next computation.
    */
   setImagePosition: (blockId: string, offset: number, xPt: number, yPt: number) => void;
   /**
-   * Ré-ancre une image au paragraphe où on vient de la lâcher.
+   * Re-anchors an image to the paragraph where it has just been dropped.
    *
-   * C'est ce que fait `SwFEShell::SetAnchor` à la fin d'un glissement : un
-   * cadre reste tributaire de son ancre — c'est elle qui décide de sa page —,
-   * donc le déposer trois pages plus bas doit changer l'ancre, pas seulement
-   * l'ordonnée. Sans cela, une image traînée loin de son paragraphe restait
-   * dessinée sur la page de celui-ci, et sortait de la feuille.
+   * This is what `SwFEShell::SetAnchor` does at the end of a drag: a frame stays dependent on its anchor (the anchor decides its page), so dropping it three pages down must change the anchor, not only the y
+   * coordinate. Without it, an image dragged far from its paragraph stayed drawn on that paragraph's page, and left the sheet.
    *
-   * Une image « comme caractère » n'a pas de coordonnées : pour elle,
-   * `target` est simplement sa nouvelle place dans le texte, et `xPt`/`yPt`
-   * sont ignorés.
+   * An image "as a character" has no coordinates: for it, `target` is simply its new place in the text, and `xPt`/`yPt` are ignored.
    */
   moveImageTo: (
     blockId: string,
@@ -291,11 +274,11 @@ export interface WriterCommands {
   insertMath: (latex: string, display: boolean) => void;
   updateMath: (blockId: string, latex: string, display: boolean) => void;
   deleteMath: (blockId: string) => void;
-  /** Insère une image au curseur, ancrée « comme caractère » (`SwFlyCntFrm`). */
+  /** Inserts an image at the cursor, anchored "as a character" (`SwFlyCntFrm`). */
   insertImage: (attributes: ImageAttributes) => void;
-  /** Réécrit source, dimensions et texte alternatif du cadre situé à cet offset. */
+  /** Rewrites the source, dimensions and alternative text of the frame at this offset. */
   updateImage: (blockId: string, offset: number, attributes: ImageAttributes) => void;
-  /** Retaille une image depuis l'éditeur, sans passer par la fenêtre. */
+  /** Resizes an image from the editor, without going through the window. */
   resizeImage: (blockId: string, offset: number, widthPt: number, heightPt: number) => void;
   deleteImage: (blockId: string, offset: number) => void;
   goToBlock: (blockId: string) => void;
@@ -303,22 +286,15 @@ export interface WriterCommands {
   redo: () => void;
   selectAll: () => void;
   /**
-   * Modifie les **réglages** du document — mobilier de page, marges, titre —
-   * sans toucher au curseur ni au focus.
+   * Modifies the document's **settings** (page furniture, margins, title) without touching the cursor or the focus.
    *
-   * Ces réglages n'appartiennent pas au fil du texte : on les change depuis un
-   * dialogue ou la règle, pendant que le curseur reste où il était. D'où les
-   * deux différences avec une commande d'édition ordinaire : rien n'est rendu
-   * à la zone de saisie invisible — le champ du dialogue garderait sinon le
-   * focus une frappe sur deux —, et la session n'est pas refondée, sous peine
-   * d'effacer l'historique du document à chaque caractère tapé dans un en-tête.
+   * These settings do not belong to the text flow: they are changed from a dialog or the ruler, while the cursor stays where it was. Hence the two differences from an ordinary editing command: nothing is handed
+   * back to the invisible input area (the dialog's field would otherwise lose focus every other keystroke), and the session is not rebuilt, otherwise the document's history would be wiped at every character typed in
+   * a header.
    *
-   * La transformation est appliquée **dans** le réducteur, jamais sur le
-   * document du rendu : deux frappes groupées par React partiraient sinon du
-   * même état, et la seconde écraserait la première.
+   * The transformation is applied **inside** the reducer, never on the render's document: two keystrokes batched by React would otherwise start from the same state, and the second would overwrite the first.
    *
-   * `settingId` regroupe les transactions d'un même geste continu en une seule
-   * entrée d'annulation (cf. `settingsGroup`).
+   * `settingId` groups the transactions of one continuous gesture into a single undo entry (see `settingsGroup`).
    */
   updateDocument: (
     label: string,
@@ -326,17 +302,13 @@ export interface WriterCommands {
     settingId?: string,
   ) => void;
   /**
-   * Applique une modification venue du réseau.
+   * Applies a change that came from the network.
    *
-   * Distincte d'`updateDocument`, qui inscrit son changement à l'historique :
-   * une modification venue du réseau n'y entre **pas**. Défaire son propre
-   * travail après qu'un collègue a écrit ailleurs doit rester possible, et
-   * `Ctrl+Z` ne doit jamais annuler la frappe de quelqu'un d'autre.
+   * Distinct from `updateDocument`, which records its change in the history: a change from the network does **not** go in. Undoing your own work after a colleague has written elsewhere must stay possible, and
+   * `Ctrl+Z` must never undo someone else's typing.
    *
-   * `remapSelection` reporte le curseur : quelqu'un qui écrit **avant** le
-   * point décale le texte sous celui-ci, et le laisser où il était ferait taper
-   * à côté. Le simple recadrage aux bornes du document ne suffit pas — l'offset
-   * y reste valide, seulement il ne désigne plus le même caractère.
+   * `remapSelection` carries the cursor over: someone writing **before** the point shifts the text under it, and leaving it where it was would make you type in the wrong place. Simply clamping to the document's
+   * bounds is not enough: the offset stays valid there, it just no longer designates the same character.
    */
   applyRemote: (
     transform: (doc: WriterDocumentState) => WriterDocumentState,
@@ -350,27 +322,21 @@ export interface WriterController {
   measurer: TextMeasurer;
   activeFormat: RunFormatting;
   currentParagraph: ParagraphNode | null;
-  /** Tableau sous le curseur, ou `null` — sert à griser les commandes inertes. */
+  /** Table under the cursor, or `null`: used to grey out the inert commands. */
   table: ReturnType<typeof tableContext>;
   caret: CaretGeometry | null;
   rects: SelectionRect[];
   /**
-   * Rectangles de sélection **regroupés par page**, et seulement pour les pages
-   * qui en portent.
+   * Selection rectangles **grouped by page**, and only for the pages that carry some.
    *
-   * Le regroupement est fait ici, une fois, et non par un `filter` dans la
-   * boucle de rendu des feuilles : un filtre y rendrait un tableau neuf à
-   * chaque rendu pour chaque page, ce qui suffit à faire échouer la
-   * comparaison superficielle de `React.memo(A4Page)` — le document entier
-   * serait alors reconcilié à chaque frappe.
+   * The grouping is done here, once, and not by a `filter` in the sheet render loop: a filter there would return a new array on every render for every page, which is enough to make the shallow comparison of
+   * `React.memo(A4Page)` fail, so the whole document would be reconciled on every keystroke.
    *
-   * Une table creuse et non un tableau indexé par page : une sélection ne
-   * touche qu'une page ou deux, et un tableau dense recréerait un `[]` neuf
-   * pour toutes les autres à chaque frappe — le même défaut, déplacé. Les
-   * pages absentes retombent sur la constante gelée `AUCUN_RECT`.
+   * A sparse table and not an array indexed by page: a selection only touches one page or two, and a dense array would recreate a new `[]` for all the others on every keystroke, the same defect moved elsewhere.
+   * The absent pages fall back on the frozen constant `AUCUN_RECT`.
    */
   rectsByPage: ReadonlyMap<number, readonly SelectionRect[]>;
-  /** Paragraphes posés, regroupés par page — ce que chaque feuille doit peindre. */
+  /** Placed paragraphs, grouped by page: what each sheet has to paint. */
   placementsByPage: { blockId: string; placed: PlacedParagraph }[][];
   isFocused: boolean;
   canUndo: boolean;
@@ -398,11 +364,10 @@ export interface WriterController {
 }
 
 /**
- * Cadre image couvrant cet offset.
+ * Image frame covering this offset.
  *
- * On accepte l'offset du **début** du cadre comme celui de sa fin : le rendu
- * annonce le premier, alors qu'un curseur posé juste après l'image donne le
- * second. Exiger l'un des deux ferait échouer la retouche une fois sur deux.
+ * We accept the offset of the **start** of the frame as well as that of its end: the rendering announces the first, whereas a cursor placed right after the image gives the second. Requiring either one would make
+ * the retouch fail one time in two.
  */
 function imageRunAt(
   runs: readonly TextRun[],
@@ -419,7 +384,7 @@ function imageRunAt(
   return null;
 }
 
-/** Attributs du premier cadre image du paragraphe, pour ouvrir l'atelier. */
+/** Attributes of the first image frame of the paragraph, to open the workshop. */
 export function imageDraftAt(
   runs: readonly TextRun[],
   offset: number,
@@ -431,11 +396,9 @@ export function imageDraftAt(
 }
 
 /**
- * Ramène une sélection dans les limites d'un document qui a changé sous elle.
+ * Brings a selection back within the limits of a document that has changed under it.
  *
- * Un participant distant peut supprimer le paragraphe où l'on a le curseur, ou
- * en raccourcir un. Sans ce recadrage, le moteur chercherait un bloc qui
- * n'existe plus et le curseur disparaîtrait de l'écran.
+ * A remote participant can delete the paragraph where our cursor is, or shorten one. Without this reframing, the engine would look for a block that no longer exists and the cursor would vanish from the screen.
  */
 function clampSelection(
   doc: WriterDocumentState,
@@ -446,8 +409,7 @@ function clampSelection(
   const recadrer = (position: DocumentPosition): DocumentPosition => {
     const node = index.byId.get(position.blockId);
     if (!node) {
-      // Bloc disparu : on se replie sur le premier paragraphe, seul point
-      // toujours valide d'un document non vide.
+      // Block gone: we fall back on the first paragraph, the only point that is always valid in a non-empty document.
       const premier = index.order[0];
       return premier ? { blockId: premier, offset: 0 } : position;
     }
@@ -466,29 +428,23 @@ function clampSelection(
   };
 }
 
-const INDENT_STEP_PT = 36; // 1,27 cm — le pas de tabulation par défaut de Writer.
-/** Bornes de corps de police, reprises de l'application Write. */
+const INDENT_STEP_PT = 36; // 1.27 cm: Writer's default tab step.
+/** Font size bounds, taken from the Write application. */
 export const MIN_FONT_SIZE_PT = 6;
 export const MAX_FONT_SIZE_PT = 96;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 
 /**
- * Actions que le contrôleur déclenche mais n'implémente pas : elles ouvrent une
- * fenêtre du navigateur ou un dialogue, ce qui n'est pas de son ressort.
+ * Actions that the controller triggers but does not implement: they open a browser window or a dialog, which is not its job.
  */
 /**
- * Une transaction a-t-elle le droit d'aboutir ?
+ * Is a transaction allowed to go through?
  *
- * Règle unique de la lecture seule, isolée ici pour être vérifiable sans monter
- * un éditeur : ce qui laisse le document identique — déplacer le curseur,
- * sélectionner pour copier — passe toujours ; ce qui le change ne passe que si
- * l'on a le droit d'écrire.
+ * The single read-only rule, isolated here to be verifiable without mounting an editor: what leaves the document identical (moving the cursor, selecting to copy) always passes; what changes it only passes if
+ * writing is allowed.
  *
- * La décision se prend sur le document lui-même, jamais sur le nom de la
- * commande : une commande oubliée dans une liste serait une modification qui
- * passe, et personne ne s'en apercevrait avant que le serveur ne la rejette en
- * silence.
+ * The decision is taken on the document itself, never on the name of the command: a command forgotten in a list would be a change that gets through, and nobody would notice before the server silently rejected it.
  */
 export function transactionAutorisee(
   lectureSeule: boolean,
@@ -500,12 +456,10 @@ export function transactionAutorisee(
 
 export interface WriterHooks {
   /**
-   * Interdit toute modification du document, sans rien figer d'autre.
+   * Forbids any change to the document, without freezing anything else.
    *
-   * Le badge « Lecture seule » et le refus de publication ne suffisaient pas :
-   * la frappe restait acceptée localement, s'affichait, puis disparaissait à la
-   * fermeture — on croyait avoir écrit. Refuser à la source est la seule façon
-   * de ne pas mentir à celui qui tape.
+   * The "Read only" badge and the refusal to publish were not enough: typing was still accepted locally, displayed, and then disappeared on close, so people believed they had written. Refusing at the source is the
+   * only way not to lie to the person typing.
    */
   readOnly?: boolean;
   onPrint?: () => void;
@@ -515,7 +469,7 @@ export interface WriterHooks {
   onEditMath?: (blockId: string, latex: string, display: boolean) => void;
   onOpenImage?: () => void;
   onEditImage?: (blockId: string, offset: number) => void;
-  /** Clic droit dans le document, en coordonnées de fenêtre. */
+  /** Right click in the document, in window coordinates. */
   onOpenContextMenu?: (x: number, y: number) => void;
 }
 
@@ -532,36 +486,30 @@ export function useWriterInput(
   const [fontsTick, setFontsTick] = useState(0);
 
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // Lu au moment de l'appel, pas à la création de `run` : la permission peut
-  // changer en cours de séance (révocation d'un partage).
+  // Read at the time of the call, not when `run` is created: the permission may change during a session (a share being revoked).
   const lectureSeuleRef = useRef(false);
   lectureSeuleRef.current = hooks.readOnly === true;
   const composing = useRef(false);
   const dragging = useRef(false);
 
-  // Les actions de l'application vivent dans une réf : le gestionnaire clavier
-  // peut ainsi les appeler sans les compter parmi ses dépendances, et rester
-  // stable d'un rendu à l'autre.
+  // The application actions live in a ref: the keyboard handler can thus call them without counting them among its dependencies, and stay stable from one render to the next.
   const hooksRef = useRef(hooks);
   hooksRef.current = hooks;
 
   /**
-   * Le tableau où se trouve le curseur, ou `null`.
+   * The table where the cursor is, or `null`.
    *
-   * Passe par une référence parce que `onKeyDown` ne dépend volontairement pas
-   * de l'état : y ajouter `session` le reconstruirait à chaque frappe. La
-   * référence est réassignée au rendu, donc toujours à jour quand la touche
-   * arrive.
+   * It goes through a reference because `onKeyDown` deliberately does not depend on the state: adding `session` to it would rebuild it on every keystroke. The reference is reassigned at render time, so it is
+   * always up to date when the key arrives.
    */
   const tableRef = useRef<ReturnType<typeof tableContext>>(null);
 
-  /** Session courante, pour les gestionnaires qui doivent la lire hors réducteur. */
+  /** Current session, for the handlers that must read it outside a reducer. */
   const sessionRef = useRef<EditorSession | null>(null);
 
   /**
-   * Les métriques d'une fonte changent au moment où elle finit de charger. Un
-   * document mis en page avant ce moment serait mesuré avec la fonte de repli,
-   * puis peint avec la vraie : les lignes ne tomberaient pas au bon endroit.
+   * The metrics of a font change at the moment it finishes loading. A document laid out before that moment would be measured with the fallback font, then painted with the real one: the lines would not fall in the
+   * right place.
    */
   useEffect(() => {
     if (typeof document === 'undefined' || !document.fonts) return;
@@ -576,7 +524,7 @@ export function useWriterInput(
 
   const layout = useMemo(
     () => paginateDocument(session.state.doc, { measurer }),
-    // `fontsTick` force un recalcul quand les fontes deviennent disponibles.
+    // `fontsTick` forces a recomputation when the fonts become available.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [session.state.doc, measurer, fontsTick],
   );
@@ -586,13 +534,10 @@ export function useWriterInput(
   }, []);
 
   /**
-   * Applique une commande et l'inscrit à l'historique.
+   * Applies a command and records it in the history.
    *
-   * La transformation **et** la clé de regroupement sont calculées à
-   * l'intérieur du réducteur, à partir de l'état courant. Les calculer dehors
-   * les figerait à l'état du rendu : deux frappes arrivées dans le même lot —
-   * ce que React 18 regroupe systématiquement — partiraient alors du même
-   * point de départ, et la seconde écraserait la première.
+   * The transformation **and** the grouping key are computed inside the reducer, from the current state. Computing them outside would freeze them at the render's state: two keystrokes arriving in the same batch
+   * (which React 18 always batches) would then start from the same starting point, and the second would overwrite the first.
    */
   const run = useCallback(
     (
@@ -611,7 +556,7 @@ export function useWriterInput(
     [],
   );
 
-  /** Déplace le curseur sans rien inscrire à l'historique. */
+  /** Moves the cursor without recording anything in the history. */
   const move = useCallback((transform: (state: EditorState) => EditorState) => {
     setSession((current) => ({ ...current, state: transform(current.state) }));
   }, []);
@@ -655,16 +600,15 @@ export function useWriterInput(
   );
 
   /**
-   * Tableau sous le curseur — `null` en dehors de toute grille.
+   * Table under the cursor: `null` outside any grid.
    *
-   * Exposé pour que les menus grisent ce qui ne s'applique pas : une commande
-   * de tableau proposée hors tableau est un clic sans effet, donc un bug d'UX.
+   * Exposed so that menus grey out what does not apply: a table command offered outside a table is a click with no effect, so a UX bug.
    */
   const table = useMemo(() => tableContext(session.state), [session.state]);
   tableRef.current = table;
   sessionRef.current = session;
 
-  /* ------------------------------------------------------------- commandes */
+  /* ------------------------------------------------------------- commands */
 
   const patchRun = useCallback(
     (label: string, patch: RunFormatPatch) => {
@@ -749,15 +693,12 @@ export function useWriterInput(
       indent: (direction) => {
         setSession((current) => {
           const node = currentNode(current.state);
-          // Dans une liste, `Tab` change le **niveau** : c'est ce que fait
-          // Writer, et l'usager n'a pas à savoir dans lequel des deux cas il
-          // se trouve pour obtenir le décalage qu'il attend.
+          // In a list, `Tab` changes the **level**: this is what Writer does, and the user does not have to know which of the two cases they are in to get the shift they expect.
           if (node?.listKind !== undefined) {
             return commit(current, 'Niveau de liste', changeListLevel(current.state, direction));
           }
           const now = node?.indentLeftPt ?? 0;
-          // Le retrait ne descend pas sous zéro : un retrait négatif ferait
-          // sortir le texte de la zone imprimable.
+          // The indent does not go below zero: a negative indent would push the text out of the printable area.
           const next = Math.max(0, now + direction * INDENT_STEP_PT);
           return commit(
             current,
@@ -795,13 +736,10 @@ export function useWriterInput(
 
       setLink: (url) => {
         const normalisee = normalizeUrl(url);
-        // Adresse refusée : on le dit au dialogue plutôt que de ne rien faire.
-        // Un bouton qui ferme sa fenêtre sans rien poser laisse croire au succès.
+        // Address refused: we tell the dialog rather than do nothing. A button that closes its window without placing anything makes people believe it succeeded.
         if (!normalisee) return false;
         setSession((current) => {
-          // Sans sélection, il n'y a rien à marquer : on insère l'adresse comme
-          // texte, puis on la marque. Armer un lien sur un curseur replié ne
-          // laisserait rien de visible, et l'usager attend de voir son lien.
+          // Without a selection there is nothing to mark: we insert the address as text, then mark it. Arming a link on a collapsed cursor would leave nothing visible, and the user expects to see their link.
           if (current.state.selection.isCollapsed) {
             const avant = current.state.selection.focus;
             const avecTexte = insertText(current.state, url.trim() || normalisee);
@@ -832,16 +770,13 @@ export function useWriterInput(
           const table = createTable(rows, cols);
           let doc = insertBlockAfter(current.state.doc, position.blockId, table);
 
-          // Un paragraphe suit toujours le tableau : sans lui, un tableau en
-          // fin de document piège le curseur, qui n'a plus aucune position où
-          // aller ensuite.
+          // A paragraph always follows the table: without it, a table at the end of the document traps the cursor, which no longer has any position to go to next.
           const at = doc.blocks.findIndex((block) => block.id === table.id);
           if (at >= 0 && at === doc.blocks.length - 1) {
             doc = { ...doc, blocks: [...doc.blocks, createParagraph('')] };
           }
 
-          // Le curseur va dans la première cellule : c'est là qu'on écrit après
-          // avoir posé un tableau.
+          // The cursor goes into the first cell: that is where you write after placing a table.
           const premiere = table.rows[0]?.cells[0]?.blocks[0];
           const next: EditorState = {
             doc,
@@ -896,9 +831,7 @@ export function useWriterInput(
       },
 
       resizeColumnBoundary: (tableId, boundaryIndex, deltaPercent) => {
-        // Le glissement d'une poignée produit des dizaines d'événements : ils
-        // se regroupent en **une** entrée d'historique, sinon dix `Ctrl+Z`
-        // seraient nécessaires pour défaire un seul geste.
+        // Dragging a handle produces dozens of events: they are grouped into **one** history entry, otherwise ten `Ctrl+Z` would be needed to undo a single gesture.
         run(
           'Largeur de colonne',
           (state) => resizeTableColumnBoundary(state, tableId, boundaryIndex, deltaPercent),
@@ -922,8 +855,7 @@ export function useWriterInput(
       },
 
       goToAdjacentCell: (forward) => {
-        // `Tab` en fin de tableau ajoute une ligne : la transaction doit donc
-        // passer par `run`, pas par `move`, pour être annulable.
+        // `Tab` at the end of a table adds a row: the transaction must therefore go through `run`, not `move`, to be undoable.
         run('Cellule suivante', (state) => moveToAdjacentCell(state, forward));
         focus();
       },
@@ -1000,8 +932,7 @@ export function useWriterInput(
       },
 
       setReviewMode: (author) => {
-        // Le basculement ne touche pas au document : il ne passe donc pas par
-        // `run`, qui empilerait une transaction annulable sans rien à annuler.
+        // The toggle does not touch the document: it therefore does not go through `run`, which would stack an undoable transaction with nothing to undo.
         setSession((current) => ({
           ...current,
           state: setReviewMode(current.state, author ? { author } : null),
@@ -1048,12 +979,10 @@ export function useWriterInput(
           const formatting = { ...precedent };
 
           /*
-           * Les clés d'habillage sont **effacées** avant d'être réécrites.
+           * The wrapping keys are **erased** before being written again.
            *
-           * `wrapFormatting` ne rend que ce que le nouveau mode demande, jamais
-           * les absences : sans cet effacement, revenir dans le fil laisserait
-           * derrière lui un `imageInFront` ou un décalage, qui ressortirait au
-           * basculement suivant comme si on ne l'avait jamais quitté.
+           * `wrapFormatting` only returns what the new mode asks for, never the absences: without this erasure, going back into the flow would leave behind an `imageInFront` or an offset, which would come back out at the next
+           * switch as if we had never left.
            */
           for (const key of WRAP_FORMAT_KEYS) delete formatting[key];
 
@@ -1061,9 +990,7 @@ export function useWriterInput(
             Object.assign(
               formatting,
               wrapFormatting(mode, precedent.imageAnchor ?? 'to-para'),
-              // Un cadre déjà flottant garde sa position ; un cadre qui quitte
-              // le fil du texte s'en voit donner une, faute de quoi il tomberait
-              // au coin haut-gauche du paragraphe, en travers de sa première ligne.
+              // A frame that is already floating keeps its position; a frame that leaves the text flow is given one, otherwise it would fall at the top-left corner of the paragraph, across its first line.
               imageWrapMode(precedent) === 'inline'
                 ? defaultFlyPlacement(mode)
                 : {
@@ -1103,9 +1030,7 @@ export function useWriterInput(
           const runs = [...node.runs];
           runs[cible.index] = {
             ...cadre,
-            // Un cadre qu'on déplace à la main a quitté son alignement : le
-            // laisser aligné le ramènerait à sa place au prochain calcul, et le
-            // geste n'aurait servi à rien.
+            // A frame moved by hand has left its alignment: leaving it aligned would bring it back to its place at the next computation, and the gesture would have been for nothing.
             imageHoriOrient: 'from-left',
             imageXPt: xPt,
             imageYPt: yPt,
@@ -1114,7 +1039,7 @@ export function useWriterInput(
           const doc = replaceParagraph(current.state.doc, blockId, { ...node, runs });
           const next = { ...current.state, doc };
           if (!transactionAutorisee(lectureSeuleRef.current, current.state, next)) return current;
-          // Tout le glissement forme une seule entrée d'historique.
+          // The whole drag forms one history entry.
           return commit(current, 'Déplacer l’image', next, dragGroup(`fly:${blockId}:${offset}`));
         });
       },
@@ -1243,7 +1168,7 @@ export function useWriterInput(
           const node = index.byId.get(blockId);
           if (!node) return current;
 
-          // Si le paragraphe ne contient QUE la formule (bloc display ou paragraphe dédié) :
+          // If the paragraph contains ONLY the formula (display block or dedicated paragraph):
           if (node.paragraph.runs.length <= 1 || node.paragraph.runs.every((r) => r.mathLatex || !r.text)) {
             const prevId = previousParagraphId(current.state.doc, blockId);
             const doc = removeBlocks(current.state.doc, new Set([blockId]));
@@ -1256,7 +1181,7 @@ export function useWriterInput(
             });
           }
 
-          // Si la formule est en ligne au milieu d'autre texte : retirer seulement le run mathématique
+          // If the formula is inline in the middle of other text: remove only the math run
           let targetOffset = 0;
           let offsetAccum = 0;
           const remainingRuns: TextRun[] = [];
@@ -1290,8 +1215,7 @@ export function useWriterInput(
         setSession((current) => {
           if (!attributes.src) return current;
 
-          // Une image remplace la sélection, comme le ferait une frappe : c'est
-          // ce que fait `SwFEShell::Insert` quand un `SwPaM` n'est pas replié.
+          // An image replaces the selection, as a keystroke would: this is what `SwFEShell::Insert` does when a `SwPaM` is not collapsed.
           const base = current.state.selection.isCollapsed
             ? current.state
             : deleteSelection(current.state);
@@ -1315,8 +1239,7 @@ export function useWriterInput(
               blockId: position.blockId,
               offset: position.offset + cadre.text.length,
             }),
-            // Sans cette remise à zéro, la frappe suivante hériterait du cadre et
-            // produirait une seconde image.
+            // Without this reset, the next keystroke would inherit the frame and produce a second image.
             pendingFormat: null,
           });
         });
@@ -1331,9 +1254,7 @@ export function useWriterInput(
           const cible = imageRunAt(node.paragraph.runs, offset);
           if (!cible) return current;
 
-          // Le cadre est **reconstruit** plutôt que corrigé clé par clé : un
-          // rognage retiré doit voir ses quatre valeurs disparaître, et une
-          // fusion de l'ancien formatage les laisserait en place.
+          // The frame is **rebuilt** rather than corrected key by key: a removed crop must see its four values disappear, and a merge of the old formatting would leave them in place.
           const runs = [...node.paragraph.runs];
           const conserve = runFormatting(runs[cible.index]!);
           for (const cle of [
@@ -1348,9 +1269,7 @@ export function useWriterInput(
             'imageCaptionManual',
             'imageMarginPt',
             'imageCaptionGapPt',
-            // L'habillage suit la même règle : revenir dans le fil du texte
-            // doit faire disparaître la géométrie flottante, et une fusion de
-            // l'ancien formatage la laisserait en place.
+            // The wrapping follows the same rule: going back into the text flow must make the floating geometry disappear, and a merge of the old formatting would leave it in place.
             ...WRAP_FORMAT_KEYS,
           ] as const) {
             delete conserve[cle];
@@ -1384,11 +1303,9 @@ export function useWriterInput(
       },
 
       /**
-       * Retaille une image en place.
+       * Resizes an image in place.
        *
-       * Ne touche **que** les deux dimensions : tout le reste du formatage est
-       * conservé tel quel. Reconstruire le run comme le fait `updateImage`
-       * effacerait la légende et le rognage à chaque mouvement de souris.
+       * Touches **only** the two dimensions: all the rest of the formatting is kept as it is. Rebuilding the run as `updateImage` does would erase the caption and the crop on every mouse movement.
        */
       resizeImage: (blockId, offset, widthPt, heightPt) => {
         setSession((current) => {
@@ -1411,7 +1328,7 @@ export function useWriterInput(
           });
           const next = { ...current.state, doc };
           if (!transactionAutorisee(lectureSeuleRef.current, current.state, next)) return current;
-          // Tout le glissement forme une seule entrée d'historique.
+          // The whole drag forms one history entry.
           return commit(current, 'Redimensionner l’image', next, dragGroup(`img:${blockId}:${offset}`));
         });
       },
@@ -1464,8 +1381,7 @@ export function useWriterInput(
           (state) => {
             const doc = transform(state.doc);
             if (doc === state.doc) return state;
-            // Le curseur reste où il est ; le recadrage ne sert qu'au cas où le
-            // réglage aurait raccourci le document sous lui.
+            // The cursor stays where it is; the reframing is only for the case where the setting would have shortened the document under it.
             return { ...state, doc, selection: clampSelection(doc, state.selection) };
           },
           settingId ? () => settingsGroup(settingId) : undefined,
@@ -1480,10 +1396,7 @@ export function useWriterInput(
             ? remapSelection(current.state.selection)
             : current.state.selection;
 
-          // La modification distante n'entre **pas** dans l'historique local :
-          // `Ctrl+Z` défait ce que l'on a fait soi-même, jamais ce qu'un autre
-          // a écrit. C'est aussi pourquoi on écrit `state` directement plutôt
-          // que de passer par `commit`.
+          // The remote change does **not** go into the local history: `Ctrl+Z` undoes what we did ourselves, never what somebody else wrote. This is also why we write `state` directly rather than going through `commit`.
           return {
             ...current,
             state: {
@@ -1498,7 +1411,7 @@ export function useWriterInput(
     [run, move, patchRun, patchParagraph, focus],
   );
 
-  /* --------------------------------------------------------------- clavier */
+  /* --------------------------------------------------------------- keyboard */
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -1507,11 +1420,9 @@ export function useWriterInput(
       const granularity = meta || altKey ? 'word' : 'character';
 
       /**
-       * Pose le curseur, en étendant la sélection si `Maj` est enfoncée.
+       * Places the cursor, extending the selection if `Shift` is held.
        *
-       * La cible est une **fonction** de l'état courant, pas une valeur : c'est
-       * ce qui rend correct un appui maintenu sur une flèche, dont les
-       * répétitions peuvent arriver dans le même lot de rendu.
+       * The target is a **function** of the current state, not a value: that is what makes a held arrow key correct, whose repeats can arrive in the same render batch.
        */
       const goTo = (
         target: (current: EditorState) => { position: DocumentPosition; desiredX: number | null } | null,
@@ -1554,9 +1465,7 @@ export function useWriterInput(
 
       if (meta && shiftKey) {
         switch (key.toLowerCase()) {
-          // `Ctrl+Maj+Z` refait, comme `Ctrl+Y` : les deux conventions
-          // coexistent selon les plateformes, refuser l'une surprendrait la
-          // moitié des usagers.
+          // `Ctrl+Shift+Z` redoes, like `Ctrl+Y`: the two conventions coexist depending on the platform, and refusing either would surprise half of the users.
           case 'z': event.preventDefault(); commands.redo(); return;
           case 'x': event.preventDefault(); commands.toggleStrike(); return;
           case 'e': event.preventDefault(); hooksRef.current.onOpenMath?.(); return;
@@ -1581,9 +1490,7 @@ export function useWriterInput(
           event.preventDefault();
           const direction = key === 'ArrowLeft' ? -1 : 1;
           goTo((current) => {
-            // Une sélection non vide se replie sur le bord vers lequel on va,
-            // plutôt que de faire un pas depuis la tête : c'est le comportement
-            // attendu partout, et il évite de perdre un caractère au passage.
+            // A non-empty selection collapses to the edge we are moving toward, rather than taking a step from the head: it is the behavior expected everywhere, and it avoids losing a character on the way.
             if (!current.selection.isCollapsed && !shiftKey) {
               const { start, end } = normalizeSelection(current.doc, current.selection);
               return { position: direction < 0 ? start : end, desiredX: null };
@@ -1621,9 +1528,7 @@ export function useWriterInput(
         case 'End': {
           event.preventDefault();
           goTo((current) => {
-            // `Ctrl+Origine` / `Ctrl+Fin` visent le document ; sans `Ctrl`, la
-            // ligne **visuelle**, pas le paragraphe : sur un paragraphe replié
-            // en cinq lignes, `Fin` s'arrête au bout de la ligne où l'on est.
+            // `Ctrl+Home` / `Ctrl+End` target the document; without `Ctrl`, the **visual** line, not the paragraph: on a paragraph wrapped into five lines, `End` stops at the end of the line we are on.
             if (meta) {
               const edge = documentEdgeOffset(current.doc, key === 'Home' ? 'start' : 'end');
               return edge ? { position: edge, desiredX: null } : null;
@@ -1673,10 +1578,8 @@ export function useWriterInput(
           return;
         }
 
-        // `Maj+F10` et la touche Menu ouvrent le menu contextuel. Sans elles, les
-        // commandes de tableau ne seraient atteignables qu'à la souris. La zone
-        // de saisie invisible suit le curseur : son rectangle **est** la
-        // position du curseur à l'écran.
+        // `Shift+F10` and the Menu key open the context menu. Without them, the table commands could only be reached with the mouse. The invisible input area follows the cursor: its rectangle **is** the cursor's position on
+        // screen.
         case 'ContextMenu': {
           event.preventDefault();
           const box = inputRef.current?.getBoundingClientRect();
@@ -1693,16 +1596,11 @@ export function useWriterInput(
         }
 
         case 'Tab': {
-          // La tabulation reste dans le document : sortir de l'éditeur au
-          // clavier se fait par `Échap` puis `Tab`, sinon on ne pourrait jamais
-          // en insérer une.
+          // The tab character stays in the document: leaving the editor with the keyboard is done with `Escape` and then `Tab`, otherwise you could never insert one.
           event.preventDefault();
 
-          // Dans un tableau, `Tab` passe de cellule en cellule — convention
-          // partagée par Word, Google Docs et Writer. Elle prime sur les deux
-          // autres usages : c'est le seul moyen de remplir une grille au
-          // clavier, et une tabulation dans une cellule étroite n'a guère de
-          // sens.
+          // In a table, `Tab` moves from cell to cell, a convention shared by Word, Google Docs and Writer. It takes priority over the two other uses: it is the only way to fill a grid with the keyboard, and a tab in a narrow
+          // cell makes little sense.
           if (tableRef.current) {
             commands.goToAdjacentCell(!shiftKey);
             return;
@@ -1712,9 +1610,7 @@ export function useWriterInput(
             commands.indent(-1);
             return;
           }
-          // En tête d'un élément de liste, `Tab` imbrique — ailleurs, il insère
-          // une vraie tabulation. C'est la règle de Writer : le décalage prime
-          // là où il a un sens structurel.
+          // At the start of a list item, `Tab` nests; elsewhere, it inserts a real tab. This is Writer's rule: the indent takes priority where it has a structural meaning.
           setSession((current) => {
             const node = currentNode(current.state);
             if (node?.listKind !== undefined && current.state.selection.focus.offset === 0) {
@@ -1734,31 +1630,24 @@ export function useWriterInput(
           break;
       }
     },
-    // Plus aucune dépendance à l'état : le gestionnaire ne lit que `current`,
-    // fourni par le réducteur. Il reste donc stable d'un rendu à l'autre.
+    // No dependency on the state any more: the handler only reads `current`, supplied by the reducer. It therefore stays stable from one render to the next.
     [layout, measurer, move, run, commands],
   );
 
-  /* ------------------------------------------------------- saisie de texte */
+  /* ------------------------------------------------------- text input */
 
   /**
-   * Saisie de texte, branchée sur l'événement **natif** `beforeinput`.
+   * Text input, wired to the **native** `beforeinput` event.
    *
-   * React expose bien un `onBeforeInput`, mais c'est un émulateur bâti sur
-   * `keypress` et `textInput` : il ne porte pas `inputType`. Or c'est
-   * précisément par `inputType` que les claviers virtuels annoncent leurs
-   * effacements (`deleteContentBackward`), la dictée son insertion et le
-   * navigateur son autocomplétion — autant de cas qui, sans cela, modifieraient
-   * la zone tampon sans jamais atteindre le modèle.
+   * React does expose an `onBeforeInput`, but it is an emulator built on `keypress` and `textInput`: it does not carry `inputType`. Yet it is precisely through `inputType` that virtual keyboards announce their deletions
+   * (`deleteContentBackward`), dictation its insertion and the browser its autocompletion: all cases that, without this, would modify the buffer area without ever reaching the model.
    */
   const handleBeforeInput = useCallback(
     (event: InputEvent) => {
-      // Pendant une composition (méthode de saisie asiatique, dictée), on laisse
-      // le navigateur travailler : le texte n'arrive qu'à la fin.
+      // During a composition (Asian input method, dictation), we let the browser work: the text only arrives at the end.
       if (composing.current) return;
 
-      // Rien de ce que fait le navigateur dans la zone tampon ne doit
-      // subsister : le document est la seule source de vérité.
+      // Nothing the browser does in the buffer area must remain: the document is the only source of truth.
       event.preventDefault();
 
       const data = event.data ?? '';
@@ -1817,9 +1706,7 @@ export function useWriterInput(
           return;
 
         default:
-          // Type inconnu : on a déjà empêché l'effet par défaut, donc rien ne
-          // se produit — ce qui vaut mieux qu'une modification silencieuse de
-          // la zone tampon que le modèle ignorerait.
+          // Unknown type: we have already prevented the default effect, so nothing happens, which is better than a silent change of the buffer area that the model would ignore.
           return;
       }
     },
@@ -1841,8 +1728,7 @@ export function useWriterInput(
     (event: React.CompositionEvent<HTMLTextAreaElement>) => {
       composing.current = false;
       const data = event.data;
-      // La zone tampon est vidée : elle ne sert qu'à recueillir la composition,
-      // le texte vit désormais dans le modèle.
+      // The buffer area is emptied: it only serves to collect the composition, the text now lives in the model.
       if (inputRef.current) inputRef.current.value = '';
       if (!data) return;
       run('Saisie', (state) => insertText(state, data));
@@ -1850,7 +1736,7 @@ export function useWriterInput(
     [run],
   );
 
-  /* --------------------------------------------------------- presse-papiers */
+  /* --------------------------------------------------------- clipboard */
 
   const onCopy = useCallback(
     (event: React.ClipboardEvent) => {
@@ -1886,8 +1772,7 @@ export function useWriterInput(
         run('Coller', (state) => insertFragment(state, fragment));
         return;
       }
-      // Collage venu d'ailleurs : on respecte au moins les fins de ligne, en
-      // les transformant en vrais paragraphes.
+      // Paste from elsewhere: we respect at least the line ends, turning them into real paragraphs.
       const paragraphs = text.replace(/\r\n?/g, '\n').split('\n');
       run('Coller', (state) =>
         insertFragment(state, {
@@ -1901,16 +1786,14 @@ export function useWriterInput(
     [run],
   );
 
-  /* ---------------------------------------------------------------- souris */
+  /* ---------------------------------------------------------------- mouse */
 
-  /** Coordonnées du pointeur dans la zone de contenu d'une page. */
+  /** Pointer coordinates in the content area of a page. */
   const pointToContent = useCallback(
-    // Un `MouseEvent` suffit : la fonction ne lit que `currentTarget` et les
-    // coordonnées de fenêtre, communes à tous les événements de pointage.
+    // A `MouseEvent` is enough: the function only reads `currentTarget` and the window coordinates, which are common to all pointer events.
     (event: React.MouseEvent<HTMLDivElement>): { x: number; y: number } => {
       const rect = event.currentTarget.getBoundingClientRect();
-      // Le rectangle est déjà mis à l'échelle par le zoom : on divise pour
-      // revenir aux coordonnées du modèle, qui ignore le zoom.
+      // The rectangle is already scaled by the zoom: we divide to get back to the model's coordinates, which knows nothing about the zoom.
       const x = (event.clientX - rect.left) / zoom - layout.geometry.contentLeftPx;
       const y = (event.clientY - rect.top) / zoom - layout.geometry.contentTopPx;
       return { x, y };
@@ -1931,7 +1814,7 @@ export function useWriterInput(
       const paragraph = paragraphIndex(session.state.doc).byId.get(position.blockId)?.paragraph;
 
       if (event.detail >= 3 && paragraph) {
-        // Triple clic : le paragraphe entier.
+        // Triple click: the whole paragraph.
         const length = paragraphText(paragraph).length;
         move((state) =>
           setSelection(
@@ -1995,12 +1878,10 @@ export function useWriterInput(
   );
 
   /**
-   * Clic droit : pose le curseur, puis laisse l'appelant ouvrir le menu.
+   * Right click: places the cursor, then lets the caller open the menu.
    *
-   * Le curseur ne bouge **pas** si le clic tombe dans la sélection courante.
-   * C'est la règle de tous les éditeurs, et elle est indispensable ici : sans
-   * elle, un clic droit sur une ligne sélectionnée pour la supprimer replierait
-   * d'abord la sélection, et la commande ne porterait plus sur rien.
+   * The cursor does **not** move if the click falls inside the current selection. It is the rule of all editors, and it is essential here: without it, a right click on a line selected to delete it would first collapse
+   * the selection, and the command would act on nothing.
    */
   const onContextMenu = useCallback(
     (event: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
@@ -2009,8 +1890,7 @@ export function useWriterInput(
 
       const { x, y } = pointToContent(event);
       const position = positionFromPoint(layout, pageIndex, x, y, measurer);
-      // La référence est assignée au rendu : elle est donc déjà posée quand un
-      // événement de pointage peut arriver.
+      // The reference is assigned at render time: it is therefore already set by the time a pointer event can arrive.
       const state = sessionRef.current?.state;
 
       if (position && state) {
@@ -2046,12 +1926,10 @@ export function useWriterInput(
   const onBlurInput = useCallback(() => setFocused(false), []);
 
   /**
-   * Faisceau de gestionnaires, d'identité stable.
+   * Bundle of handlers, with a stable identity.
    *
-   * Chaque gestionnaire est déjà tenu par un `useCallback` ; ce qui manquait,
-   * c'était l'identité de **l'objet** qui les porte. Reconstruit à chaque
-   * rendu, il propageait son instabilité à tout ce qui en dépend — au premier
-   * rang `onPagePointerDown`, transmis aux feuilles.
+   * Each handler is already held by a `useCallback`; what was missing was the identity of the **object** that carries them. Rebuilt on every render, it spread its instability to everything that depends on it, first of
+   * all `onPagePointerDown`, passed down to the sheets.
    */
   const handlers = useMemo(
     () => ({
@@ -2108,14 +1986,14 @@ export function useWriterInput(
   };
 }
 
-/* ------------------------------------------------------------------ outils */
+/* ------------------------------------------------------------------ tools */
 
-/** Paragraphe où se trouve la tête du curseur. */
+/** Paragraph where the cursor's head is. */
 function currentNode(state: EditorState): ParagraphNode | null {
   return paragraphIndex(state.doc).byId.get(state.selection.focus.blockId)?.paragraph ?? null;
 }
 
-/** Caractère qu'un effacement va retirer, pour le regroupement d'annulation. */
+/** Character that a deletion is about to remove, for undo grouping. */
 function removedCharacter(state: EditorState, direction: -1 | 1): string | null {
   if (!state.selection.isCollapsed) return null;
   const position = state.selection.focus;
@@ -2131,7 +2009,7 @@ function removedCharacter(state: EditorState, direction: -1 | 1): string | null 
   return to > from ? text.slice(from, to) : null;
 }
 
-/** Première ou dernière position du document (`Ctrl+Origine` / `Ctrl+Fin`). */
+/** First or last position of the document (`Ctrl+Home` / `Ctrl+End`). */
 function documentEdgeOffset(
   doc: WriterDocumentState,
   edge: 'start' | 'end',

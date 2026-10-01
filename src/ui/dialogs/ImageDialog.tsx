@@ -1,27 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Atelier d'insertion et de retouche d'image.
+ * Workshop to insert and retouch an image.
  *
- * Équivalent du dialogue « Insertion ▸ Image » de Writer
- * (`sw/source/ui/dialog/`, onglets Type, Adaptation du texte et Options de
- * `SwFrmDlg`) : la source, les dimensions, le texte alternatif, la légende et
- * l'intégration au texte — habillage, alignement et calque.
+ * Equivalent of Writer's "Insert ▸ Image" dialog (`sw/source/ui/dialog/`, the Type, Wrap and Options tabs of `SwFrmDlg`): the source, the dimensions, the alternative text, the caption and how
+ * the image fits into the text (wrapping, alignment and layer).
  *
- * Quatre décisions d'ergonomie :
+ * Four ergonomic decisions:
  *
- *  - **le rapport est verrouillé par défaut.** Déformer une image est presque
- *    toujours un accident ; le faire exprès reste possible, en décochant ;
- *  - **les dimensions sont en millimètres**, comme les marges et la règle. Les
- *    points sont l'unité interne du modèle, pas celle du papier ;
- *  - **un fichier local devient une `data:` immédiatement.** Le document reste
- *    complet hors ligne ; c'est le partage, ensuite, qui dépose les octets sur
- *    le serveur et remplace l'adresse ;
- *  - **les réglages de position ne paraissent qu'une fois l'image sortie du
- *    fil du texte.** Writer les grise dans le même cas : une abscisse n'a pas
- *    de sens pour un cadre dont le formateur décide de la place, et la montrer
- *    quand même invite à la régler pour rien.
+ *  - **the aspect ratio is locked by default.** Distorting an image is almost always an accident; doing it on purpose is still possible, by unticking;
+ *  - **dimensions are in millimeters**, like the margins and the ruler. Points are the model's internal unit, not the paper's;
+ *  - **a local file becomes a `data:` URL immediately.** The document stays complete offline; it is sharing, afterwards, that uploads the bytes to the server and replaces the address;
+ *  - **the position settings only appear once the image is out of the text flow.** Writer greys them out in the same case: an x coordinate means nothing for a frame whose place the formatter
+ *    decides, and showing it anyway invites people to set it for nothing.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
@@ -52,57 +44,54 @@ import { DEFAULT_WRAP_MARGIN_PT } from '../../domain/engine/flyLayout';
 import { ImageWrapPicker } from '../components/ImageWrapPicker';
 import { ImageCropper } from './ImageCropper';
 import { probeImageSize, readFileAsDataUrl } from '../../domain/image/raster';
-// Les deux conversions vivaient ici en double, reconstruites autour d'un
-// `72 / 25.4` local. Une définition unique, partagée avec le moteur et l'export.
+// The two conversions used to live here in duplicate, rebuilt around a local `72 / 25.4`. A single definition now, shared with the engine and the export.
 import { mmToPt, ptToMm, pxToPt } from '../../domain/document/units';
 
-/** Arrondi d'affichage : le dixième de millimètre, la précision d'une règle. */
+/** Display rounding: a tenth of a millimeter, the precision of a ruler. */
 function showMm(pt: number): string {
   return (Math.round(ptToMm(pt) * 10) / 10).toString();
 }
 
 export interface ImageDraft {
-  /** Présent en retouche, absent à l'insertion. */
+  /** Present when retouching, absent when inserting. */
   blockId?: string;
-  /** Offset du cadre dans le paragraphe, en retouche. */
+  /** Offset of the frame in the paragraph, when retouching. */
   offset?: number;
   src: string;
   widthPt: number;
   heightPt: number;
   alt: string;
-  /** Rognage déjà appliqué, dans le repère de l'image d'origine. */
+  /** Crop already applied, in the frame of reference of the original image. */
   crop?: ImageCrop;
-  /** Réglages de légende. Absent = pas de légende. */
+  /** Caption settings. Absent = no caption. */
   caption?: ImageCaption;
-  /** Numéro qu'aurait cette figure — pour l'aperçu seul, jamais enregistré. */
+  /** Number this figure would have: for the preview only, never saved. */
   figureNumber?: number;
-  /** Marge autour du cadre, en points. */
+  /** Margin around the frame, in points. */
   marginPt?: number;
-  /** Blanc entre l'image et sa légende, en points. */
+  /** Space between the image and its caption, in points. */
   captionGapPt?: number;
 
-  /* -- Intégration au texte (`SwFmtSurround`, `SwFmtHoriOrient`) ---------- */
+  /* -- Fitting into the text (`SwFmtSurround`, `SwFmtHoriOrient`) ------- */
 
-  /** Comment l'image s'intègre au texte. Absent = dans le fil (`FLY_AS_CHAR`). */
+  /** How the image fits into the text. Absent = in the flow (`FLY_AS_CHAR`). */
   wrap?: ImageWrapMode;
-  /** Alignement horizontal d'un cadre flottant. */
+  /** Horizontal alignment of a floating frame. */
   horiOrient?: FlyHoriOrient;
-  /** Repère de cet alignement : la colonne de texte ou la feuille. */
+  /** Reference of that alignment: the text column or the sheet. */
   horiRelation?: FlyHoriRelation;
-  /** Décalage horizontal, en points — consulté par le seul `from-left`. */
+  /** Horizontal offset, in points: only read for `from-left`. */
   xPt?: number;
-  /** Décalage vertical depuis le haut de l'ancre, en points. */
+  /** Vertical offset from the top of the anchor, in points. */
   yPt?: number;
-  /** Marge d'habillage : le blanc que le texte laisse autour du cadre. */
+  /** Wrapping margin: the white space the text leaves around the frame. */
   wrapMarginPt?: number;
 }
 
 /**
- * Les trois pages du dialogue.
+ * The three pages of the dialog.
  *
- * Le découpage est celui des onglets de `SwFrmDlg` : ce que l'image **est**,
- * où elle **se pose**, ce qu'on **écrit dessous**. Chaque page répond à une
- * question, et l'on sait donc toujours laquelle ouvrir.
+ * The split is that of the tabs of `SwFrmDlg`: what the image **is**, where it **sits**, what is **written under** it. Each page answers one question, so one always knows which one to open.
  */
 const ONGLETS = [
   { id: 'image', label: 'Image' },
@@ -114,7 +103,7 @@ type OngletId = (typeof ONGLETS)[number]['id'];
 
 export interface ImageDialogProps {
   draft: ImageDraft;
-  /** Largeur de la zone imprimable, en points : plafond d'insertion. */
+  /** Width of the printable area, in points: the insertion ceiling. */
   contentWidthPt: number;
   onCancel: () => void;
   onSubmit: (draft: ImageDraft) => void;
@@ -137,8 +126,7 @@ export function ImageDialog({
   const [alt, setAlt] = useState(draft.alt);
 
   /*
-   * Légende. La numérotation automatique est le mode par défaut : c'est celui
-   * qui produit « Figure n°1 : … » sans que l'utilisateur ait rien à régler.
+   * Caption. Automatic numbering is the default mode: it is the one that produces "Figure n°1: ..." without the user having to set anything.
    */
   const [captionText, setCaptionText] = useState(draft.caption?.text ?? '');
   const [captionPosition, setCaptionPosition] = useState<'above' | 'below'>(
@@ -148,26 +136,21 @@ export function ImageDialog({
     draft.caption?.align ?? 'center',
   );
   /*
-   * Une image a-t-elle une légende du tout ?
+   * Does an image have a caption at all?
    *
-   * Cet interrupteur manquait, et son absence se voyait : la numérotation
-   * automatique étant le défaut, toute image passée par cette fenêtre
-   * ressortait légendée « Figure n°1 », sans moyen de le refuser autrement
-   * qu'en devinant qu'il fallait décocher la numérotation **et** vider le
-   * texte. Une image déposée par glisser-lâcher, elle, n'avait pas de légende :
-   * les deux chemins d'insertion ne donnaient donc pas le même résultat.
+   * This switch was missing, and its absence showed: automatic numbering being the default, every image that went through this window came out captioned "Figure n°1", with no way to refuse
+   * it other than guessing that you had to untick the numbering **and** empty the text. An image dropped by drag and drop, on the other hand, had no caption, so the two ways of inserting did not
+   * give the same result.
    *
-   * Le défaut est désormais celui du document ouvert — légende s'il y en avait
-   * une, aucune pour une image neuve — et le choix est explicite.
+   * The default is now that of the document that was opened (a caption if there was one, none for a new image) and the choice is explicit.
    */
   const [captionOn, setCaptionOn] = useState(draft.caption !== undefined);
   const [captionAuto, setCaptionAuto] = useState(draft.caption ? !draft.caption.manual : true);
   const [marginPt, setMarginPt] = useState(draft.marginPt ?? 0);
 
   /*
-   * Intégration au texte. Les quatre réglages de position ne servent qu'aux
-   * modes flottants ; ils restent néanmoins en état, pour qu'un aller-retour
-   * par « Aligner » ne les efface pas sous les doigts de l'utilisateur.
+   * Fitting into the text. The four position settings are only used by the floating modes; they nevertheless stay in state, so that a round trip through "Align" does not wipe them out under the
+   * user's fingers.
    */
   const [wrap, setWrap] = useState<ImageWrapMode>(draft.wrap ?? 'inline');
   const [horiOrient, setHoriOrient] = useState<FlyHoriOrient>(draft.horiOrient ?? 'from-left');
@@ -182,22 +165,19 @@ export function ImageDialog({
   const [chargement, setChargement] = useState(false);
 
   /**
-   * Rognage **déjà appliqué**, dans le repère de l'image d'origine.
+   * Crop **already applied**, in the frame of reference of the original image.
    *
-   * Distinct du cadre en cours de tracé : celui-ci s'exprime dans le repère de
-   * ce que l'aperçu montre, donc de l'image déjà rognée. Les confondre ferait
-   * couper au second geste bien plus que ce qui a été désigné.
+   * Distinct from the frame being drawn: that one is expressed in the frame of reference of what the preview shows, so of the image that is already cropped. Mixing them would make the second
+   * gesture cut far more than what was designated.
    */
   const [cropApplique, setCropApplique] = useState<ImageCrop>(draft.crop ?? NO_CROP);
-  /** Cadre en cours de tracé ; `null` hors du mode rognage. */
+  /** Frame being drawn; `null` outside crop mode. */
   const [cadreEnCours, setCadreEnCours] = useState<ImageCrop | null>(null);
 
   /**
-   * Rapport de référence.
+   * Reference ratio.
    *
-   * Il est figé à la dernière **source** connue, jamais aux dimensions
-   * courantes : sans cela, chaque arrondi d'affichage se reporterait dans le
-   * rapport et l'image dériverait à force de retouches.
+   * It is frozen at the last known **source**, never at the current dimensions: without that, every display rounding would carry over into the ratio and the image would drift after enough retouching.
    */
   const ratioRef = useRef({ widthPt: draft.widthPt, heightPt: draft.heightPt });
   const fichierRef = useRef<HTMLInputElement | null>(null);
@@ -219,8 +199,7 @@ export function ImageDialog({
         setSrc(nouvelleSource);
         setWidthPt(ajustee.widthPt);
         setHeightPt(ajustee.heightPt);
-        // Le rognage désigne une région de **cette** image : changer d'image le
-        // laisserait pointer une région qui n'existe plus.
+        // The crop designates a region of **this** image: changing the image would leave it pointing at a region that no longer exists.
         setCropApplique(NO_CROP);
         setCadreEnCours(null);
       } catch (error) {
@@ -232,9 +211,8 @@ export function ImageDialog({
     [contentWidthPt],
   );
 
-  // En retouche, on relit la taille naturelle pour connaître le rapport d'origine :
-  // le cadre a pu être déformé, et « rétablir les proportions » doit repartir de
-  // l'image, pas de ce que valait le cadre.
+  // When retouching, we read the natural size again to know the original ratio: the frame may have been distorted, and "restore the proportions" must start again from the image, not from what the frame
+  // was worth.
   useEffect(() => {
     if (!draft.src) return;
     let annule = false;
@@ -247,7 +225,7 @@ export function ImageDialog({
         };
       })
       .catch(() => {
-        /* rapport laissé à celui du cadre : mieux que rien */
+        /* ratio left at that of the frame: better than nothing */
       });
     return () => {
       annule = true;
@@ -296,23 +274,19 @@ export function ImageDialog({
     setHeightPt(heightForWidth(contentWidthPt, ratioRef.current));
   };
 
-  /* ------------------------------------------------------------- rognage */
+  /* ------------------------------------------------------------- cropping */
 
   const entrerDansLeRognage = (): void => {
     if (!src) return;
-    // On repart d'un cadre plein : il désigne l'intégralité de ce qui est
-    // **actuellement visible**, ce que l'aperçu montre déjà.
+    // We start again from a full frame: it designates all of what is **currently visible**, which the preview already shows.
     setCadreEnCours(NO_CROP);
   };
 
   /**
-   * Valide le cadre tracé.
+   * Validates the drawn frame.
    *
-   * Deux choses en même temps : le rognage se compose avec celui déjà appliqué,
-   * et le cadre **rétrécit d'autant**. Sans ce second point, la partie conservée
-   * serait étirée pour remplir l'ancienne taille — l'image paraîtrait déformée
-   * alors qu'on n'a fait que couper. C'est le comportement « conserver
-   * l'échelle » de `SvxGrfCropPage`.
+   * Two things at once: the crop composes with the one already applied, and the frame **shrinks by as much**. Without this second point, the kept part would be stretched to fill the old size: the image
+   * would look distorted although we only cut. This is the "keep the scale" behavior of `SvxGrfCropPage`.
    */
   const appliquerLeRognage = (): void => {
     if (!cadreEnCours) return;
@@ -325,7 +299,7 @@ export function ImageDialog({
 
   const annulerLeRognage = (): void => setCadreEnCours(null);
 
-  /** Rétablit l'image entière et rend au cadre la taille correspondante. */
+  /** Restores the whole image and gives the frame the matching size back. */
   const retirerLeRognage = (): void => {
     const reste = visibleFraction(cropApplique);
     setWidthPt(clampSize(widthPt / reste.width));
@@ -335,20 +309,17 @@ export function ImageDialog({
   };
 
   /**
-   * Style de l'aperçu hors mode rognage : le cadre masque ce qui est retranché,
-   * exactement comme le fera la page.
+   * Style of the preview outside crop mode: the frame hides what is cut away, exactly as the page will.
    */
   const apercuRogne = hasCrop(cropApplique)
     ? cropGeometry(cropApplique, 100, 100)
     : null;
 
   /**
-   * Flèches gauche/droite entre les onglets, `Début` et `Fin` aux extrémités.
+   * Left/right arrows between the tabs, `Home` and `End` at the ends.
    *
-   * C'est le motif « tabs » d'ARIA : un seul onglet est atteignable à la
-   * tabulation, les autres se parcourent aux flèches. Sans cela, traverser le
-   * dialogue au clavier demande autant de tabulations qu'il y a d'onglets avant
-   * d'atteindre le premier champ.
+   * It is ARIA's "tabs" pattern: only one tab can be reached with Tab, the others are traversed with the arrows. Without it, crossing the dialog with the keyboard takes as many Tab presses as there are
+   * tabs before reaching the first field.
    */
   const naviguerOnglets = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
     const pas =
@@ -363,8 +334,7 @@ export function ImageDialog({
     event.preventDefault();
     const suivant = ONGLETS[index]!.id;
     setOngletActif(suivant);
-    // Le focus suit la sélection : c'est ce qu'attend un lecteur d'écran, et
-    // sans cela les flèches suivantes repartiraient de l'onglet abandonné.
+    // Focus follows the selection: it is what a screen reader expects, and without it the next arrows would start again from the abandoned tab.
     event.currentTarget.parentElement
       ?.querySelector<HTMLElement>(`#onglet-${suivant}`)
       ?.focus();
@@ -385,14 +355,12 @@ export function ImageDialog({
       marginPt,
       captionGapPt,
       wrap,
-      // Les réglages de position ne quittent la fenêtre qu'avec un mode qui les
-      // consulte : les joindre à « Aligner » écrirait dans le run une géométrie
-      // flottante que rien ne lirait, et qui ressortirait au prochain habillage.
+      // The position settings only leave the window with a mode that reads them: attaching them to "Align" would write into the run a floating geometry that nothing would read, and that would come back out at the
+      // next wrapping.
       ...(wrap === 'inline'
         ? {}
         : { horiOrient, horiRelation, xPt, yPt, wrapMarginPt }),
-      // Légende éteinte, ou vide en mode manuel : on ne la garde pas, plutôt
-      // que de réserver de la hauteur pour rien.
+      // Caption turned off, or empty in manual mode: we do not keep it, rather than reserve height for nothing.
       ...(captionOn && (captionAuto || captionText.trim().length > 0)
         ? {
             caption: {
@@ -411,12 +379,10 @@ export function ImageDialog({
       title={isEdit ? "Modifier l'image" : 'Insérer une image'}
       onClose={onCancel}
       /*
-       * Plus large qu'auparavant, et souple.
+       * Wider than before, and flexible.
        *
-       * À 700 px, les cinq modes d'habillage et les trois champs de position ne
-       * tenaient pas : le contenu se coupait à droite et il fallait un ascenseur
-       * horizontal pour atteindre « Devant le texte ». La fenêtre se ramène
-       * d'elle-même à ce que l'écran offre, et devient plein écran sur mobile.
+       * At 700 px, the five wrapping modes and the three position fields did not fit: the content was cut off on the right and a horizontal scrollbar was needed to reach "In front of the text". The window now
+       * scales itself down to what the screen offers, and becomes full screen on mobile.
        */
       width={960}
       footer={
@@ -499,15 +465,12 @@ export function ImageDialog({
             ) : (
               <div
                 className={src ? 'image-dialog__apercu image-dialog__apercu--cliquable' : 'image-dialog__apercu'}
-                // Double-clic sur l'aperçu : c'est le geste de Writer, et celui
-                // qu'attend l'usager d'un tableur ou d'un logiciel de photo.
+                // Double click on the preview: it is Writer's gesture, and the one a user expects from a spreadsheet or a photo editor.
                 onDoubleClick={entrerDansLeRognage}
                 title={src ? 'Double-cliquer pour rogner l’image' : undefined}
               >
                 {src ? (
-                  // Le cadre montre l'image telle qu'elle sera sur la page :
-                  // rognée. Montrer l'original ici obligerait à imaginer le
-                  // résultat au lieu de le voir.
+                  // The frame shows the image as it will be on the page: cropped. Showing the original here would force people to imagine the result instead of seeing it.
                   <span className="image-dialog__cadre">
                     <img
                       src={src}
@@ -567,20 +530,7 @@ export function ImageDialog({
             )}
           </div>
 
-          {/*
-            Trois onglets, comme les pages de `SwFrmDlg` (Type, Adaptation du
-            texte, Options).
-
-            Le formulaire compte une vingtaine de réglages. Tous à plat, ils se
-            valaient : rien ne disait ce qui touchait à l'image, à sa place ou à
-            sa légende, et l'œil devait relire chaque libellé pour retrouver
-            celui qu'il cherchait. Trois pages de six champs se parcourent d'un
-            coup d'œil.
-
-            L'aperçu, lui, ne bouge pas : il est le sujet de toutes les pages,
-            et le voir changer pendant qu'on règle est la moitié de l'intérêt
-            d'un dialogue.
-          */}
+          {/* Three tabs, like the pages of `SwFrmDlg` (Type, Wrap, Options).  The form has about twenty settings. All laid out flat, they were worth the same: nothing said what concerned the image, its place or its caption, and the eye had to reread each label to find the one it was looking for. Three pages of six fields can be taken in at a glance.  The preview, for its part, does not move: it is the subject of all the pages, and seeing it change while you adjust is half the point of a dialog. */}
           <div className="image-dialog__panneaux">
             <div className="image-dialog__onglets" role="tablist" aria-label="Réglages de l’image">
               {ONGLETS.map((onglet) => (
@@ -591,8 +541,7 @@ export function ImageDialog({
                   id={`onglet-${onglet.id}`}
                   aria-selected={onglet.id === ongletActif}
                   aria-controls={`panneau-${onglet.id}`}
-                  // Un seul onglet est atteignable à la tabulation : les autres
-                  // se parcourent aux flèches, motif « tabs » d'ARIA.
+                  // Only one tab can be reached with Tab: the others are traversed with the arrows, ARIA's "tabs" pattern.
                   tabIndex={onglet.id === ongletActif ? 0 : -1}
                   className={
                     onglet.id === ongletActif
@@ -658,11 +607,7 @@ export function ImageDialog({
                     }
                   />
                 </label>
-                {/*
-                  Le blanc avant la légende a rejoint le panneau « Titre /
-                  légende » : il n'a de sens qu'avec une légende, et le laisser
-                  ici obligeait à régler à deux endroits une même chose.
-                */}
+                {/* The gap before the caption has joined the "Title / caption" panel: it only means something with a caption, and leaving it here forced people to set one thing in two places. */}
                 <label className="image-dialog__ratio">
                   <input
                     type="checkbox"
@@ -700,7 +645,7 @@ export function ImageDialog({
 
               {ongletActif === 'position' && (
                 <>
-              {/* -- Intégration au texte (`SwFmtSurround`) -------------------- */}
+              {/* -- Fitting into the text (`SwFmtSurround`) ------------------- */}
               <fieldset className="image-dialog__wrap">
                 <legend className="field__label">Intégration au texte</legend>
 
@@ -710,11 +655,7 @@ export function ImageDialog({
                   {IMAGE_WRAP_MODES.find((entry) => entry.mode === wrap)?.hint}
                 </p>
 
-                {/*
-                  Position et marge d'habillage n'ont de sens qu'une fois l'image
-                  sortie du fil. On les retire au lieu de les griser : un réglage
-                  inerte occupe la même place et se lit comme une panne.
-                */}
+                {/* Position and wrapping margin only mean something once the image is out of the flow. We remove them instead of greying them out: an inert setting takes the same room and reads like a malfunction. */}
                 {wrap !== 'inline' && (
                   <>
                     <div className="image-dialog__row">
@@ -748,11 +689,7 @@ export function ImageDialog({
                     </div>
 
                     <div className="image-dialog__row">
-                      {/*
-                        L'abscisse ne paraît qu'en position libre : c'est le seul
-                        mode qui la consulte (`HoriOrientation::NONE`), et la
-                        laisser visible ailleurs ferait croire qu'on l'y règle.
-                      */}
+                      {/* The x coordinate only appears in free position: it is the only mode that reads it (`HoriOrientation::NONE`), and leaving it visible elsewhere would suggest it can be set there. */}
                       {horiOrient === 'from-left' && (
                         <label className="field">
                           <span className="field__label">Décalage horizontal (mm)</span>
@@ -775,10 +712,7 @@ export function ImageDialog({
                         />
                       </label>
 
-                      {/*
-                        La marge d'habillage n'écarte le texte que s'il y a un
-                        texte à écarter : « derrière » et « devant » le traversent.
-                      */}
+                      {/* The wrapping margin only pushes the text away if there is text to push: "behind" and "in front of" go through it. */}
                       {(wrap === 'wrap' || wrap === 'break') && (
                         <label className="field">
                           <span className="field__label">Écart au texte (mm)</span>
@@ -808,7 +742,7 @@ export function ImageDialog({
 
               {ongletActif === 'legende' && (
                 <>
-              {/* -- Légende -------------------------------------------------- */}
+              {/* -- Caption -------------------------------------------------- */}
               <fieldset className="image-dialog__legend">
                 <legend className="field__label">Titre / légende</legend>
 
@@ -828,11 +762,7 @@ export function ImageDialog({
                   </span>
                 </label>
 
-                {/*
-                  Le reste du panneau disparaît quand la légende est éteinte, au
-                  lieu d'être grisé : cinq réglages inertes occupent la même place
-                  et se lisent comme une panne.
-                */}
+                {/* The rest of the panel disappears when the caption is turned off, instead of being greyed out: five inert settings take the same room and read like a malfunction. */}
                 {captionOn && (
                   <>
                     <input
@@ -860,11 +790,7 @@ export function ImageDialog({
                       </span>
                     </label>
 
-                    {/*
-                      Aperçu du rendu exact, numéro compris : c'est la seule façon
-                      de rendre le choix « automatique / manuel » évident sans
-                      fermer la fenêtre pour en constater l'effet.
-                    */}
+                    {/* Preview of the exact rendering, number included: it is the only way to make the "automatic / manual" choice obvious without closing the window to see its effect. */}
                     <p className="image-dialog__preview" aria-live="polite">
                       <span className="image-dialog__preview-label">Aperçu</span>
                       <span

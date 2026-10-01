@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
@@ -19,26 +19,25 @@ export function Button({ variant = 'secondary', children, ...rest }: ButtonProps
 }
 
 interface ToggleButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-pressed'> {
-  /** Ref externe : permet d'ancrer un panneau flottant sur ce bouton. */
+  /** External ref: lets a floating panel be anchored on this button. */
   buttonRef?: React.MutableRefObject<HTMLButtonElement | null>;
   /**
-   * État **contextuel** : le bouton porte sur l'élément où se trouve le curseur
-   * (tableau, image…). Visuellement identique à un bouton actif, mais sans
-   * `aria-pressed` — ce bouton n'est pas une bascule, il ouvre un panneau. Le
-   * changement de contexte est déjà porté par le libellé, qui change lui aussi.
+   * **Contextual** state: the button applies to the element where the cursor is (table, image...). Visually identical to an active
+   * button, but without `aria-pressed`: this button is not a toggle, it opens a panel. The change of context is already carried by
+   * the label, which changes too.
    */
   active?: boolean;
-  /** Libellé accessible ; obligatoire car le bouton n'affiche qu'une icône. */
+  /** Accessible label; mandatory because the button only shows an icon. */
   label: string;
-  /** Raccourci affiché dans l'info-bulle : un raccourci non découvrable n'existe pas. */
+  /** Shortcut shown in the tooltip: a shortcut that cannot be discovered does not exist. */
   shortcut?: string;
   pressed: boolean;
   children: ReactNode;
 }
 
 /**
- * Bouton bascule du ruban. `aria-pressed` porte l'état : la couleur seule ne DOIT
- * jamais être le véhicule d'une information (directive UX §2.1).
+ * Toggle button of the ribbon. `aria-pressed` carries the state: color alone MUST never be the vehicle of information (UX
+ * directive §2.1).
  */
 export function ToggleButton({
   label,

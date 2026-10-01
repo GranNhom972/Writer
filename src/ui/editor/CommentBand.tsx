@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Gouttière de commentaires. Transposition de `SwPostItMgr` et
- * `SwAnnotationWin` (`sw/source/ui/docvw/PostItMgr.cxx`, `AnnotationWin.cxx`).
+ * Comment gutter. (OpenOffice: `SwPostItMgr` and `SwAnnotationWin`, `sw/source/ui/docvw/PostItMgr.cxx`, `AnnotationWin.cxx`.)
  *
- * Writer pose les bulles dans une bande **hors de la feuille**, à droite, et
- * non dans la marge de la page : une bulle dans la marge s'imprimerait, alors
- * qu'un commentaire est un objet de relecture. C'est le choix repris ici — la
- * bande est un frère de la pile de pages, et la feuille `@media print` la fait
- * disparaître sans toucher à la géométrie du document.
+ * Writer puts the bubbles in a band **outside the sheet**, on the right, and not in the page margin: a bubble in the margin would be printed, whereas a comment is a review object. That choice is kept here: the band is a
+ * sibling of the page stack, and the `@media print` stylesheet makes it disappear without touching the geometry of the document.
  *
- * `SwPostItMgr::LayoutPostIts` empile les bulles dans l'ordre du **texte** et
- * les décale vers le bas quand deux ancres sont trop proches pour que leurs
- * bulles tiennent côte à côte. On reprend cette règle : sans elle, deux
- * commentaires sur la même ligne se superposeraient.
+ * `SwPostItMgr::LayoutPostIts` stacks the bubbles in **text** order and shifts them down when two anchors are too close for their bubbles to fit side by side. We keep that rule: without it, two comments on the same
+ * line would overlap.
  */
 
 import { useCallback, useLayoutEffect, useRef, useState, type JSX } from 'react';
@@ -26,46 +20,40 @@ import { commentThreads, type CommentThread } from '../../domain/document/commen
 import type { WriterDocumentState } from '../../domain/document/types';
 import type { DocumentLayout } from '../../domain/engine/paginate';
 
-/** Écart minimal entre deux bulles, en pixels (`SwPostItMgr::GetSpaceBetween`). */
+/** Minimum gap between two bubbles, in pixels (`SwPostItMgr::GetSpaceBetween`). */
 const BUBBLE_GAP_PX = 12;
 
 /**
- * Hauteur de repli, pour la première passe d'empilement.
+ * Fallback height, for the first stacking pass.
  *
- * Elle ne sert qu'avant la mesure : une bulle qui porte des réponses ou une
- * citation dépasse largement cette valeur — 284 px relevés pour deux réponses —
- * et empiler tout le monde sur 92 px faisait recouvrir la précédente par la
- * suivante. La hauteur réelle est relevée après le rendu (cf. `useLayoutEffect`
- * dans `CommentBand`), et c'est elle qui décide de l'empilement définitif.
+ * It is only used before measuring: a bubble that carries replies or a quotation goes well beyond this value (284 px measured for two replies), and stacking everybody on 92 px made each bubble cover the previous one.
+ * The real height is read after rendering (see `useLayoutEffect` in `CommentBand`), and it is what decides the final stacking.
  */
 const COLLAPSED_HEIGHT_PX = 92;
 
 /**
- * Largeur de la bande, en pixels.
+ * Width of the band, in pixels.
  *
- * Exportée parce que la surface doit réserver cette largeur **avant** de
- * mettre la pile à l'échelle : la boîte du zoom se dimensionne sur la largeur
- * du contenu, et une seconde valeur écrite en dur ailleurs finirait par
- * diverger de celle-ci.
+ * Exported because the surface must reserve this width **before** scaling the stack: the zoom box sizes itself on the content's width, and a second value hard-coded elsewhere would end up diverging from this one.
  */
 export const COMMENT_BAND_WIDTH_PX = 260;
 
 export interface CommentBandProps {
   doc: WriterDocumentState;
   layout: DocumentLayout;
-  /** Hauteur d'une page plus l'espace inter-pages — pour situer une ancre. */
+  /** Height of a page plus the space between pages: to locate an anchor. */
   pageStridePx: number;
   contentTopPx: number;
-  /** Auteur des réponses saisies ici. */
+  /** Author of the replies typed here. */
   author: string;
-  /** Fil mis en avant, généralement celui que traverse le curseur. */
+  /** Thread put forward, usually the one the cursor is in. */
   activeThreadId?: string | null;
   readOnly?: boolean;
   onReply: (threadId: string, text: string) => void;
   onResolve: (threadId: string, resolved: boolean) => void;
   onDelete: (threadId: string) => void;
   onEdit: (commentId: string, text: string) => void;
-  /** Amène le curseur sur l'ancre du fil. */
+  /** Brings the cursor to the thread's anchor. */
   onGoToAnchor: (blockId: string) => void;
 }
 
@@ -84,17 +72,12 @@ export function CommentBand({
   onGoToAnchor,
 }: CommentBandProps): JSX.Element | null {
   /*
-   * Hauteurs réelles des bulles, relevées après le rendu.
+   * Real heights of the bubbles, read after rendering.
    *
-   * L'empilement a besoin de la hauteur de la bulle précédente pour poser la
-   * suivante, et cette hauteur n'existe qu'une fois le texte mis en page : elle
-   * dépend du nombre de réponses, de la longueur de la citation et de
-   * l'ouverture du champ de réponse. On peint donc une première fois sur la
-   * hauteur de repli, on mesure, et le second rendu est le bon — c'est ce
-   * qu'obtient `SwPostItMgr::LayoutPostIts` en interrogeant chaque fenêtre.
+   * Stacking needs the height of the previous bubble to place the next one, and that height only exists once the text is laid out: it depends on the number of replies, the length of the quotation and whether the reply
+   * field is open. So we paint a first time on the fallback height, measure, and the second render is the right one, which is what `SwPostItMgr::LayoutPostIts` gets by querying each window.
    *
-   * Les hooks précèdent le retour anticipé : leur ordre doit être le même à
-   * chaque rendu, y compris celui où le document n'a plus aucun commentaire.
+   * The hooks come before the early return: their order must be the same on every render, including the one where the document has no comment left.
    */
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
   const nodes = useRef(new Map<string, HTMLElement>());
@@ -108,8 +91,7 @@ export function CommentBand({
     const mesures = new Map<string, number>();
     nodes.current.forEach((node, id) => mesures.set(id, node.offsetHeight));
 
-    // Comparaison avant d'écrire : un `setState` inconditionnel dans un effet
-    // sans dépendances relancerait le rendu sans fin.
+    // Compare before writing: an unconditional `setState` in an effect with no dependencies would restart the render forever.
     let identique = mesures.size === heights.size;
     if (identique) {
       for (const [id, h] of mesures) {
@@ -154,19 +136,17 @@ export function CommentBand({
 }
 
 /**
- * Empile les bulles sans chevauchement.
+ * Stacks the bubbles without overlap.
  *
- * L'ordonnée idéale d'une bulle est celle de son ancre ; deux ancres proches
- * donneraient deux bulles superposées. On descend donc chaque bulle juste assez
- * pour dégager la précédente — la règle de `SwPostItMgr::LayoutPostIts`, qui
- * garde ainsi l'ordre de lecture intact.
+ * The ideal y coordinate of a bubble is that of its anchor; two close anchors would give two overlapping bubbles. So we move each bubble down just enough to clear the previous one: the rule of
+ * `SwPostItMgr::LayoutPostIts`, which keeps the reading order intact.
  */
 function stackThreads(
   threads: readonly CommentThread[],
   layout: DocumentLayout,
   pageStridePx: number,
   contentTopPx: number,
-  /** Hauteurs relevées au rendu précédent ; la hauteur de repli à défaut. */
+  /** Heights read at the previous render; the fallback height otherwise. */
   heights: ReadonlyMap<string, number>,
 ): { thread: CommentThread; topPx: number }[] {
   const out: { thread: CommentThread; topPx: number }[] = [];
@@ -204,7 +184,7 @@ function CommentBubble({
 }: {
   thread: CommentThread;
   topPx: number;
-  /** Confie l'élément à la bande, qui mesure sa hauteur pour l'empilement. */
+  /** Hands the element to the band, which measures its height for stacking. */
   register: (threadId: string, node: HTMLElement | null) => void;
   author: string;
   isActive: boolean;
@@ -272,7 +252,7 @@ function CommentBubble({
             cursor: 'pointer',
             color: 'var(--fg-secondary)',
             fontStyle: 'italic',
-            // Une seule ligne : la citation situe le fil, elle ne le remplace pas.
+            // A single line: the quotation locates the thread, it does not replace it.
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -336,8 +316,7 @@ function CommentBubble({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              // `Ctrl+Entrée` envoie, `Entrée` seul passe à la ligne : une
-              // réponse de plusieurs phrases doit rester possible.
+              // `Ctrl+Enter` sends, `Enter` alone starts a new line: a reply of several sentences must remain possible.
               if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
                 submitReply();
@@ -375,7 +354,7 @@ const bareButtonStyle = {
   textDecoration: 'underline',
 } as const;
 
-/** Date courte, ou la chaîne brute si elle n'est pas lisible. */
+/** Short date, or the raw string if it is not readable. */
 function formatDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;

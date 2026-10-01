@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useEffect, useRef, useState } from 'react';
 import type { Swatch } from '../color/palette';
@@ -7,25 +7,24 @@ import { parseHex, readableOutline } from '../color/color';
 
 interface ColorGridProps {
   rows: readonly Swatch[][];
-  /** Couleur actuellement appliquée, mise en évidence dans la grille. */
+  /** Color currently applied, highlighted in the grid. */
   value: string | null;
   label: string;
   onSelect: (color: string) => void;
 }
 
 /**
- * Grille de couleurs accessible.
+ * Accessible color grid.
  *
- * 80 pastilles = 80 arrêts de tabulation si chacune est focusable : la barre
- * d'outils deviendrait impraticable au clavier. On applique donc le motif ARIA
- * `grid` avec **tabulation itinérante** : un seul arrêt, les flèches se déplacent
- * de case en case, `Origine`/`Fin` vont aux extrémités de la ligne.
+ * 80 swatches = 80 tab stops if each one is focusable: the toolbar would become unusable with the keyboard. We therefore apply the
+ * ARIA `grid` pattern with **roving tabindex**: a single tab stop, the arrow keys move from cell to cell, `Home`/`End` go to the
+ * ends of the row.
  */
 export function ColorGrid({ rows, value, label, onSelect }: ColorGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState<[number, number]>(() => findValue(rows, value) ?? [0, 0]);
 
-  // Le focus suit la couleur appliquée à l'ouverture : l'usager repart d'où il en est.
+  // Focus follows the applied color when opening: the user resumes where they are.
   useEffect(() => {
     const position = findValue(rows, value);
     if (position) setFocused(position);
@@ -87,10 +86,10 @@ export function ColorGrid({ rows, value, label, onSelect }: ColorGridProps) {
                   className="color-grid__swatch"
                   style={{
                     background: swatch.value,
-                    // Repère de sélection lisible sur clair comme sur foncé.
+                    // Selection marker that is readable on light as well as dark.
                     ...(selected && rgb ? { boxShadow: `inset 0 0 0 2px ${readableOutline(rgb)}` } : {}),
                   }}
-                  // Un seul arrêt de tabulation dans toute la grille.
+                  // A single tab stop in the whole grid.
                   tabIndex={isFocusTarget ? 0 : -1}
                   aria-label={swatch.name}
                   aria-selected={selected}

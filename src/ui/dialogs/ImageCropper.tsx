@@ -1,38 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 //
-// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
-// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
-// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+// Derivative work of Apache OpenOffice 4.1.16 (© The Apache Software Foundation,
+// Apache License 2.0), modified: ported to TypeScript. See the NOTICE and
+// LICENSE-APACHE files.
 
 /**
- * Atelier de rognage.
+ * Crop workshop.
  *
- * Transposition du mode « Rogner » de Writer (`svx/source/dialog/grfpage.cxx`,
- * `SvxGrfCropPage`) : on tire un cadre sur l'image, et ce qui est hors du cadre
- * est retranché.
+ * A transposition of Writer's "Crop" mode (`svx/source/dialog/grfpage.cxx`, `SvxGrfCropPage`): you drag a frame on the image, and what is outside the frame is cut away.
  *
- * Trois choix d'ergonomie :
+ * Three ergonomic choices:
  *
- *  - **l'image entière reste visible**, la partie retranchée seulement
- *    assombrie. Masquer ce qu'on retire empêcherait de juger de ce qu'on garde,
- *    et interdirait d'élargir à nouveau le cadre ;
- *  - **huit poignées plus l'intérieur** : les quatre coins agissent sur deux
- *    bords à la fois, les quatre milieux sur un seul, l'intérieur déplace le
- *    cadre sans changer sa taille ;
- *  - **le clavier fait tout ce que la souris fait.** Les flèches déplacent le
- *    bord ou le cadre sélectionné ; sans elles, le rognage serait la seule
- *    fonction de l'éditeur inaccessible sans pointeur.
+ *  - **the whole image stays visible**, the cut-away part only darkened. Hiding what you remove would make it impossible to judge what you keep, and would forbid widening the
+ *    frame again;
+ *  - **eight handles plus the inside**: the four corners act on two edges at once, the four midpoints on one, and the inside moves the frame without changing its size;
+ *  - **the keyboard does everything the mouse does.** The arrows move the selected edge or the frame; without them, cropping would be the only editor function inaccessible
+ *    without a pointer.
  *
- * Le cadre est exprimé en **fractions de l'image affichée** (0 à 1) et jamais en
- * pixels : le dialogue peut être redimensionné, et l'aperçu changer d'échelle,
- * sans que le rognage bouge.
+ * The frame is expressed in **fractions of the displayed image** (0 to 1) and never in pixels: the dialog can be resized, and the preview change scale, without the crop moving.
  */
 
 import { useCallback, useRef, type CSSProperties, type JSX } from 'react';
 import { MIN_VISIBLE_FRACTION, type ImageCrop } from '../../domain/document/images';
 
-/** Bord ou coin saisi, ou l'intérieur du cadre. */
+/** Edge or corner grabbed, or the inside of the frame. */
 type Poignee =
   | 'haut'
   | 'bas'
@@ -55,13 +47,13 @@ const POIGNEES: readonly { nom: Poignee; libelle: string; style: CSSProperties }
   { nom: 'bas-droite', libelle: 'Coin inférieur droit', style: { left: '100%', top: '100%', cursor: 'nwse-resize' } },
 ];
 
-/** Pas de déplacement au clavier ; `Maj` le décuple. */
+/** Keyboard move step; `Shift` makes it ten times larger. */
 const PAS_CLAVIER = 0.01;
 
 export interface ImageCropperProps {
   src: string;
   alt: string;
-  /** Rognage de départ, exprimé dans le repère de l'image montrée ici. */
+  /** Starting crop, expressed in the frame of reference of the image shown here. */
   value: ImageCrop;
   onChange: (crop: ImageCrop) => void;
 }
@@ -70,20 +62,17 @@ export function ImageCropper({ src, alt, value, onChange }: ImageCropperProps): 
   const cadreRef = useRef<HTMLDivElement | null>(null);
 
   /**
-   * État du geste en cours.
+   * State of the gesture in progress.
    *
-   * Tout est dans une **réf**, jamais dans un état React : le premier
-   * `pointermove` peut suivre le `pointerdown` de moins d'une milliseconde, et
-   * un état pas encore propagé ferait ignorer ce premier déplacement — le cadre
-   * sauterait au second, avec un décalage égal à ce qui a été perdu.
+   * All of it is in a **ref**, never in React state: the first `pointermove` can follow the `pointerdown` by less than a millisecond, and a state that has not propagated yet would make
+   * us ignore that first move: the frame would jump at the second one, with an offset equal to what was lost.
    *
-   * Le rognage de départ et le point de saisie sont figés à l'appui : calculer
-   * chaque déplacement à partir du précédent accumulerait les arrondis, et le
-   * cadre dériverait sous le pointeur au fil d'un long glissement.
+   * The starting crop and the grab point are frozen at press time: computing each move from the previous one would accumulate rounding, and the frame would drift under the pointer over a long
+   * drag.
    */
   const geste = useRef<{ poignee: Poignee; depart: ImageCrop; x: number; y: number } | null>(null);
 
-  /** Position du pointeur en fraction de l'image affichée. */
+  /** Pointer position as a fraction of the displayed image. */
   const fractionDe = useCallback((clientX: number, clientY: number) => {
     const boite = cadreRef.current?.getBoundingClientRect();
     if (!boite || boite.width === 0 || boite.height === 0) return null;
@@ -98,9 +87,7 @@ export function ImageCropper({ src, alt, value, onChange }: ImageCropperProps): 
       let { topPct, rightPct, bottomPct, leftPct } = depart;
 
       if (poignee === 'interieur') {
-        // Déplacement : la taille du cadre ne change pas, donc les deux bords
-        // opposés bougent d'autant. Le décalage est borné pour que le cadre ne
-        // sorte pas de l'image.
+        // Move: the frame's size does not change, so the two opposite edges move by the same amount. The offset is bounded so that the frame does not leave the image.
         const dxBorne = Math.max(-leftPct, Math.min(rightPct, dx));
         const dyBorne = Math.max(-topPct, Math.min(bottomPct, dy));
         leftPct += dxBorne;
@@ -114,9 +101,8 @@ export function ImageCropper({ src, alt, value, onChange }: ImageCropperProps): 
         if (poignee.includes('bas')) bottomPct -= dy;
       }
 
-      // Chaque bord reste dans l'image et laisse passer de quoi voir : on borne
-      // ici plutôt qu'après coup, pour que le bord opposé ne soit pas repoussé
-      // par la normalisation — le cadre se déformerait sous la main.
+      // Each edge stays inside the image and leaves enough to see: we bound here rather than afterwards, so that the opposite edge is not pushed by normalization, which would make the frame
+      // deform under the hand.
       leftPct = Math.max(0, Math.min(1 - rightPct - MIN_VISIBLE_FRACTION, leftPct));
       rightPct = Math.max(0, Math.min(1 - leftPct - MIN_VISIBLE_FRACTION, rightPct));
       topPct = Math.max(0, Math.min(1 - bottomPct - MIN_VISIBLE_FRACTION, topPct));
@@ -135,8 +121,7 @@ export function ImageCropper({ src, alt, value, onChange }: ImageCropperProps): 
       if (!position) return;
 
       geste.current = { poignee, depart: value, x: position.x, y: position.y };
-      // La capture garde le geste vivant quand le pointeur sort du dialogue :
-      // sans elle, tirer trop loin lâcherait le cadre au milieu du mouvement.
+      // Pointer capture keeps the gesture alive when the pointer leaves the dialog: without it, dragging too far would drop the frame in the middle of the move.
       event.currentTarget.setPointerCapture(event.pointerId);
     },
     [fractionDe, value],
@@ -202,8 +187,7 @@ export function ImageCropper({ src, alt, value, onChange }: ImageCropperProps): 
     >
       <img className="cropper__image" src={src} alt={alt || 'Image à rogner'} draggable={false} />
 
-      {/* Zone retranchée : assombrie, mais toujours visible pour qu'on puisse
-          juger de ce qu'on coupe — et revenir en arrière. */}
+      {/* Cut-away area: darkened, but still visible so that you can judge what you are cutting, and go back. */}
       <div className="cropper__ombre" style={cadre} aria-hidden="true" />
 
       <div

@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Espaces de noms OpenDocument (OASIS ODF 1.2, partie 3).
+ * OpenDocument XML namespaces (OASIS ODF 1.2, part 3).
  *
- * Les préfixes (`text:`, `style:`, …) ne sont qu'une convention d'écriture :
- * seul l'URI fait foi. On garde donc les deux — les URI pour lire un document
- * produit par n'importe quel logiciel, les préfixes pour écrire les nôtres,
- * dans la forme qu'attendent Writer et Word.
+ * The prefixes (`text:`, `style:`, ...) are only a writing convention: only the URI counts. We
+ * therefore keep both: the URIs to read a document produced by any software, the prefixes to write ours,
+ * in the form that Writer and Word expect.
  */
 
 export const NS = {
@@ -21,33 +20,30 @@ export const NS = {
   meta: 'urn:oasis:names:tc:opendocument:xmlns:meta:1.0',
   xlink: 'http://www.w3.org/1999/xlink',
   dc: 'http://purl.org/dc/elements/1.1/',
-  // `xml:id` sert d'identifiant de liste à ODF (`text:continue-list` le vise).
+  // `xml:id` serves as the list identifier in ODF (`text:continue-list` points to it).
   xml: 'http://www.w3.org/XML/1998/namespace',
   /**
-   * Extensions LibreOffice.
+   * LibreOffice extensions.
    *
-   * ODF 1.2 ne sait pas dire qu'un fil de commentaires est **clos** : la notion
-   * n'apparaît qu'en 1.3, et LibreOffice l'a d'abord portée ici. On écrit dans
-   * ce même espace de noms plutôt que d'inventer le nôtre — un lecteur tiers
-   * ignore un attribut inconnu, mais LibreOffice, lui, comprend celui-là.
+   * ODF 1.2 has no way to say that a comment thread is **closed**: the notion only appears in 1.3, and
+   * LibreOffice first carried it here. We write in that same namespace rather than invent our own: a
+   * third-party reader ignores an unknown attribute, but LibreOffice understands this one.
    */
   loext: 'urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0',
   manifest: 'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0',
   /**
-   * Réglages de légende propres à cet éditeur.
+   * Caption settings specific to this editor.
    *
-   * ODF sait écrire une légende — un cadre englobant, un `draw:text-box`, un
-   * paragraphe — mais rien n'y distingue « numérotation automatique » de
-   * « texte saisi tel quel », ni ne conserve l'alignement voulu quand le texte
-   * a déjà été composé. On écrit donc la légende **deux fois** : en clair, dans
-   * la structure ODF normale, pour que tout lecteur l'affiche ; et sous forme
-   * d'attributs, ici, pour se relire sans perte. Un lecteur tiers ignore un
-   * attribut d'espace de noms inconnu, comme le veut la spécification.
+   * ODF can write a caption (an enclosing frame, a `draw:text-box`, a paragraph) but nothing in it tells
+   * "automatic numbering" from "text typed as is", nor keeps the intended alignment once the text has been
+   * laid out. So we write the caption **twice**: in plain form, in the normal ODF structure, so that any
+   * reader shows it; and as attributes, here, so we can read it back without loss. A third-party reader
+   * ignores an attribute from an unknown namespace, as the specification requires.
    */
   writer: 'urn:cloudantille:names:writer:caption:1.0',
 } as const;
 
-/** Déclarations à poser sur l'élément racine de tout fichier que l'on écrit. */
+/** Declarations to put on the root element of every file we write. */
 export const NS_DECLARATIONS = [
   `xmlns:office="${NS.office}"`,
   `xmlns:text="${NS.text}"`,
@@ -64,17 +60,16 @@ export const NS_DECLARATIONS = [
 ].join(' ');
 
 /**
- * Nom local d'un élément, préfixe retiré.
+ * Local name of an element, prefix removed.
  *
- * `Element.localName` suffit quand le document a été analysé avec les espaces
- * de noms ; le repli sur `tagName` couvre les fichiers mal formés, fréquents
- * chez les producteurs tiers, plutôt que de les rejeter en bloc.
+ * `Element.localName` is enough when the document was parsed with namespaces; the fallback on `tagName`
+ * covers malformed files, common among third-party producers, rather than rejecting them wholesale.
  */
 export function localName(element: Element): string {
   return element.localName || element.tagName.replace(/^.*:/, '');
 }
 
-/** Attribut recherché par URI, avec repli sur le nom préfixé. */
+/** Attribute looked up by URI, falling back on the prefixed name. */
 export function attr(element: Element, ns: string, name: string): string | null {
   return element.getAttributeNS(ns, name) ?? element.getAttribute(qualified(ns, name));
 }
@@ -88,7 +83,7 @@ function qualified(ns: string, name: string): string {
   return prefix ? `${prefix}:${name}` : name;
 }
 
-/** Échappement XML du texte et des valeurs d'attribut. */
+/** XML escaping of text and attribute values. */
 export function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')

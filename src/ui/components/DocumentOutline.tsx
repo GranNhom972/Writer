@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useMemo, type JSX } from 'react';
 import type { WriterDocumentState } from '../../domain/document/types';
@@ -51,9 +51,8 @@ export function DocumentOutline({
 
   return (
     <aside
-      // La classe n'est pas décorative : c'est par elle que la feuille
-      // `@media print` masque le plan. Sans elle, le panneau s'imprimait et
-      // décalait les pages A4 hors de la feuille.
+      // The class is not decorative: it is what the `@media print` stylesheet uses to hide the outline. Without it, the panel was printed and pushed
+      // the A4 pages off the sheet.
       className="document-outline"
       aria-label="Plan du document"
       style={{

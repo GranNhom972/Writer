@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Ruban de mise en forme.
+ * Formatting ribbon.
  *
- * Porté de l'application Write et rebranché sur le moteur natif. Toute action
- * est une **commande du contrôleur**, la même que celle du raccourci clavier et
- * de l'entrée de menu : une implémentation, trois chemins d'accès.
+ * Taken from the Write application and rewired onto the native engine. Every action is a **controller command**, the same as the keyboard shortcut and the
+ * menu entry: one implementation, three ways in.
  *
- * Les boutons ne conservent aucun état : ils lisent le formatage que le moteur
- * a calculé. Un bouton reste donc d'accord avec le document même après une
- * annulation — cas où un état dupliqué dans le composant se désynchroniserait.
+ * The buttons keep no state: they read the formatting that the engine has computed. A button therefore stays consistent with the document even after an undo,
+ * a case where a state duplicated in the component would get out of sync.
  *
- * ⚠️ Écart assumé à la loi de Hick (directive UX §2) : le ruban expose plus de
- * douze actions pour couvrir le périmètre bureautique. Elles sont regroupées et
- * séparées ; le menu de dépassement reste à faire.
+ * ⚠️ A deliberate departure from Hick's law (UX directive §2): the ribbon exposes more than twelve actions to cover the office-suite scope. They are grouped and
+ * separated; the overflow menu remains to be done.
  */
 
 import { useRef, useState, type JSX, type MutableRefObject } from 'react';
@@ -111,8 +108,7 @@ export function Ribbon({
         >
           <Icon name="redo" />
         </ToggleButton>
-        {/* L'export PDF reste au menu Fichier : une icône de plus dans le ruban
-            ne le rendait pas plus accessible, seulement plus chargé. */}
+        {/* The PDF export stays in the File menu: one more icon in the ribbon would not have made it more accessible, only more crowded. */}
         <ToggleButton label="Imprimer" shortcut={shortcutLabel('Mod-p')} pressed={false} onClick={onPrint}>
           <Icon name="print" />
         </ToggleButton>
@@ -210,8 +206,7 @@ export function Ribbon({
             aria-label="Taille de police"
             onChange={(event) => commands.setFontSize(Number(event.target.value))}
           >
-            {/* La taille courante peut venir d'un import et ne pas figurer dans
-                la liste : on l'y ajoute plutôt que d'afficher une valeur fausse. */}
+            {/* The current size may come from an import and not be in the list: we add it there rather than display a wrong value. */}
             {(FONT_SIZES as readonly number[]).includes(fontSize)
               ? null
               : <option value={String(fontSize)}>{`${fontSize} pt`}</option>}

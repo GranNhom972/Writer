@@ -1,8 +1,9 @@
-/* Coquille applicative. Le chrome ne dépasse pas 25 % de la hauteur du viewport
-   (01_DIRECTIVE_UX_ERGONOMIE.md §3) : le document est le sujet. */
+/*
+ * Application shell. The chrome does not exceed 25 % of the viewport height (01_DIRECTIVE_UX_ERGONOMIE.md §3): the document is the subject.
+ */
 
 .shell {
-  /* Repère de positionnement des panneaux ancrés (barre de recherche). */
+  /* Positioning reference for anchored panels (search bar). */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -16,7 +17,7 @@
   padding: var(--space-6);
 }
 
-/* --- Barre de titre --- */
+/* --- Title bar --- */
 .titlebar {
   display: flex;
   align-items: center;
@@ -76,7 +77,7 @@
   flex-shrink: 0;
 }
 
-/* --- Barre de menus --- */
+/* --- Menu bar --- */
 .menubar {
   display: flex;
   align-items: center;
@@ -127,8 +128,9 @@
   z-index: 50;
   top: calc(100% + 2px);
   inset-inline-start: 0;
-  /* Largeur dictée par le contenu, entre deux bornes : un libellé qui se coupe
-     sur deux lignes casse le balayage vertical du menu. */
+  /*
+   * Width dictated by the content, between two bounds: a label that breaks onto two lines ruins the vertical scanning of the menu.
+   */
   min-width: 240px;
   max-width: min(380px, calc(100vw - var(--space-6)));
   width: max-content;
@@ -140,12 +142,10 @@
 }
 
 /*
- * Hôte du menu contextuel.
+ * Host of the context menu.
  *
- * Il ne fait que positionner : l'apparence vient de `.menu`, partagée avec la
- * barre de menus. Le décalage vertical de `.menu` (`top: 100% + 2px`, calibré
- * pour pendre sous un déclencheur) est annulé ici — un menu contextuel s'ouvre
- * au point cliqué, pas deux pixels sous lui.
+ * It only positions: the appearance comes from `.menu`, shared with the menu bar. The vertical offset of `.menu` (`top: 100% + 2px`, calibrated to hang below a trigger) is cancelled here: a context menu opens at the
+ * clicked point, not two pixels below it.
  */
 .context-menu {
   position: fixed;
@@ -206,7 +206,7 @@
   color: var(--accent);
 }
 
-/* Les raccourcis forment une colonne : l'œil les compare sans les chercher. */
+/* The shortcuts form a column: the eye compares them without having to look for them. */
 .menu__shortcut {
   flex: none;
   margin-inline-start: auto;
@@ -220,7 +220,7 @@
   flex: 1;
 }
 
-/* --- Ruban --- */
+/* --- Ribbon --- */
 .ribbon {
   display: flex;
   align-items: center;
@@ -243,7 +243,7 @@
   background: var(--border-subtle);
 }
 
-/* --- Sélecteurs et champs du ruban --- */
+/* --- Ribbon selectors and fields --- */
 .ribbon__select select {
   min-height: var(--control-height);
   max-width: 18ch;
@@ -272,9 +272,9 @@
 }
 
 .ribbon__size {
-  /* Les flèches natives du champ `number` sont masquées : elles volaient la place
-     du chiffre (il devenait invisible) et offraient des cibles de 8 px, sous le
-     minimum de la Loi de Fitts. Le pas se fait par les boutons A− / A+. */
+  /*
+   * The native arrows of the `number` field are hidden: they took the digit's room (it became invisible) and offered 8 px targets, under the minimum of Fitts's law. Stepping is done with the A− / A+ buttons.
+   */
   appearance: textfield;
   -moz-appearance: textfield;
   width: 6ch;
@@ -288,15 +288,15 @@
   border-radius: var(--radius-sm);
 }
 
-/* --- Icônes --- */
+/* --- Icons --- */
 .icon {
   display: block;
   flex: none;
-  /* L'icône hérite de la couleur du bouton : aucun état ne se règle ici. */
+  /* The icon inherits the button's color: no state is set here. */
   color: inherit;
 }
 
-/* --- Panneaux flottants (couleurs, liens, images) --- */
+/* --- Floating panels (colors, links, images) --- */
 .picker {
   position: relative;
   display: inline-flex;
@@ -367,7 +367,7 @@
   border-radius: var(--radius-sm);
 }
 
-/* --- Palette de couleurs --- */
+/* --- Color palette --- */
 .palette {
   width: 268px;
 }
@@ -397,7 +397,7 @@
   background: var(--bg-sunken);
 }
 
-/* Damier : signifie « aucune couleur » sans dépendre d'un libellé seul. */
+/* Checkerboard: means "no color" without relying on a label alone. */
 .palette__reset-chip {
   width: 16px;
   height: 16px;
@@ -436,8 +436,9 @@
   transform: scale(1.15);
 }
 
-/* Le focus doit rester visible sur une pastille de n'importe quelle couleur :
-   anneau décalé, jamais un simple changement de bordure. */
+/*
+ * Focus must stay visible on a swatch of any color: an offset ring, never a mere change of border.
+ */
 .color-grid__swatch:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -479,7 +480,7 @@
   color: var(--fg-secondary);
 }
 
-/* --- Sélecteur de couleur personnalisée --- */
+/* --- Custom color picker --- */
 .custom-color {
   width: 268px;
   display: flex;
@@ -654,10 +655,10 @@
   gap: var(--space-2);
 }
 
-/* --- Bande d'en-tête et de pied ---------------------------------------------
-   Ces règles servent DEUX fois : la bande dessinée sur la feuille et celle qu'on
-   manipule dans le dialogue. C'est ce partage qui rend l'aperçu fidèle — le jour
-   où il aurait sa propre feuille de style, il commencerait à mentir. */
+/*
+ * --- Header and footer band ---------------------------------------------
+ * These rules serve TWICE: the band drawn on the sheet and the one handled in the dialog. It is this sharing that makes the preview faithful: the day it had its own stylesheet, it would start to lie.
+ */
 
 .bande {
   position: relative;
@@ -666,11 +667,11 @@
   color: var(--fg-secondary);
 }
 
-/* Guide posé HORS de la boîte en mode édition */
+/* Guide placed OUTSIDE the box in edit mode */
 .bande--editable::after {
   content: '';
   position: absolute;
-  /* Le guide suit la colonne de texte, pas le bord du papier. */
+  /* The guide follows the text column, not the edge of the paper. */
   inset-inline: var(--bande-marge-gauche, 0) var(--bande-marge-droite, 0);
   height: 1px;
   background: var(--border-subtle);
@@ -723,7 +724,7 @@
   object-fit: contain;
 }
 
-/* --- Bande en mode édition --- */
+/* --- Band in edit mode --- */
 
 .bande--editable {
   background: var(--bg-page);
@@ -732,8 +733,9 @@
 
 .bande--editable .bande__bloc {
   cursor: grab;
-  /* Le pointeur pilote le déplacement : sans cela, un glissement au doigt
-     ferait défiler le dialogue au lieu de bouger le bloc. */
+  /*
+   * The pointer drives the movement: without this, a finger drag would scroll the dialog instead of moving the block.
+   */
   touch-action: none;
   user-select: none;
 }
@@ -754,7 +756,7 @@
   z-index: 20;
 }
 
-/* Poignées de redimensionnement (Coin = proportionnel, Bord = libre) */
+/* Resize handles (Corner = proportional, Edge = free) */
 .bande__handle {
   position: absolute;
   z-index: 25;
@@ -767,7 +769,7 @@
   touch-action: none;
 }
 
-/* Hitbox invisible élargie pour faciliter la saisie à la souris et au toucher */
+/* Enlarged invisible hitbox to make it easier to grab with a mouse or by touch */
 .bande__handle::before {
   content: '';
   position: absolute;
@@ -787,7 +789,7 @@
 .bande__handle--w { top: calc(50% - 5px); left: -6px; border-radius: 2px; cursor: ew-resize; }
 .bande__handle--e { top: calc(50% - 5px); right: -6px; border-radius: 2px; cursor: ew-resize; }
 
-/* Image complète en arrière-plan en mode rognage */
+/* Full image in the background in crop mode */
 .bande__crop-full-img {
   position: absolute;
   top: 0;
@@ -799,7 +801,7 @@
   pointer-events: none;
 }
 
-/* Masques sombres autour du cadre de rognage */
+/* Dark masks around the crop frame */
 .bande__crop-dimmer {
   position: absolute;
   background: rgba(15, 23, 42, 0.6);
@@ -807,7 +809,7 @@
   z-index: 5;
 }
 
-/* Cadre de rognage interactif (déplaçable et redimensionnable) */
+/* Interactive crop frame (movable and resizable) */
 .bande__crop-box {
   position: absolute;
   box-sizing: border-box;
@@ -818,7 +820,7 @@
   touch-action: none;
 }
 
-/* Grille des tiers (3x3) */
+/* Rule-of-thirds grid (3x3) */
 .bande__crop-grid {
   position: absolute;
   inset: 0;
@@ -830,7 +832,7 @@
   background-position: -1px -1px;
 }
 
-/* Poignées de rognage (Coins en L et barres de bord) */
+/* Crop handles (L-shaped corners and edge bars) */
 .bande__crop-handle {
   position: absolute;
   z-index: 30;
@@ -930,7 +932,7 @@
   cursor: ew-resize;
 }
 
-/* Barre d'outils flottante en mode rognage */
+/* Floating toolbar in crop mode */
 .bande__crop-toolbar {
   position: absolute;
   top: -38px;
@@ -1044,7 +1046,7 @@
   gap: var(--space-2);
 }
 
-/* L'état pressé ne repose pas sur la seule couleur (directive UX §2.1). */
+/* The pressed state does not rely on color alone (UX directive §2.1). */
 .bande-editeur__styles .btn[aria-pressed='true'] {
   color: var(--accent);
   background: var(--accent-subtle);
@@ -1091,7 +1093,7 @@
 }
 
 
-/* --- En-tête et pied de page --- */
+/* --- Header and footer --- */
 .furniture {
   display: flex;
   flex-direction: column;
@@ -1131,8 +1133,9 @@
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-/* État de la bande, lisible sans changer d'onglet : sans elle, on ne sait pas
-   qu'un pied existe tant qu'on n'est pas allé voir. */
+/*
+ * State of the band, readable without changing tabs: without it, you do not know that a footer exists until you have gone to look.
+ */
 .furniture__pastille {
   margin-left: var(--space-2);
   padding: 0 var(--space-2);
@@ -1235,12 +1238,11 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-/* --- Repères d'aimantation ---------------------------------------------------
-   Tracés le temps du geste seulement : un repère permanent devient du décor,
-   un repère qui apparaît AU MOMENT où il agit explique ce qui vient de se
-   passer. Leur couleur distingue la nature du repère, mais ne la porte PAS
-   seule (directive UX §2.1) : le bandeau de lecture la nomme en toutes lettres
-   — « Marge gauche », « Centre de la page ». */
+/*
+ * --- Snapping guides ---------------------------------------------------
+ * Drawn only for the duration of the gesture: a permanent guide becomes decoration, whereas a guide that appears AT THE MOMENT it acts explains what has just happened. Their color distinguishes the kind of guide, but does
+ * NOT carry it alone (UX directive §2.1): the reading banner names it in full words ("Left margin", "Page center").
+ */
 .bande__repere {
   position: absolute;
   z-index: 15;
@@ -1267,11 +1269,11 @@
 .bande__repere--baseline { --repere-couleur: var(--warning); }
 .bande__repere--edge { --repere-couleur: var(--fg-disabled); }
 
-/* --- Atelier d'une bande -----------------------------------------------------
-   Deux colonnes : la feuille à gauche, l'inspecteur à droite. L'inspecteur
-   défile pour lui-même et garde une largeur fixe — quand il apparaissait sous
-   la surface, chaque sélection faisait sauter tout le dialogue et poussait les
-   réglages hors écran. */
+/*
+ * --- Workshop of a band ------------------------------------------------
+ * Two columns: the sheet on the left, the inspector on the right. The inspector scrolls on its own and keeps a fixed width: when it appeared under the surface, every selection made the whole dialog jump and pushed the
+ * settings off screen.
+ */
 .atelier {
   display: flex;
   flex-direction: column;
@@ -1320,8 +1322,9 @@
   min-width: 0;
 }
 
-/* Fenêtre sur la feuille. Elle défile dans les deux sens : au-delà de
-   « Ajuster », le papier est plus grand qu'elle, et c'est le but. */
+/*
+ * Window onto the sheet. It scrolls in both directions: beyond "Fit", the paper is bigger than it is, and that is the point.
+ */
 .atelier__cadre {
   overflow: auto;
   max-height: 46vh;
@@ -1340,8 +1343,9 @@
   margin: 0 auto;
 }
 
-/* Tranche de feuille. Le papier est montré tel quel — bord, ombre portée — et
-   se perd en fondu du côté où la page continue. */
+/*
+ * Slice of sheet. The paper is shown as it is (edge, drop shadow) and fades out on the side where the page continues.
+ */
 .atelier__feuille {
   position: relative;
   background: var(--bg-page);
@@ -1367,8 +1371,9 @@
   background: linear-gradient(to top, transparent, var(--bg-page));
 }
 
-/* Fantôme du corps de texte : ce que la bande laisse au document. Des lignes
-   plutôt qu'un aplat — l'œil y lit « du texte » sans avoir à le déchiffrer. */
+/*
+ * Ghost of the text body: what the band leaves to the document. Lines rather than a flat fill: the eye reads "text" in them without having to decipher it.
+ */
 .atelier__fantome {
   position: absolute;
   opacity: 0.5;
@@ -1390,7 +1395,7 @@
 .atelier__bande--header { top: 0; }
 .atelier__bande--footer { bottom: 0; }
 
-/* --- Règle graduée : les marges sont des poignées --- */
+/* --- Graduated ruler: the margins are handles --- */
 .regle {
   position: relative;
   height: 22px;
@@ -1442,8 +1447,9 @@
   background: var(--accent);
   border: none;
   border-radius: 0;
-  /* Triangle pointant vers la colonne de texte : la forme du curseur de marge
-     des traitements de texte, reconnue sans légende. */
+  /*
+   * Triangle pointing toward the text column: the shape of the margin marker of word processors, recognized without a caption.
+   */
   clip-path: polygon(50% 100%, 0 0, 100% 0);
   cursor: ew-resize;
   touch-action: none;
@@ -1454,9 +1460,10 @@
   outline-offset: 2px;
 }
 
-/* --- Lecture de position -----------------------------------------------------
-   Fixe, sous la surface. Une bulle qui suit le curseur masque justement ce
-   qu'on cherche à placer. */
+/*
+ * --- Position readout ------------------------------------------------
+ * Fixed, under the surface. A bubble that follows the cursor hides precisely what you are trying to place.
+ */
 .atelier__lecture {
   display: flex;
   flex-wrap: wrap;
@@ -1508,7 +1515,7 @@
   color: var(--fg-secondary);
 }
 
-/* --- Gabarits : une bande vide n'est plus une page blanche --- */
+/* --- Templates: an empty band is no longer a blank page --- */
 .atelier__gabarits {
   display: flex;
   flex-wrap: wrap;
@@ -1548,7 +1555,7 @@
   color: var(--fg-secondary);
 }
 
-/* --- Inspecteur --- */
+/* --- Inspector --- */
 .atelier__inspecteur {
   max-height: 62vh;
   overflow: auto;
@@ -1643,7 +1650,7 @@
   flex: 1;
 }
 
-/* --- Sélecteur segmenté --- */
+/* --- Segmented selector --- */
 .segmente {
   display: flex;
   border: 1px solid var(--border-strong);
@@ -1676,8 +1683,9 @@
   background: var(--bg-sunken);
 }
 
-/* L'état choisi ne repose pas sur la seule couleur : graisse et liseré basse
-   l'accompagnent (directive UX §2.1). */
+/*
+ * The chosen state does not rely on color alone: weight and a bottom edge go with it (UX directive §2.1).
+ */
 .segmente__btn[aria-pressed='true'] {
   color: var(--accent);
   font-weight: 600;
@@ -1685,7 +1693,7 @@
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-/* --- Adaptation aux fenêtres étroites --- */
+/* --- Adapting to narrow windows --- */
 @media (max-width: 940px) {
   .atelier__corps {
     grid-template-columns: minmax(0, 1fr);
@@ -1696,7 +1704,7 @@
   }
 }
 
-/* --- Retour de téléchargement (non modal, éphémère) --- */
+/* --- Download feedback (non-modal, ephemeral) --- */
 .toast {
   position: fixed;
   z-index: 70;
@@ -1733,7 +1741,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* Mouvement réduit : l'indicateur reste visible, il cesse simplement de tourner. */
+/* Reduced motion: the indicator stays visible, it simply stops spinning. */
 @media (prefers-reduced-motion: reduce) {
   .toast__spinner {
     animation: none;
@@ -1741,12 +1749,13 @@
   }
 }
 
-/* --- Poignées de manipulation directe du tableau --- */
+/* --- Direct manipulation handles of the table --- */
 .table-overlay {
   position: absolute;
   z-index: 15;
-  /* Le calque laisse passer les clics : seules ses poignées les captent, sinon
-     il empêcherait d'écrire dans les cellules qu'il recouvre. */
+  /*
+   * The layer lets clicks through: only its handles capture them, otherwise it would prevent writing in the cells it covers.
+   */
   pointer-events: none;
 }
 
@@ -1754,8 +1763,9 @@
   pointer-events: auto;
 }
 
-/* Le tableau où se trouve le curseur se signale par un liseré discret : avec
-   plusieurs tableaux dans la page, il faut savoir lequel les poignées visent. */
+/*
+ * The table where the cursor is signals itself with a discreet outline: with several tables on the page, you need to know which one the handles aim at.
+ */
 .table-overlay::before {
   content: '';
   position: absolute;
@@ -1765,8 +1775,9 @@
   pointer-events: none;
 }
 
-/* Barres fines sur les bords : présentes sans être bruyantes, elles s'affirment
-   au survol du tableau. */
+/*
+ * Thin bars on the edges: present without being noisy, they assert themselves when the table is hovered.
+ */
 .table-overlay__grip {
   position: absolute;
   padding: 0;
@@ -1800,7 +1811,7 @@
   background: var(--accent);
 }
 
-/* Points d'insertion : le « + » apparaît à la frontière visée. */
+/* Insertion points: the "+" appears at the targeted boundary. */
 .table-overlay__add {
   position: absolute;
   display: flex;
@@ -1838,7 +1849,7 @@
   background: var(--accent);
 }
 
-/* Poignée d'angle : le geste du tableur, pour dimensionner d'un seul mouvement. */
+/* Corner handle: the spreadsheet gesture, to size in a single movement. */
 .table-overlay__corner {
   position: absolute;
   right: -7px;
@@ -1922,7 +1933,7 @@
   color: var(--danger);
 }
 
-/* --- Grille de choix de taille de tableau --- */
+/* --- Table size picker grid --- */
 .table-picker {
   width: max-content;
 }
@@ -1972,10 +1983,10 @@
   color: var(--fg-secondary);
 }
 
-/* --- Propriétés du tableau --- */
-/* Panneau détaché de son bouton : la position vient de la mesure du bouton, et
-   `inset-inline-start` doit être annulé — sans quoi les deux bords sont fixés et
-   la boîte s'étire sur toute la largeur. */
+/* --- Table properties --- */
+/*
+ * Panel detached from its button: the position comes from measuring the button, and `inset-inline-start` must be cancelled, otherwise both edges are fixed and the box stretches across the whole width.
+ */
 .popover--anchored {
   inset-inline-start: auto;
   max-width: min(320px, calc(100vw - var(--space-6)));
@@ -2095,7 +2106,7 @@
   margin: 0;
 }
 
-/* --- Barre de recherche (non modale, ancrée) --- */
+/* --- Search bar (non-modal, anchored) --- */
 .findbar {
   position: absolute;
   z-index: 40;
@@ -2123,8 +2134,9 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-/* Champ + compteur dans un même bloc : le compteur appartient au champ, il ne
-   doit pas se lire comme un élément indépendant. */
+/*
+ * Field + counter in the same block: the counter belongs to the field, it must not read as an independent element.
+ */
 .findbar__field {
   display: flex;
   align-items: center;
@@ -2182,7 +2194,7 @@
   color: var(--fg-secondary);
 }
 
-/* --- Dialogue modal --- */
+/* --- Modal dialog --- */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2195,29 +2207,24 @@
 }
 
 /*
- * Une fenêtre est une **colonne** : en-tête fixe, corps défilant, actions
- * fixes.
+ * A window is a **column**: fixed header, scrolling body, fixed actions.
  *
- * C'est tout le contraire de faire défiler la fenêtre entière, où le titre
- * s'en va vers le haut et « Appliquer » vers le bas — on croit alors le
- * dialogue sans issue, et l'on cherche le bouton en tâtonnant.
+ * It is the complete opposite of scrolling the whole window, where the title goes off to the top and "Apply" to the bottom: the dialog then seems to have no way out, and you grope for the button.
  */
 .modal {
   display: flex;
   flex-direction: column;
   /*
-   * La largeur demandée, ramenée à la place disponible.
+   * The requested width, brought down to the available room.
    *
-   * Une largeur en dur débordait des écrans étroits : le contenu se coupait à
-   * droite et il fallait un ascenseur **horizontal** pour atteindre la moitié
-   * des champs. `min()` fait de la valeur passée un souhait, pas une exigence.
+   * A hard-coded width overflowed narrow screens: the content was cut off on the right and a **horizontal** scrollbar was needed to reach half of the fields. `min()` makes the passed value a wish, not a requirement.
    */
   width: min(var(--modal-width, 640px), 100%);
   max-height: 100%;
   background: var(--bg-raised);
   border-radius: var(--radius-lg);
   box-shadow: var(--elevation-modal);
-  /* Les angles arrondis coupent le contenu défilant, en-tête compris. */
+  /* The rounded corners clip the scrolling content, header included. */
   overflow: hidden;
 }
 
@@ -2225,10 +2232,10 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* Place de l'ascenseur réservée en permanence. Sans cela, un contenu dont la
-     hauteur dépend de la largeur — la bande d'en-tête, mise à l'échelle de la
-     place disponible — entre en oscillation : l'ascenseur apparaît, la largeur
-     diminue, la bande rétrécit, l'ascenseur disparaît, et ainsi de suite. */
+  /*
+   * Scrollbar room permanently reserved. Without it, content whose height depends on its width (the header band, scaled to the available room) goes into oscillation: the scrollbar appears, the width shrinks, the band
+   * shrinks, the scrollbar disappears, and so on.
+   */
   scrollbar-gutter: stable;
 }
 
@@ -2243,17 +2250,13 @@
 }
 
 /*
- * Sur mobile, une fenêtre **prend l'écran**.
+ * On mobile, a window **takes over the screen**.
  *
- * Une boîte flottante de 700 px sur un téléphone de 390 se réduit à une bande
- * étroite entourée de fond grisé : on perd la place là où elle manque le plus,
- * et le moindre formulaire y devient un tunnel. Les fenêtres plein écran sont
- * la convention de toutes les plateformes tactiles, et elles rendent d'un coup
- * la largeur entière au contenu.
+ * A floating 700 px box on a 390 px phone shrinks to a narrow strip surrounded by dimmed backdrop: you lose room where it is most lacking, and the slightest form becomes a tunnel. Full-screen windows are the convention of
+ * every touch platform, and they give the whole width back to the content at once.
  *
- * `dvh` plutôt que `vh` : sur mobile la barre d'adresse se rétracte au
- * défilement, et `vh` fige la hauteur à celle du navigateur déployé — le bas de
- * la fenêtre, donc les boutons, passait alors sous le bord de l'écran.
+ * `dvh` rather than `vh`: on mobile the address bar retracts when scrolling, and `vh` freezes the height at that of the expanded browser, so the bottom of the window, and therefore the buttons, slipped under the screen
+ * edge.
  */
 @media (max-width: 767px) {
   .modal-backdrop {
@@ -2266,13 +2269,10 @@
     width: 100%;
     max-width: none;
     /*
-     * La hauteur du **fond**, non celle de la fenêtre du navigateur.
+     * The height of the **backdrop**, not that of the browser window.
      *
-     * `100dvh` paraissait plus juste, mais il se mesure sur la fenêtre physique
-     * là où le fond, posé en `fixed; inset: 0`, épouse la zone d'affichage
-     * réelle. Sur une page mise à l'échelle par le navigateur, les deux
-     * diffèrent d'un bon tiers — la fenêtre s'arrêtait alors aux deux tiers de
-     * l'écran, le pied flottant au milieu du vide.
+     * `100dvh` looked more correct, but it is measured on the physical window, whereas the backdrop, set as `fixed; inset: 0`, matches the real display area. On a page scaled by the browser, the two differ by a good third:
+     * the window then stopped two thirds of the way down the screen, the footer floating in the middle of nothing.
      */
     height: 100%;
     max-height: none;
@@ -2282,7 +2282,7 @@
   .modal__header,
   .modal__footer {
     padding: var(--space-4);
-    /* Encoches et barres système des téléphones. */
+    /* Notches and system bars of phones. */
     padding-left: max(var(--space-4), env(safe-area-inset-left));
     padding-right: max(var(--space-4), env(safe-area-inset-right));
   }
@@ -2309,7 +2309,7 @@
   font-weight: 600;
 }
 
-/* --- Éditeur de formules --- */
+/* --- Formula editor --- */
 .math-dialog {
   display: flex;
   flex-direction: column;
@@ -2335,8 +2335,9 @@
   resize: vertical;
 }
 
-/* L'aperçu garde une hauteur minimale : sans elle, le dialogue sautille à chaque
-   passage entre formule valide et message d'erreur. */
+/*
+ * The preview keeps a minimum height: without it, the dialog bounces every time it switches between a valid formula and an error message.
+ */
 .math-dialog__preview {
   display: flex;
   align-items: center;
@@ -2445,7 +2446,7 @@
   border-radius: var(--radius-xs);
 }
 
-/* --- Boutons : cible ≥ 32px souris, ≥ 44px tactile (Loi de Fitts) --- */
+/* --- Buttons: target ≥ 32px mouse, ≥ 44px touch (Fitts's law) --- */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -2484,8 +2485,9 @@
   background: var(--accent-hover);
 }
 
-/* Bouton discret : même géométrie, moins d'appui visuel. Il sert aux barres
-   d'outils, où un cadre par action produit une grille de boîtes illisible. */
+/*
+ * Discreet button: same geometry, less visual weight. It is used in toolbars, where a frame per action produces an unreadable grid of boxes.
+ */
 .btn--ghost {
   background: transparent;
   border-color: transparent;
@@ -2496,7 +2498,7 @@
   border-color: var(--border-subtle);
 }
 
-/* Action destructrice : elle DOIT se voir comme telle avant le clic. */
+/* Destructive action: it MUST look like one before the click. */
 .btn--danger {
   color: var(--danger);
   border-color: var(--danger);
@@ -2515,13 +2517,14 @@
 }
 
 .btn--primary .icon {
-  /* Icône légèrement moins appuyée que le libellé qu'elle accompagne. */
+  /* Icon slightly lighter than the label it goes with. */
   opacity: 0.9;
 }
 
-/* L'état pressé ne repose pas sur la seule couleur : bordure + fond + aria-pressed.
-   `data-active` couvre le cas contextuel (le bouton porte sur l'élément courant),
-   avec le même rendu : pour l'œil, « actif » doit se lire de la même façon. */
+/*
+ * The pressed state does not rely on color alone: border + background + aria-pressed. `data-active` covers the contextual case (the button applies to the current element), with the same rendering: to the eye, "active"
+ * must read the same way.
+ */
 .btn--icon[aria-pressed='true'],
 .btn--icon[data-active='true'] {
   background: var(--accent-subtle);
@@ -2530,11 +2533,9 @@
 }
 
 /*
- * Cibles tactiles (WCAG 2.5.8 « Target Size »).
+ * Touch targets (WCAG 2.5.8 "Target Size").
  *
- * La règle ne couvrait que les boutons. Les champs y échappaient, et une liste
- * déroulante de 19 px de haut se vise mal au doigt : on ouvre le champ voisin
- * une fois sur trois. Elle vaut donc pour tout ce qui se touche.
+ * The rule only covered buttons. Fields escaped it, and a drop-down list 19 px high is hard to aim at with a finger: you open the neighboring field one time in three. It therefore applies to everything that is touched.
  */
 @media (pointer: coarse) {
   .btn,
@@ -2556,13 +2557,13 @@
   }
 }
 
-/* --- Zone document --- */
+/* --- Document area --- */
 .document-area {
   flex: 1;
   overflow: auto;
 }
 
-/* --- Bandeaux --- */
+/* --- Banners --- */
 .banner {
   padding: var(--space-3) var(--space-5);
   font-size: var(--text-md);
@@ -2574,7 +2575,7 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
-/* --- Barre d'état : 24px --- */
+/* --- Status bar: 24px --- */
 .statusbar {
   display: flex;
   align-items: center;
@@ -2609,7 +2610,7 @@
 .statusbar__sync--offline { color: var(--warning); }
 .statusbar__sync--local { color: var(--fg-secondary); }
 
-/* --- Présence --- */
+/* --- Presence --- */
 .presence {
   display: flex;
   align-items: center;
@@ -2634,7 +2635,7 @@
   background: var(--bg-sunken);
 }
 
-/* --- États (vide / erreur / chargement) --- */
+/* --- States (empty / error / loading) --- */
 .state-panel {
   max-width: 560px;
   padding: var(--space-7);
@@ -2716,7 +2717,7 @@
   margin-bottom: var(--space-6);
 }
 
-/* --- Points de rupture (§3) --- */
+/* --- Breakpoints (§3) --- */
 @media (max-width: 767px) {
   .titlebar__id {
     display: none;
@@ -2727,7 +2728,7 @@
 }
 
 
-/* --- Impression : seul le document est imprimé --- */
+/* --- Printing: only the document is printed --- */
 @media print {
   @page {
     size: A4 portrait;
@@ -2808,11 +2809,10 @@
     page-break-inside: avoid !important;
   }
 
-  /* Le saut est posé **avant** chaque page sauf la première, et jamais après
-     la dernière : un `break-after` sur la dernière page fait sortir une
-     feuille blanche de plus. On ne peut pas le rattraper avec `:last-child` —
-     la zone de saisie `.writer-input`, masquée à l'impression mais bien
-     présente dans le DOM, reste le dernier enfant de `.writer-pages`. */
+  /*
+   * The break is set **before** every page except the first, and never after the last one: a `break-after` on the last page makes one more blank sheet come out. It cannot be fixed with `:last-child`: the `.writer-input`
+   * input area, hidden when printing but still present in the DOM, remains the last child of `.writer-pages`.
+   */
   .writer-page + .writer-page {
     break-before: page !important;
     page-break-before: always !important;
@@ -2830,7 +2830,7 @@
 }
 
 
-/* --- Banc d'essai de pagination (page /pagination-test.html) --- */
+/* --- Pagination test bench (page /pagination-test.html) --- */
 .essai {
   padding: var(--space-5);
 }
@@ -2882,13 +2882,13 @@
   margin-top: var(--space-4);
 }
 
-/* Élément fautif : souligné en rouge, visible sans lire le rapport. */
+/* Offending element: underlined in red, visible without reading the report. */
 .essai-faute {
   outline: 2px solid var(--danger);
   background: var(--danger-subtle);
 }
 
-/* ------------------------------------------- pastilles d'en-tête et pied de page */
+/* ------------------------------------------- header and footer badges */
 .page-guide__acces {
   position: absolute;
   right: 16px;
@@ -2935,7 +2935,7 @@
   border-color: #1e429f;
 }
 
-/* ── Atelier d'image ─────────────────────────────────────────────────────── */
+/* ── Image workshop ─────────────────────────────────────────────────────── */
 
 .image-dialog {
   display: flex;
@@ -2979,13 +2979,10 @@
 }
 
 /*
- * Aperçu à gauche, onglets à droite.
+ * Preview on the left, tabs on the right.
  *
- * `minmax(0, …)` et non `minmax(180px, 1fr)` : le minimum d'une piste `1fr`
- * est sa largeur **de contenu**, et c'est par là que le dialogue débordait —
- * les cinq modes d'habillage réclamaient 550 px dans une colonne qui en offrait
- * 450, et le surplus sortait à droite sous un ascenseur horizontal. Avec un
- * minimum nul, ce sont les grilles intérieures qui se replient.
+ * `minmax(0, …)` and not `minmax(180px, 1fr)`: the minimum of a `1fr` track is its **content** width, and that is how the dialog overflowed: the five wrapping modes demanded 550 px in a column that offered 450, and the
+ * surplus came out on the right under a horizontal scrollbar. With a zero minimum, it is the inner grids that fold back.
  */
 .image-dialog__corps {
   display: grid;
@@ -3011,8 +3008,9 @@
   cursor: zoom-in;
 }
 
-/* Le cadre porte le masquage : l'image rognée y est agrandie et décalée, et
-   c'est `overflow: hidden` qui coupe — la même mécanique qu'à la page. */
+/*
+ * The frame carries the masking: the cropped image is enlarged and shifted inside it, and it is `overflow: hidden` that cuts, the same mechanism as on the page.
+ */
 .image-dialog__cadre {
   position: relative;
   display: block;
@@ -3035,8 +3033,9 @@
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
-  /* L'aperçu est le sujet de toutes les pages : il reste en vue pendant qu'on
-     fait défiler les réglages d'un onglet long. */
+  /*
+   * The preview is the subject of all the pages: it stays in view while you scroll the settings of a long tab.
+   */
   position: sticky;
   top: 0;
 }
@@ -3056,24 +3055,24 @@
   line-height: 1.35;
 }
 
-/* ── Atelier de rognage ──────────────────────────────────────────────────── */
+/* ── Crop workshop ──────────────────────────────────────────────────────── */
 
 .cropper {
   position: relative;
   display: inline-block;
   max-width: 100%;
-  /* Le conteneur doit épouser **l'image**, pas la colonne qui l'entoure : le
-     cadre de rognage est positionné en pourcentages de ce bloc, et un bloc plus
-     large que l'image décalerait le cadre de la différence — on tracerait à
-     côté de ce qu'on croit désigner. En colonne flexible, un enfant s'étire par
-     défaut sur toute la largeur ; `align-self` l'en empêche. */
+  /*
+   * The container must hug the **image**, not the column around it: the crop frame is positioned in percentages of this block, and a block wider than the image would shift the frame by the difference, so you would draw
+   * next to what you think you are designating. In a flexible column, a child stretches by default across the full width; `align-self` prevents it.
+   */
   align-self: flex-start;
   width: fit-content;
   line-height: 0;
-  /* Sans ce masquage, l'ombre de très grande étendue de `__ombre` déborderait
-     de l'image et assombrirait tout le dialogue. */
+  /*
+   * Without this masking, the very large shadow of `__ombre` would overflow the image and darken the whole dialog.
+   */
   overflow: hidden;
-  /* Le geste de rognage ne doit pas faire défiler la page sous le doigt. */
+  /* The crop gesture must not scroll the page under the finger. */
   touch-action: none;
   user-select: none;
 }
@@ -3085,15 +3084,12 @@
 }
 
 /**
- * Assombrissement de la partie retranchée.
+ * Darkening of the cut-away part.
  *
- * L'élément épouse la partie **conservée** et projette une ombre de très grande
- * étendue : ce qui est dehors se trouve assombri, ce qui est dedans reste net.
- * Un voile posé par-dessus l'image aurait demandé quatre éléments — un par bord
- * — et autant de calculs de position à tenir d'accord avec le cadre.
+ * The element hugs the **kept** part and casts a shadow of very large extent: what is outside is darkened, what is inside stays sharp. A veil placed over the image would have needed four elements, one per edge, and as many
+ * position computations to keep in agreement with the frame.
  *
- * L'image entière reste visible sous ce voile : on doit pouvoir juger de ce
- * qu'on coupe, et élargir à nouveau le cadre.
+ * The whole image stays visible under this veil: you must be able to judge what you are cutting, and widen the frame again.
  */
 .cropper__ombre {
   position: absolute;
@@ -3107,7 +3103,7 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
 
-/* Grille des tiers : l'aide au cadrage la plus universelle. */
+/* Rule-of-thirds grid: the most universal framing aid. */
 .cropper__cadre::before,
 .cropper__cadre::after {
   content: '';
@@ -3181,8 +3177,9 @@
 
 .image-dialog__dimensions {
   display: grid;
-  /* Minimum nul, comme la grille du corps : sinon les deux champs imposent
-     leur largeur de contenu et poussent le panneau hors de la fenêtre. */
+  /*
+   * Zero minimum, like the body grid: otherwise the two fields impose their content width and push the panel out of the window.
+   */
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
 }
@@ -3204,7 +3201,7 @@
   flex: 1;
 }
 
-/* ── Partage ─────────────────────────────────────────────────────────────── */
+/* ── Sharing ─────────────────────────────────────────────────────────────── */
 
 .share-dialog {
   display: flex;
@@ -3328,7 +3325,7 @@
   color: var(--danger, #b91c1c);
 }
 
-/* ── État de connexion en barre d'état ───────────────────────────────────── */
+/* ── Connection state in the status bar ───────────────────────────────────── */
 
 .writer-status__lien {
   display: inline-flex;
@@ -3337,8 +3334,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* La pastille double le libellé, elle ne le remplace pas : l'état ne doit
-   jamais dépendre de la seule couleur. */
+/*
+ * The dot doubles the label, it does not replace it: the state must never depend on color alone.
+ */
 .writer-status__lien::before {
   content: '';
   width: 7px;
@@ -3384,7 +3382,7 @@
 }
 
 
-/* ------------------------------------------------ légende, atelier d'image */
+/* ------------------------------------------------ caption, image workshop */
 
 .image-dialog__legend {
   display: flex;
@@ -3409,7 +3407,7 @@
   color: var(--fg-secondary);
 }
 
-/* Aperçu : le rendu exact de la légende, numéro compris. */
+/* Preview: the exact rendering of the caption, number included. */
 .image-dialog__preview {
   display: flex;
   gap: var(--space-3);
@@ -3442,18 +3440,16 @@
 }
 
 /*
- * Un champ descend d'une ligne plutôt que de se laisser écraser.
+ * A field drops to the next line rather than let itself be squeezed.
  *
- * `flex: 1` seul laissait trois champs se partager 450 px : le libellé
- * « Mesuré par rapport à » se coupait et la liste déroulante devenait illisible.
- * Sous 9 rem, mieux vaut passer à la ligne suivante.
+ * `flex: 1` alone let three fields share 450 px: the label "Mesuré par rapport à" was cut and the drop-down list became unreadable. Under 9 rem, better to wrap to the next line.
  */
 .image-dialog__row .field {
   flex: 1 1 9rem;
   min-width: 0;
 }
 
-/* -- Intégration d'une image au texte (`SwFmtSurround`) -------------------- */
+/* -- How an image fits into the text (`SwFmtSurround`) -------------------- */
 
 .image-dialog__wrap {
   display: flex;
@@ -3472,11 +3468,9 @@
 }
 
 /*
- * Les cinq modes en une rangée qui se replie.
+ * The five modes in one row that wraps.
  *
- * `1fr` par colonne plutôt qu'une largeur fixe : les libellés n'ont pas la même
- * longueur, et des cases inégales feraient lire une hiérarchie là où les cinq
- * choix sont de même rang.
+ * `1fr` per column rather than a fixed width: the labels do not have the same length, and unequal boxes would make a hierarchy readable where the five choices are of the same rank.
  */
 .wrap-picker__choices {
   display: grid;
@@ -3513,7 +3507,7 @@
   color: var(--accent);
   background: var(--accent-subtle);
   border-color: var(--accent);
-  /* Deux signaux plutôt qu'un : la couleur seule ne suffit pas (WCAG 1.4.1). */
+  /* Two signals rather than one: color alone is not enough (WCAG 1.4.1). */
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -3522,7 +3516,7 @@
   line-height: 1.25;
 }
 
-/* -- Le même choix, en menu (barre de l'image sélectionnée) ---------------- */
+/* -- The same choice, as a menu (toolbar of the selected image) ---------------- */
 
 .wrap-picker {
   position: relative;
@@ -3548,8 +3542,9 @@
   color: var(--fg-primary);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
-  /* Jamais l'interligne du document : la barre vit dans une ligne de texte
-     dont l'interligne vaut la hauteur de l'image. */
+  /*
+   * Never the document's line spacing: the bar lives in a line of text whose line spacing equals the height of the image.
+   */
   line-height: normal;
   text-align: left;
   background: transparent;
@@ -3571,11 +3566,10 @@
   color: var(--accent);
 }
 
-/* -- Onglets du dialogue d'image ------------------------------------------
+/*
+ * -- Tabs of the image dialog ------------------------------------------
  *
- * Trois pages plutôt qu'un formulaire de vingt champs. La barre est une
- * `tablist` ARIA complète : un seul onglet atteignable à la tabulation, les
- * autres aux flèches (cf. `naviguerOnglets`).
+ * Three pages rather than a twenty-field form. The bar is a complete ARIA `tablist`: a single tab reachable with Tab, the others with the arrows (see `naviguerOnglets`).
  */
 
 .image-dialog__panneaux {
@@ -3588,8 +3582,9 @@
 .image-dialog__onglets {
   display: flex;
   gap: var(--space-1);
-  /* Sur écran étroit la barre glisse plutôt que de replier les onglets : trois
-     libellés sur deux lignes se lisent comme deux groupes distincts. */
+  /*
+   * On a narrow screen the bar slides rather than wrap the tabs: three labels on two lines read as two distinct groups.
+   */
   overflow-x: auto;
   scrollbar-width: none;
   border-bottom: 1px solid var(--border-subtle);
@@ -3609,8 +3604,9 @@
   white-space: nowrap;
   background: transparent;
   border: 0;
-  /* Le trait actif est posé en permanence, transparent au repos : sans lui,
-     l'onglet sélectionné grandirait de 2 px et la barre sauterait. */
+  /*
+   * The active line is always set, transparent at rest: without it, the selected tab would grow by 2 px and the bar would jump.
+   */
   border-bottom: 2px solid transparent;
   cursor: pointer;
 }
@@ -3637,16 +3633,15 @@
   min-width: 0;
 }
 
-/* Le panneau reçoit le focus au changement d'onglet ; pas de liseré pour
-   autant, il n'est pas un contrôle. */
+/*
+ * The panel receives the focus when the tab changes; no outline for all that, it is not a control.
+ */
 .image-dialog__panneau:focus {
   outline: none;
 }
 
 /*
- * Les panneaux n'ont plus besoin d'un cadre : l'onglet dit déjà de quoi il
- * s'agit, et une bordure de plus à l'intérieur d'une page qui n'en contient
- * qu'une seule chose est du bruit.
+ * The panels no longer need a frame: the tab already says what it is about, and one more border inside a page that only contains one thing is noise.
  */
 .image-dialog__panneau > .image-dialog__wrap,
 .image-dialog__panneau > .image-dialog__legend {
@@ -3657,7 +3652,7 @@
 
 .image-dialog__panneau > .image-dialog__wrap > legend,
 .image-dialog__panneau > .image-dialog__legend > legend {
-  /* Le titre du groupe ferait doublon avec le libellé de l'onglet. */
+  /* The group's title would duplicate the tab's label. */
   position: absolute;
   width: 1px;
   height: 1px;
@@ -3666,12 +3661,12 @@
   white-space: nowrap;
 }
 
-/* -- Dialogue d'image sur mobile ------------------------------------------ */
+/* -- Image dialog on mobile ------------------------------------------ */
 
 @media (max-width: 767px) {
-  /* Une seule colonne : l'aperçu passe au-dessus des réglages, et cesse d'être
-     collant — il occuperait sinon le tiers d'un écran de téléphone en
-     permanence. */
+  /*
+   * A single column: the preview goes above the settings, and stops being sticky: it would otherwise take a third of a phone screen permanently.
+   */
   .image-dialog__corps {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
@@ -3683,8 +3678,9 @@
 
   .image-dialog__apercu {
     min-height: 0;
-    /* Assez pour reconnaître l'image, pas au point de chasser les réglages
-       sous la ligne de flottaison. */
+    /*
+     * Enough to recognize the image, not so much as to push the settings below the fold.
+     */
     max-height: 28vh;
   }
 
@@ -3698,15 +3694,16 @@
     gap: var(--space-4);
   }
 
-  /* Cinq modes de front sont illisibles sur 390 px : deux colonnes laissent au
-     libellé la place de tenir sur une ligne. */
+  /*
+   * Five modes abreast are unreadable on 390 px: two columns leave the label room to fit on one line.
+   */
   .wrap-picker__choices {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-3);
   }
 
   .wrap-picker__choice {
-    /* Cible tactile : 44 px de haut au minimum (WCAG 2.5.8). */
+    /* Touch target: 44 px high at minimum (WCAG 2.5.8). */
     flex-direction: row;
     gap: var(--space-3);
     min-height: 44px;
@@ -3718,8 +3715,9 @@
     font-size: var(--text-md);
   }
 
-  /* Un champ par ligne : deux listes déroulantes côte à côte sur un téléphone
-     ne laissent lire ni l'une ni l'autre. */
+  /*
+   * One field per row: two drop-down lists side by side on a phone let you read neither.
+   */
   .image-dialog__row .field,
   .image-dialog__dimensions .field {
     flex: 1 1 100%;
@@ -3729,9 +3727,9 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* La barre d'actions garde « Annuler » et « Appliquer » côte à côte, et
-     renvoie la suppression à la ligne du dessus : c'est l'action dangereuse,
-     elle ne doit pas voisiner avec le bouton qu'on vise. */
+  /*
+   * The action bar keeps "Cancel" and "Apply" side by side, and sends the delete button to the line above: it is the dangerous action, it must not sit next to the button you are aiming at.
+   */
   .modal__footer {
     flex-wrap: wrap;
   }
@@ -3751,11 +3749,9 @@
   }
 
   /*
-   * Mêmes cibles qu'en pointeur grossier.
+   * Same targets as with a coarse pointer.
    *
-   * Un navigateur de bureau réduit à la largeur d'un téléphone n'annonce pas
-   * `pointer: coarse`, et les champs y restaient hauts de 19 px — or c'est
-   * exactement la fenêtre qu'on regarde pour vérifier le rendu mobile.
+   * A desktop browser narrowed to the width of a phone does not announce `pointer: coarse`, and the fields stayed 19 px high there, yet that is exactly the window you look at to check the mobile rendering.
    */
   .modal input:not([type='checkbox']):not([type='radio']),
   .modal select,
@@ -3763,24 +3759,23 @@
     min-height: 40px;
   }
 
-  /* Les onglets ne sont pas des `.btn` : la règle des cibles les manquait. */
+  /* The tabs are not `.btn`s: the targets rule missed them. */
   .image-dialog__onglet {
     min-height: 44px;
     flex: 1 0 auto;
   }
 }
 
-/* ==========================================================================
-   Mobile — mobilier de l'éditeur
-   ==========================================================================
-   Le travail mobile déjà fait ici couvrait les fenêtres modales, les onglets
-   et les `.btn`. Restait le mobilier de l'éditeur lui-même : barre de titre,
-   barre de menus, ruban et règle, tous dessinés pour la souris. Sur un
-   téléphone, la barre de menus débordait de l'écran (« Aide » à 503px pour
-   412px de large) et entraînait toute la page en défilement horizontal.
-   ========================================================================== */
+/*
+ * ==========================================================================
+ * Mobile: the editor's furniture
+ * ==========================================================================
+ * The mobile work already done here covered modal windows, tabs and `.btn`s. What remained was the editor's own furniture: title bar, menu bar, ribbon and ruler, all designed for the mouse. On a phone, the menu bar
+ * overflowed the screen ("Help" at 503px for a 412px-wide screen) and dragged the whole page into horizontal scrolling.
+ * ==========================================================================
+ */
 
-/* Règle graduée (auparavant en style inline dans Ruler.tsx). */
+/* Graduated ruler (previously as an inline style in Ruler.tsx). */
 .ruler-container {
   width: 100%;
   display: flex;
@@ -3794,9 +3789,9 @@
   box-sizing: border-box;
 }
 
-/* Bandeau d'état de la coque (« Document CloudServ ouvert… »). Il portait
-   --text-xs (11px) et un « Fermer » à 11px : c'est pourtant lui qui dit où
-   partent les modifications. */
+/*
+ * Status banner of the shell ("CloudServ document opened..."). It carried --text-xs (11px) and a "Close" at 11px: yet it is the one that says where the changes are going.
+ */
 .shell-banner {
   font-size: var(--text-md);
 }
@@ -3807,21 +3802,22 @@
 }
 
 @media (pointer: coarse) {
-  /* La densité est la même variable que sur bureau : on la relève pour le
-     doigt plutôt que de reprendre chaque commande une par une. */
+  /*
+   * Density is the same variable as on desktop: we raise it for the finger rather than redo every control one by one.
+   */
   :root {
     --control-height: 44px;
     --control-height-sm: 40px;
   }
 
-  /* Entrées de menu : 21px de haut, et collées les unes aux autres. */
+  /* Menu entries: 21px high, and stuck to one another. */
   .menubar__trigger {
     min-height: 44px;
     padding-inline: var(--space-3);
     font-size: var(--text-lg);
   }
 
-  /* Listes du ruban : sous 16px, iOS zoome de lui-même à l'ouverture. */
+  /* Ribbon lists: under 16px, iOS zooms in by itself on opening. */
   .ribbon__select select,
   .ribbon__size,
   .titlebar__input {
@@ -3836,15 +3832,16 @@
     font-size: var(--text-lg);
   }
 
-  /* Champ invisible qui reçoit la frappe : il est à opacité nulle, mais c'est
-     lui qui prend le focus quand on touche la page. Sous 16px, iOS zoome donc
-     le document à la première frappe, sans que rien ne l'explique. */
+  /*
+   * Invisible field that receives typing: it has zero opacity, but it is the one that takes the focus when the page is touched. Under 16px, iOS therefore zooms the document on the first keystroke, with nothing to explain it.
+   */
   .writer-input {
     font-size: 16px;
   }
 
-  /* Pastilles de présence : 26px avec des initiales à 11px, chevauchées de
-     6px par leur voisine — ni visables ni lisibles. */
+  /*
+   * Presence badges: 26px with 11px initials, overlapped by 6px by their neighbor: neither targetable nor readable.
+   */
   .presence__avatar {
     width: 32px;
     height: 32px;
@@ -3853,14 +3850,14 @@
 }
 
 @media (max-width: 767px) {
-  /* Huit menus ne tiennent pas sur 412px. Plutôt que de les replier sur
-     plusieurs lignes — ce qui repousserait le document vers le bas —, la
-     barre défile horizontalement dans sa propre bande. */
+  /*
+   * Eight menus do not fit in 412px. Rather than fold them onto several lines (which would push the document down), the bar scrolls horizontally in its own band.
+   */
   .menubar {
     margin-left: 0;
     overflow-x: auto;
     scrollbar-width: none;
-    /* Sans ça, une barre en `flex` comprime ses entrées au lieu de défiler. */
+    /* Without this, a `flex` bar compresses its entries instead of scrolling. */
     flex: 1 1 auto;
     min-width: 0;
   }
@@ -3874,10 +3871,10 @@
     white-space: nowrap;
   }
 
-  /* Les deux règles graduées (`.regle` et `.ruler`) sont des instruments de
-     précision à la souris : graduations de 8 et 9px, poignées de marge à
-     faire glisser. Au doigt elles ne servent à rien, et `.ruler` impose au
-     document la largeur d'une page entière. */
+  /*
+   * The two graduated rulers (`.regle` and `.ruler`) are precision instruments for the mouse: 8 and 9px graduations, margin handles to drag. With a finger they are of no use, and `.ruler` imposes the width of a whole page
+   * on the document.
+   */
   .regle,
   .ruler,
   .ruler-container {
@@ -3893,7 +3890,7 @@
     flex: 1 1 100%;
     min-width: 0;
   }
-  /* 280px de minimum sur un écran de 412 ne laissait rien aux actions. */
+  /* A minimum of 280px on a 412 screen left nothing for the actions. */
   .titlebar__input {
     min-width: 0;
     width: 100%;
@@ -3905,8 +3902,9 @@
     gap: var(--space-1);
   }
 
-  /* Le document défile dans sa propre zone : la page A4 ne doit jamais
-     entraîner la fenêtre entière en défilement horizontal. */
+  /*
+   * The document scrolls in its own area: the A4 page must never drag the whole window into horizontal scrolling.
+   */
   .document-area {
     min-width: 0;
     overscroll-behavior-x: contain;

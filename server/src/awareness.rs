@@ -1,39 +1,39 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Cycle de vie des présences (curseurs, participants).
+//! Tracks who is present on a document (cursors, participant list).
 //!
-//! Le serveur relaie les trames de présence sans les interpréter… sauf pour une
-//! chose : savoir **quels participants appartiennent à quelle connexion**. Sans
-//! cela, la fermeture d'un onglet laisse un fantôme dans la liste des présents
-//! (« 5 personnes » pour 2 connectés), jusqu'à l'expiration côté client — et pas
-//! du tout si le client d'origine reste ouvert en arrière-plan.
+//! The server forwards presence frames without interpreting them, with one
+//! exception: it needs to know **which participants belong to which connection**.
+//! Without that, closing a browser tab leaves a "ghost" in the list of people
+//! present ("5 people" for 2 connected), until the client side times it out, or
+//! forever if the original client stays open in the background.
 //!
-//! Format d'une charge utile `awareness` (y-protocols) :
-//!   varuint  nombre de participants
-//!   pour chacun :
-//!     varuint  identifiant de client
-//!     varuint  horloge
-//!     varstring  état JSON (« null » = participant retiré)
+//! Layout of an `awareness` payload (y-protocols):
+//!   varuint  number of participants
+//!   for each participant:
+//!     varuint    client id
+//!     varuint    clock
+//!     varstring  JSON state ("null" = participant removed)
 
 use crate::protocol::{write_var_u8array, write_varuint, Cursor};
 
-/// Un participant annoncé dans une trame de présence.
+/// One participant announced inside a presence frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AwarenessEntry {
     pub client_id: u64,
     pub clock: u64,
-    /// `false` quand l'état vaut `null` : le participant s'est retiré lui-même.
+    /// `false` when the state is `null`: the participant removed themselves.
     pub present: bool,
 }
 
-/// Lit les participants d'une trame. `None` si la trame est malformée.
+/// Reads the participants out of a frame. Returns `None` if the frame is malformed.
 pub fn parse_awareness(payload: &[u8]) -> Option<Vec<AwarenessEntry>> {
     let mut cursor = Cursor::new(payload);
     let count = cursor.read_varuint()?;
 
-    // Garde-fou : une trame annonçant des millions de participants est hostile
-    // ou corrompue ; on refuse plutôt que d'allouer.
+    // Safety limit: a frame claiming millions of participants is hostile or
+    // corrupted, so we refuse it instead of allocating memory for it.
     if count > 10_000 {
         return None;
     }
@@ -52,10 +52,10 @@ pub fn parse_awareness(payload: &[u8]) -> Option<Vec<AwarenessEntry>> {
     Some(entries)
 }
 
-/// Construit la trame retirant les participants d'une connexion fermée.
+/// Builds the frame that removes the participants of a connection that just closed.
 ///
-/// L'horloge est incrémentée : sans cela, les pairs considéreraient l'information
-/// comme périmée et conserveraient le fantôme.
+/// The clock is incremented on purpose: otherwise the other clients would treat
+/// the removal as outdated information and keep the ghost.
 pub fn encode_removals(entries: &[(u64, u64)]) -> Vec<u8> {
     let mut payload = Vec::new();
     write_varuint(&mut payload, entries.len() as u64);
@@ -117,10 +117,10 @@ mod tests {
     #[test]
     fn rejects_malformed_frames_without_panicking() {
         assert_eq!(parse_awareness(&[]), None);
-        assert_eq!(parse_awareness(&[1]), None); // participant annoncé, absent
-        assert_eq!(parse_awareness(&[1, 42, 7, 200]), None); // longueur > tampon
+        assert_eq!(parse_awareness(&[1]), None); // participant announced, then missing
+        assert_eq!(parse_awareness(&[1, 42, 7, 200]), None); // declared length is larger than the buffer
 
-        // Trame annonçant un nombre absurde de participants.
+        // A frame announcing an absurd number of participants.
         let mut hostile = Vec::new();
         write_varuint(&mut hostile, 5_000_000);
         assert_eq!(parse_awareness(&hostile), None);

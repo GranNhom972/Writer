@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
  * @vitest-environment jsdom
  *
- * Légende de figure : numérotation dérivée, réglages, aller-retour ODF.
+ * Figure caption: derived numbering, settings, ODF round trip.
  *
- * La règle qui structure tout : **le numéro n'est jamais enregistré**. Il est
- * dérivé de l'ordre du document à chaque lecture, comme Writer le fait de ses
- * champs de séquence. C'est ce qui rend impossibles les doublons et les trous,
- * et ce qui fait qu'ajouter, supprimer ou déplacer une image renumérote le
- * reste sans qu'aucun code n'ait à s'en charger.
+ * The rule that structures everything: **the number is never saved**. It is derived from the order of the document on every read, as Writer does with its sequence fields. This is what makes duplicates and gaps impossible,
+ * and what makes adding, deleting or moving an image renumber the rest with no code having to take care of it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -28,10 +25,9 @@ import { buildContentXml } from '../src/domain/odf/export';
 import { importOdfContent } from '../src/domain/odf/import';
 
 /**
- * Aller-retour complet : sérialisation puis relecture du `content.xml`.
+ * Full round trip: serialization then re-reading of `content.xml`.
  *
- * Les images restent en `data:` — l'extraction du ZIP ne change rien à la
- * légende, et s'en passer garde le test lisible.
+ * The images stay as `data:` URLs: extracting from the ZIP changes nothing about the caption, and doing without it keeps the test readable.
  */
 function roundTrip(doc: ReturnType<typeof docOf>) {
   return importOdfContent(buildContentXml(doc)).document;
@@ -67,7 +63,7 @@ function para(...runs: TextRun[]): ParagraphNode {
 
 const docOf = (blocks: DocumentBlock[]) => ({ ...createEmptyDocument(), blocks });
 
-/** Légendes rendues, dans l'ordre du document. */
+/** Captions as rendered, in document order. */
 function rendered(doc: ReturnType<typeof docOf>): string[] {
   const numbers = figureNumbering(doc);
   const out: string[] = [];
@@ -151,7 +147,7 @@ describe('Numérotation automatique', () => {
       para(image({ text: 'après' })),
     ]);
 
-    expect(rendered(doc).length).toBe(2); // `rendered` ignore les tableaux
+    expect(rendered(doc).length).toBe(2); // `rendered` ignores the tables
     expect([...figureNumbering(doc).values()]).toEqual([1, 2, 3]);
   });
 });

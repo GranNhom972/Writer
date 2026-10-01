@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Tests du moteur mathématique (KaTeX, modèles et intégration Writer).
+ * Tests of the math engine (KaTeX, templates and Writer integration).
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -144,7 +144,7 @@ describe('Mise en page et géométrie des formules', () => {
     expect(layout.lines).toHaveLength(1);
     const line = layout.lines[0];
     expect(line).toBeDefined();
-    // La hauteur de ligne doit être augmentée pour accueillir la fraction
+    // The line height must be increased to make room for the fraction
     expect(line!.heightPx).toBeGreaterThanOrEqual(44);
     expect(line!.segments[0]?.formatting.mathLatex).toBe(formula);
   });
@@ -163,15 +163,15 @@ describe('Mise en page et géométrie des formules', () => {
     const line = layout.lines[0]!;
     const mathSegment = line.segments[1]!;
 
-    // Début de formule
+    // Start of the formula
     const startX = caretXOnLine(line, mathSegment.startOffset, measurer);
     expect(startX).toBe(mathSegment.leftPx);
 
-    // Milieu ou fin de formule -> snap à l'extrémité
+    // Middle or end of the formula -> snap to the end
     const endX = caretXOnLine(line, mathSegment.endOffset, measurer);
     expect(endX).toBe(mathSegment.leftPx + mathSegment.widthPx);
 
-    // Clic / hit-test au milieu de la formule -> renvoie startOffset ou endOffset sans scinder la formule
+    // Click / hit test in the middle of the formula -> returns startOffset or endOffset without splitting the formula
     const offsetNearStart = offsetFromX(line, mathSegment.leftPx + 2, measurer);
     expect(offsetNearStart).toBe(mathSegment.startOffset);
 
@@ -191,18 +191,18 @@ describe('Mise en page et géométrie des formules', () => {
     });
     doc.blocks = [p];
 
-    // Curseur positionné juste après la formule : "Avant " (6) + "E = mc^2" (8) = offset 14
+    // Cursor placed right after the formula: "Avant " (6) + "E = mc^2" (8) = offset 14
     const state = createEditorState(doc);
     const atFormulaEnd = {
       ...state,
       selection: collapsedSelection({ blockId: p.id, offset: 14 }),
     };
 
-    // moveHorizontal vers la gauche doit sauter directement au début de la formule (offset 6)
+    // moveHorizontal to the left must jump straight to the start of the formula (offset 6)
     const target = moveHorizontal(doc, atFormulaEnd.selection.focus, -1);
     expect(target.offset).toBe(6);
 
-    // deleteBackward supprime la formule entière
+    // deleteBackward deletes the whole formula
     const afterDelete = deleteBackward(atFormulaEnd);
     const updatedParagraph = afterDelete.doc.blocks[0] as typeof p;
     expect(updatedParagraph.runs.some((r) => r.mathLatex)).toBe(false);
@@ -222,18 +222,18 @@ describe('Mise en page et géométrie des formules', () => {
     });
     doc.blocks = [p];
 
-    // Curseur positionné juste avant la formule : offset 6
+    // Cursor placed right before the formula: offset 6
     const state = createEditorState(doc);
     const atFormulaStart = {
       ...state,
       selection: collapsedSelection({ blockId: p.id, offset: 6 }),
     };
 
-    // moveHorizontal vers la droite doit sauter directement à la fin de la formule (offset 14)
+    // moveHorizontal to the right must jump straight to the end of the formula (offset 14)
     const target = moveHorizontal(doc, atFormulaStart.selection.focus, 1);
     expect(target.offset).toBe(14);
 
-    // deleteForward supprime la formule entière
+    // deleteForward deletes the whole formula
     const afterDelete = deleteForward(atFormulaStart);
     const updatedParagraph = afterDelete.doc.blocks[0] as typeof p;
     expect(updatedParagraph.runs.some((r) => r.mathLatex)).toBe(false);
@@ -278,10 +278,10 @@ describe('Mise en page et géométrie des formules', () => {
       ]),
     };
 
-    // Curseur dans le texte ordinaire au début (offset 0)
+    // Cursor in ordinary text at the start (offset 0)
     const textCaret = caretGeometry(docLayout as any, { blockId: p.id, offset: 0 }, measurer);
     expect(textCaret).not.toBeNull();
-    // La hauteur du curseur dans le texte ordinaire doit être proportionnelle au texte et inférieure à la hauteur totale de la fraction
+    // The cursor height in ordinary text must be proportional to the text and smaller than the total height of the fraction
     expect(textCaret!.heightPx).toBeLessThan(line.heightPx);
   });
 
@@ -290,7 +290,7 @@ describe('Mise en page et géométrie des formules', () => {
     const fraction = '\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}';
     const width = estimateLatexWidth(fraction, em);
 
-    // La largeur réelle d'une telle fraction est d'environ 100 à 150px (et non pas 250px)
+    // The real width of such a fraction is about 100 to 150 px (and not 250 px)
     expect(width).toBeGreaterThanOrEqual(80);
     expect(width).toBeLessThan(160);
   });
@@ -305,11 +305,11 @@ describe('Mise en page et géométrie des formules', () => {
       ],
     });
 
-    // Largeur étroite forçant le retour à la ligne
+    // Narrow width forcing a line wrap
     const layout = layoutParagraph(p, context(220));
     expect(layout.lines.length).toBeGreaterThanOrEqual(2);
 
-    // Vérifier qu'aucune ligne ne coupe la formule en son milieu
+    // Check that no line cuts the formula in the middle
     for (const line of layout.lines) {
       for (const segment of line.segments) {
         if (segment.formatting.mathLatex) {

@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Dialogues d'annotation : commentaire et signet.
+ * Annotation dialogs: comment and bookmark.
  *
- * Les deux posent un **repère sur une plage de texte** et partagent donc la
- * même contrainte : sans sélection, il n'y a rien à ancrer. C'est ce que les
- * deux dialogues disent explicitement plutôt que de laisser l'utilisateur
- * valider un formulaire qui ne fera rien — le reproche exact qu'on peut faire
- * à un bouton qui accepte le clic et n'agit pas.
+ * Both put a **marker on a range of text** and therefore share the same constraint: without a selection, there is nothing to anchor. That is what both dialogs say
+ * explicitly rather than let the user validate a form that will do nothing, which is exactly the criticism one can make of a button that accepts the click and does not act.
  */
 
 import { useState, type FormEvent, type JSX } from 'react';
@@ -33,14 +30,14 @@ const labelStyle = {
 
 interface CommentDialogProps {
   open: boolean;
-  /** Texte actuellement sélectionné — vide si le curseur est replié. */
+  /** Currently selected text: empty if the cursor is collapsed. */
   quotedText: string;
   author: string;
   onClose: () => void;
   onInsert: (text: string) => void;
 }
 
-/** Dépose un commentaire sur la sélection (`SwEditShell::InsertPostIt`). */
+/** Puts a comment on the selection (`SwEditShell::InsertPostIt`). */
 export function CommentDialog({
   open,
   quotedText,
@@ -118,13 +115,13 @@ export function CommentDialog({
 interface BookmarkDialogProps {
   open: boolean;
   quotedText: string;
-  /** Signets déjà posés, pour refuser un doublon avant validation. */
+  /** Bookmarks already set, to refuse a duplicate before validation. */
   existingNames: readonly string[];
   onClose: () => void;
   onInsert: (name: string) => void;
 }
 
-/** Pose un signet nommé sur la sélection (`IDocumentMarkAccess::makeMark`). */
+/** Puts a named bookmark on the selection (`IDocumentMarkAccess::makeMark`). */
 export function BookmarkDialog({
   open,
   quotedText,

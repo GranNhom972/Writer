@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Export PDF d'un document **contenant des images**.
+ * PDF export of a document **that contains images**.
  *
- * Le moteur PDF est pur : il place des octets JPEG qu'on lui donne, il n'en
- * fabrique pas. Ce fichier est la couture entre les deux — il décode les images
- * par le navigateur (`domain/image/raster.ts`), puis appelle l'export.
+ * The PDF engine is pure: it places the JPEG bytes it is given and does not manufacture them. This file is the seam
+ * between the two: it decodes the images through the browser (`domain/image/raster.ts`), then calls the export.
  *
- * Il est séparé de `export.ts` pour que ce dernier reste exécutable sans DOM,
- * dans un test comme dans un Web Worker.
+ * It is separate from `export.ts` so that the latter stays runnable without a DOM, in a test as in a Web Worker.
  */
 
 import type { WriterDocumentState } from '../document/types';
@@ -17,7 +15,7 @@ import type { DocumentLayout } from '../engine/paginate';
 import { rasterizeAll } from '../image/raster';
 import { collectImageSources, downloadPdf, exportToPdfBlob, type PdfExportOptions } from './export';
 
-/** Prépare les images du document puis rend les options d'export complétées. */
+/** Prepares the document's images, then returns the completed export options. */
 export async function withRasterizedImages(
   doc: WriterDocumentState,
   options: PdfExportOptions = {},
@@ -35,7 +33,7 @@ export async function exportPdfBlobWithImages(
   return exportToPdfBlob(doc, layout, await withRasterizedImages(doc, options));
 }
 
-/** Télécharge le PDF, images comprises. */
+/** Downloads the PDF, images included. */
 export async function downloadPdfWithImages(
   doc: WriterDocumentState,
   layout: DocumentLayout,

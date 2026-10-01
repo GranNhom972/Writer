@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
-//! Erreurs applicatives normalisées RFC 9457.
+//! Application errors, normalized as RFC 9457 "problem details".
 //!
-//! Règle reprise du serveur Write : aucun `unwrap`/`expect` sur un chemin d'I/O,
-//! de réseau ou de désérialisation d'entrée. Tout remonte ici, et le détail
-//! technique d'une panne interne est **journalisé**, jamais renvoyé au client.
+//! Rule inherited from the Write server: no `unwrap`/`expect` on an I/O, network
+//! or input-deserialization path. Everything bubbles up to here, and the technical
+//! detail of an internal failure is **logged**, never sent back to the client.
 
 use axum::{
     http::StatusCode,
@@ -32,13 +32,13 @@ pub enum AppError {
     PayloadTooLarge,
     #[error("stockage indisponible")]
     Storage(#[from] std::io::Error),
-    /// Update CRDT illisible : trame corrompue ou hostile.
+    /// Unreadable CRDT update: a corrupted or hostile frame.
     #[error("état CRDT illisible: {0}")]
     Crdt(String),
-    /// Opération de document illisible ou inapplicable — ancien format seulement.
+    /// Unreadable or inapplicable document operation (old format only).
     #[error("opération invalide: {0}")]
     Operation(String),
-    /// Défaillance interne : tâche interrompue, verrou empoisonné.
+    /// Internal failure: an interrupted task or a poisoned lock.
     #[error("erreur interne: {0}")]
     Internal(String),
 }
@@ -65,9 +65,9 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, kind) = self.parts();
 
-        // Le détail technique est journalisé, jamais renvoyé au client sur 5xx :
-        // un chemin de fichier ou un message de bibliothèque renseignerait un
-        // attaquant sur l'intérieur du serveur.
+        // The technical detail is logged and never sent back to the client on a 5xx:
+        // a file path or a library error message would tell an attacker about the
+        // inside of the server.
         let detail = match &self {
             AppError::Storage(e) => {
                 tracing::error!(error = %e, "défaillance du stockage");
@@ -92,10 +92,10 @@ impl IntoResponse for AppError {
 
 pub type AppResult<T> = Result<T, AppError>;
 
-/// Convertit l'échec d'une tâche bloquante en erreur interne.
+/// Turns the failure of a blocking task into an internal error.
 ///
-/// `spawn_blocking` échoue quand la tâche a paniqué ou que l'exécuteur s'arrête :
-/// dans les deux cas c'est une panne du serveur, pas une faute du client.
+/// `spawn_blocking` fails when the task panicked or the executor is shutting down.
+/// Either way it is a server fault, not the client's.
 pub fn joined<T>(result: Result<T, tokio::task::JoinError>) -> AppResult<T> {
     result.map_err(|e| AppError::Internal(e.to_string()))
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
 
@@ -8,21 +8,17 @@ interface ModalProps {
   onClose: () => void;
   children: ReactNode;
   /**
-   * Largeur **souhaitée**, en pixels.
+   * **Desired** width, in pixels.
    *
-   * Ce n'est pas une largeur ferme : le CSS la ramène à ce que l'écran offre
-   * (`min(largeur, 100vw - marges)`). Une valeur en dur débordait des petits
-   * écrans, et il fallait alors faire défiler la fenêtre horizontalement pour
-   * atteindre un bouton — le pire des défauts d'un dialogue.
+   * It is not a firm width: the CSS brings it down to what the screen offers (`min(width, 100vw - margins)`). A hard-coded value
+   * overflowed small screens, and the window then had to be scrolled sideways to reach a button, the worst defect of a dialog.
    */
   width?: number;
   /**
-   * Barre d'actions, épinglée **hors** de la zone défilante.
+   * Action bar, pinned **outside** the scrolling area.
    *
-   * Sans elle, « Appliquer » descend avec le contenu et disparaît sous le bord
-   * de l'écran dès que le formulaire dépasse la hauteur disponible : on croit
-   * le dialogue sans issue. Les dialogues courts peuvent l'ignorer et garder
-   * leurs boutons dans le flux.
+   * Without it, "Apply" goes down with the content and disappears under the edge of the screen as soon as the form is taller than the
+   * available height: the dialog looks like it has no way out. Short dialogs can ignore it and keep their buttons in the flow.
    */
   footer?: ReactNode;
 }
@@ -31,21 +27,19 @@ const FOCUSABLE =
   'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Dialogue modal accessible (directive UX §6.7) : focus déplacé à l'ouverture,
- * **piégé** pendant, et **restitué au déclencheur** à la fermeture ; `Échap` ferme ;
- * `aria-modal` isole le reste de la page pour les technologies d'assistance.
+ * Accessible modal dialog (UX directive §6.7): focus moved on opening, **trapped** while open, and **given back to the trigger** on
+ * closing; `Escape` closes; `aria-modal` isolates the rest of the page for assistive technologies.
  */
 export function Modal({ title, onClose, children, width = 640, footer }: ModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
 
   /**
-   * Fermeture lue par référence.
+   * Close callback read by reference.
    *
-   * L'appelant passe presque toujours une fonction fléchée, donc une identité
-   * neuve à chaque rendu. En dépendre relançait l'effet à chaque frappe : le
-   * focus repartait sur le premier champ du dialogue, et la saisie devenait
-   * impossible. L'effet ne doit s'armer qu'à l'ouverture.
+   * The caller almost always passes an arrow function, so a new identity on every render. Depending on it re-ran the effect on every
+   * keystroke: the focus went back to the first field of the dialog, and typing became impossible. The effect must only arm itself on
+   * opening.
    */
   const fermerRef = useRef(onClose);
   fermerRef.current = onClose;
@@ -63,7 +57,7 @@ export function Modal({ title, onClose, children, width = 640, footer }: ModalPr
       }
       if (event.key !== 'Tab' || !panel) return;
 
-      // Piège à focus : la tabulation boucle à l'intérieur du dialogue.
+      // Focus trap: Tab loops inside the dialog.
       const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (focusable.length === 0) return;
       const first = focusable[0]!;
@@ -92,9 +86,8 @@ export function Modal({ title, onClose, children, width = 640, footer }: ModalPr
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        // Largeur souhaitée passée en variable : c'est le CSS qui arbitre entre
-        // elle et la place réellement disponible, et lui seul connaît les
-        // marges du fond et le point de rupture mobile.
+        // Desired width passed as a variable: it is the CSS that arbitrates between it and the room actually available, and only it knows the
+        // margins of the backdrop and the mobile breakpoint.
         style={{ '--modal-width': `${width}px` } as CSSProperties}
         ref={panelRef}
       >

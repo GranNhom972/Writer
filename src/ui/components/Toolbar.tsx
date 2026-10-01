@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Barre d'outils.
+ * Toolbar.
  *
- * Les boutons ne portent aucun état propre : ils lisent le formatage actif que
- * le moteur a calculé et appellent des commandes. Un bouton est donc toujours
- * d'accord avec le document, y compris après une annulation — cas où un état
- * dupliqué dans le composant se serait désynchronisé.
+ * The buttons carry no state of their own: they read the active formatting that the engine has computed and call commands. A button is therefore always consistent
+ * with the document, even after an undo, a case where a state duplicated in the component would have got out of sync.
  */
 
 import type { JSX } from 'react';

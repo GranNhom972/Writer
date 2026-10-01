@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Les contributeurs de Writer
+// Copyright (C) 2026 The Writer contributors
 
 /**
- * Réservation de la zone de notes — `SwFtnContFrm` / `SwFtnBossFrm::GetVarSpace`
- * (`sw/source/core/layout/ftnfrm.cxx`).
+ * Reservation of the footnote area: `SwFtnContFrm` / `SwFtnBossFrm::GetVarSpace` (`sw/source/core/layout/ftnfrm.cxx`).
  *
- * Le défaut que ces tests ferment : les notes étaient attachées aux pages
- * **après** la mise en page, sans que leur hauteur soit retranchée de la place
- * disponible. Sur une page pleine, le bandeau recouvrait donc les dernières
- * lignes du corps.
+ * The defect these tests close: notes were attached to the pages **after** layout, without their height being subtracted from the available room. On a full page, the banner therefore covered the last lines of the body.
  *
- * L'invariant vérifié ici est celui de Writer : sur toute page portant des
- * notes, `corps + zone de notes <= hauteur utile`.
+ * The invariant checked here is Writer's: on every page that carries notes, `body + footnote area <= usable height`.
  *
  * @vitest-environment jsdom
  */
@@ -32,7 +27,7 @@ function docOf(blocks: DocumentBlock[]) {
   return { ...createEmptyDocument(), blocks };
 }
 
-/** Paragraphe portant un appel de note à la fin de son texte. */
+/** Paragraph carrying a footnote call at the end of its text. */
 function avecNote(texte: string, id: string, note: string) {
   return createParagraph('', {
     runs: [makeRun(texte), makeRun('¹', { footnoteText: note, footnoteId: id })],
@@ -44,7 +39,7 @@ const REMPLISSAGE =
 
 describe('Réservation de la zone de notes (SwFtnBossFrm::GetVarSpace)', () => {
   it('le corps et les notes tiennent ensemble dans la hauteur utile', () => {
-    // Assez de matière pour remplir la page, avec un appel de note à la fin.
+    // Enough material to fill the page, with a footnote call at the end.
     const blocs = [
       ...Array.from({ length: 40 }, (_, i) => createParagraph(`${REMPLISSAGE}${i}`)),
       avecNote('Dernière phrase', 'fn1', 'Une note explicative sur la dernière phrase.'),
@@ -56,7 +51,7 @@ describe('Réservation de la zone de notes (SwFtnBossFrm::GetVarSpace)', () => {
     for (const page of layout.pages) {
       if (!page.footnotes?.length) continue;
       expect(page.footnoteAreaHeightPx).toBeGreaterThan(0);
-      // L'invariant : le bandeau ne peut plus recouvrir le corps.
+      // The invariant: the banner can no longer cover the body.
       expect(page.usedHeightPx + (page.footnoteAreaHeightPx ?? 0)).toBeLessThanOrEqual(utile + 0.5);
     }
   });
@@ -113,8 +108,7 @@ describe('Réservation de la zone de notes (SwFtnBossFrm::GetVarSpace)', () => {
   });
 
   it('n\'impute la note qu\'à la page portant la ligne de son appel', () => {
-    // Le paragraphe porteur est placé après un long remplissage : sa note doit
-    // suivre sa ligne, pas rester sur la première page.
+    // The carrier paragraph is placed after a long filler: its note must follow its line, not stay on the first page.
     const blocs = [
       ...Array.from({ length: 60 }, (_, i) => createParagraph(`${REMPLISSAGE}${i}`)),
       avecNote('Appel tardif', 'fnTard', 'Note appelée tard dans le document.'),
@@ -126,13 +120,12 @@ describe('Réservation de la zone de notes (SwFtnBossFrm::GetVarSpace)', () => {
     const pagesAvecNote = layout.pages.filter((p) => p.footnotes?.length);
     expect(pagesAvecNote).toHaveLength(1);
     expect(pagesAvecNote[0]?.index).toBe(layout.pages.length - 1);
-    // Les pages précédentes n'ont rien réservé.
+    // The previous pages reserved nothing.
     expect(layout.pages[0]?.footnoteAreaHeightPx).toBeUndefined();
   });
 
   it('retient moins de lignes sur la page quand une note descend avec elles', () => {
-    // Même corps, avec et sans note : la version annotée doit reporter au moins
-    // autant de contenu, la zone de notes lui prenant de la place.
+    // Same body, with and without a note: the annotated version must carry over at least as much content, the footnote area taking room from it.
     const corps = Array.from({ length: 44 }, (_, i) => createParagraph(`${REMPLISSAGE}${i}`));
 
     const sansNote = paginateDocument(docOf([...corps]), { measurer });
@@ -161,8 +154,7 @@ describe('Réservation de la zone de notes (SwFtnBossFrm::GetVarSpace)', () => {
     expect(refs.get('fnB')?.index).toBe(2);
     expect(refs.get('fnC')?.index).toBe(3);
 
-    // La numérotation ne dépend pas de la pagination : elle reste donc stable
-    // d'une passe à l'autre, ce dont dépend la convergence en deux passes.
+    // Numbering does not depend on pagination: it therefore stays stable from one pass to the next, which the two-pass convergence depends on.
     const layout = paginateDocument(doc, { measurer });
     expect(layout.pages[0]?.footnotes?.map((f) => f.index)).toEqual([1, 2, 3]);
   });
