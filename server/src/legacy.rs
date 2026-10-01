@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Lecture des documents écrits par la version précédente du serveur.
 //!
 //! Jusqu'ici, la synchronisation ne relayait pas des updates CRDT mais des

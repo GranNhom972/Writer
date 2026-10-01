@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * L'éditeur complet assemblé : Barre de menus, Ruban avec icônes vectorielles,
  * Règle graduée, Plan du document (DocumentOutline), Recherche/Remplacement,

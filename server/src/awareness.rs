@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Cycle de vie des présences (curseurs, participants).
 //!
 //! Le serveur relaie les trames de présence sans les interpréter… sauf pour une

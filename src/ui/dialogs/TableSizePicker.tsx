@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Choix de la taille d'un tableau par survol d'une grille.
  *

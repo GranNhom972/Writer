@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+//
+// Œuvre dérivée et modifiée d'Apache OpenOffice 4.1.16 (© The Apache Software
+// Foundation, Apache License 2.0) : portage en TypeScript, fichier modifié par
+// rapport à l'original. Voir les fichiers NOTICE et LICENSE-APACHE.
+
 /**
  * Choix de l'intégration d'une image au texte.
  *

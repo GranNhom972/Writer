@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Encodage/décodage des messages du protocole `y-protocols` (lib0).
 //!
 //! Trames **binaires**. Format lib0 :

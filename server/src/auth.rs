@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Identité et portées.
 //!
 //! Directive : l'identité provient **exclusivement** d'un jeton vérifié, jamais du

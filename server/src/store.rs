@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Persistance : journal d'updates en ajout seul + instantanés compactés.
 //!
 //! Reprise du `FileStore` de `write/server`. Le journal contient désormais des

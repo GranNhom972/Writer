@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Lecture seule — un partage sans droit d'écriture ne doit pas laisser écrire.
  *

@@ -169,3 +169,19 @@ Writer's reliability is backed by **27 automated test suites** on the client and
 - Cryptographic validation (SHA-256 FIPS 180-4, HMAC RFC 4231, constant-time comparison).
 - Yrs CRDT convergence, log compaction, restore point rotation and binary packet parsing.
 - JWT ticket verification and `session-checkpoint` / `session-closed` HTTP callbacks.
+
+---
+
+## 📜 License
+
+Writer is free software, distributed under the terms of the **GNU General Public License version 3 or, at your option, any later version** (`GPL-3.0-or-later`): see [`LICENSE`](LICENSE).
+
+Writer is a **port of Apache OpenOffice 4.1.16** (algorithms and data structures from `sw`, `svx`, `xmloff`, `editeng`, `starmath`), published under the **Apache License 2.0** by The Apache Software Foundation. The files that come from this port are derivative works and have been modified; they carry the header `SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later`. The Apache License 2.0 is compatible with GPL v3 (but not with GPL v2 alone, hence the choice of v3).
+
+| File | Content |
+| :--- | :--- |
+| [`LICENSE`](LICENSE) | Text of the GNU GPL v3 (Writer's license) |
+| [`LICENSE-APACHE`](LICENSE-APACHE) | Text of the Apache License 2.0 (original Apache OpenOffice code) |
+| [`NOTICE`](NOTICE) | Original attributions (The Apache Software Foundation, Oracle, IBM) and trademark notice |
+
+Each source file starts with an SPDX header stating its license. Apache, Apache OpenOffice and OpenOffice are trademarks of The Apache Software Foundation; Writer is neither affiliated with nor endorsed by the Foundation.

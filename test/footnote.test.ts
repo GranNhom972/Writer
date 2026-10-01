@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Tests du sous-système de notes de bas de page (SwFtnFrm / SwFtnContFrm).
  *

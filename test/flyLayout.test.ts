@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Cadres flottants et habillage — `SwFlyFreeFrm` (`sw/source/core/layout/fly.cxx`)
  * et le calcul de bande utile de `SwTxtFly` (`sw/source/core/text/txtfly.cxx`).

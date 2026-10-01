@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 import type { ReactNode } from 'react';
 
 /** Squelette respectant la géométrie finale — pas de spinner centré (directive UX §4). */

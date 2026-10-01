@@ -1,0 +1,27 @@
+Writer
+Copyright (C) 2026 Les contributeurs de Writer
+
+Ce produit est distribué sous licence GNU GPL version 3 ou ultérieure
+(GPL-3.0-or-later) : voir le fichier LICENSE.
+
+Writer est un portage, en TypeScript et en Rust, d'algorithmes et de structures
+de données d'Apache OpenOffice 4.1.16 (http://www.openoffice.org), diffusé sous
+Apache License, Version 2.0 : voir le fichier LICENSE-APACHE. Les fichiers
+concernés sont des œuvres dérivées, modifiées par rapport à l'original ; ils
+portent l'en-tête « SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later ».
+La licence Apache 2.0 est compatible avec la GPL version 3.
+
+Apache, Apache OpenOffice et OpenOffice sont des marques de The Apache Software
+Foundation. Writer n'est ni affilié à la Fondation Apache ni approuvé par elle.
+
+Notices d'origine, reproduites du fichier NOTICE d'Apache OpenOffice 4.1.16 :
+
+    Apache OpenOffice (http://www.openoffice.org)
+    Copyright 2011-2025 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (http://www.apache.org/).
+
+    Portions of this software copyright (c) 2000-2011, Oracle and/or its affiliates  <http://www.oracle.com/>.
+
+    Portions of this software (C) Copyright IBM Corporation 2003, 2012.  All Rights Reserved.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Popover } from './Popover';
 import { ColorGrid } from './ColorGrid';

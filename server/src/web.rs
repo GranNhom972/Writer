@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 //! Service du bundle de l'éditeur par le binaire du serveur lui-même.
 //!
 //! L'éditeur appelle son API en RELATIF (`/api/v1/…`) et ouvre son WebSocket de

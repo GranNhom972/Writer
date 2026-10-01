@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Suivi des modifications — `SwRangeRedline` / `SwRedlineTbl`
  * (`sw/source/core/doc/docredln.cxx`) et mode `REDLINE_ON`.

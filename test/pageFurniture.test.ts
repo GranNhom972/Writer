@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Les contributeurs de Writer
+
 /**
  * Tests unitaires du modèle et des calculs d'en-tête et pied de page
  * Transposition SwPageDesc / SwHeaderFrm / SwFooterFrm OpenOffice.
