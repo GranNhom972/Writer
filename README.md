@@ -125,7 +125,7 @@ Writer integrates with **CloudServ** as a temporary, stateless editor, following
    ┌───────────────────────┐   Service ticket (JWT HS256, 60s)     ┌──────────────────────────┐
    │                       │ ────────────────────────────────────▶ │                          │
    │       CloudServ       │   POST /api/v1/documents              │   Writer Server (Rust)   │
-   │     (Python API)      │                                       │   (Port 8081)            │
+   │      (Rust API)       │                                       │   (Port 8081)            │
    │                       │ ◀──────────────────────────────────── │                          │
    └───────────────────────┘   HMAC-SHA256 signed body             └──────────────────────────┘
                                POST …/session-checkpoint (during session)
