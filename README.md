@@ -4,6 +4,12 @@
 
 > 🤖 **Note: No line of code in this project was written by hand.** The entire codebase (client, server, tests and documentation) was produced by AI.
 
+![Writer: the decree of 27 April 1848 abolishing slavery, opened as an .odt file](docs/capture.webp)
+
+<sub>The web editor with a real document: the decree of 27 April 1848 abolishing slavery in the French colonies (public domain,
+text from [Wikisource](https://fr.wikisource.org/wiki/D%C3%A9cret_du_27_avril_1848_abolissant_l%E2%80%99esclavage)), with a
+footnote citing the source.</sub>
+
 ---
 
 ## 🌟 Core Principles & Golden Rule
