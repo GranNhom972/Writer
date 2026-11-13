@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 The Writer contributors
 
-import { useState, type JSX } from 'react';
+import { useId, useState, type JSX } from 'react';
 import type { PageSetup, DocumentDefaults } from '../../domain/document/types';
 import { Modal } from '../../design/components/Modal';
 import { Button } from '../../design/components/Button';
@@ -74,8 +74,10 @@ export function StylesAndMarginsDialog({
   const [pageSetupDraft, setPageSetupDraft] = useState<PageSetup>(initialPageSetup);
   const [defaultsDraft, setDefaultsDraft] = useState<DocumentDefaults>(initialDefaults);
 
-  if (!open) return null;
+  // Relie chaque libellé à son champ (nom accessible des champs de marges et de styles).
+  const uid = useId();
 
+  if (!open) return null;
   const updateMargins = (margins: Partial<Pick<PageSetup, 'marginTopMm' | 'marginBottomMm' | 'marginLeftMm' | 'marginRightMm'>>) => {
     setPageSetupDraft((prev) => ({ ...prev, ...margins }));
   };
@@ -102,29 +104,31 @@ export function StylesAndMarginsDialog({
       marginRightMm: 25,
       orientation: 'portrait',
     });
-    setDefaultsDraft({
+    setDefaultsDraft((prev) => ({
+      ...prev,
       fontFamily: 'Liberation Serif, Georgia, Times New Roman, serif',
       fontSizePt: 12,
       lineSpacing: 1.15,
       color: '#16191d',
-    });
+    }));
   };
 
   return (
     <Modal title="Paramètres du document (Mise en page et Styles)" onClose={onClose} width={740}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '4px' }}>
+        {/* Contrôle segmenté : le seul bouton primaire du dialogue reste « Appliquer ». */}
+        <div className="bento-segmented" role="group" aria-label="Section des paramètres">
           <button
             type="button"
-            className={`btn ${tab === 'margins' ? 'btn--primary' : 'btn--ghost'}`}
+            aria-pressed={tab === 'margins'}
             onClick={() => setTab('margins')}
           >
             Marges et format de page
           </button>
           <button
             type="button"
-            className={`btn ${tab === 'styles' ? 'btn--primary' : 'btn--ghost'}`}
+            aria-pressed={tab === 'styles'}
             onClick={() => setTab('styles')}
           >
             Typographie par défaut
@@ -133,7 +137,7 @@ export function StylesAndMarginsDialog({
 
         {tab === 'margins' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 'var(--space-6)' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
               <div>
                 <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-secondary)', display: 'block', marginBottom: '8px' }}>
                   Préréglages de marges
@@ -182,7 +186,7 @@ export function StylesAndMarginsDialog({
               {/* Custom margins */}
               <div
                 style={{
-                  padding: 'var(--space-4)',
+                  padding: 'var(--space-3)',
                   backgroundColor: 'var(--bg-sunken)',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--border-subtle)',
@@ -191,12 +195,13 @@ export function StylesAndMarginsDialog({
                 <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-secondary)', display: 'block', marginBottom: '12px' }}>
                   Marges personnalisées (en centimètres)
                 </span>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 500, marginBottom: '4px' }}>
+                    <label htmlFor={`${uid}-0`} style={{ display: 'block', fontSize: 'var(--text-md)', fontWeight: 500, color: 'var(--fg-secondary)', marginBottom: 'var(--space-1)' }}>
                       Haut (cm)
                     </label>
                     <input
+                      id={`${uid}-0`}
                       type="number"
                       min={0.5}
                       max={6}
@@ -205,9 +210,10 @@ export function StylesAndMarginsDialog({
                       onChange={(e) => updateMargins({ marginTopMm: versMm(e.target.value) })}
                       style={{
                         width: '100%',
-                        padding: '6px 8px',
-                        borderRadius: 'var(--radius-xs)',
-                        border: '1px solid var(--border-strong)',
+                        minHeight: 'var(--control-height)',
+                        padding: '0 var(--space-3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-input)',
                         backgroundColor: 'var(--bg-app)',
                         color: 'var(--fg-primary)',
                       }}
@@ -215,10 +221,11 @@ export function StylesAndMarginsDialog({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 500, marginBottom: '4px' }}>
+                    <label htmlFor={`${uid}-1`} style={{ display: 'block', fontSize: 'var(--text-md)', fontWeight: 500, color: 'var(--fg-secondary)', marginBottom: 'var(--space-1)' }}>
                       Bas (cm)
                     </label>
                     <input
+                      id={`${uid}-1`}
                       type="number"
                       min={0.5}
                       max={6}
@@ -227,9 +234,10 @@ export function StylesAndMarginsDialog({
                       onChange={(e) => updateMargins({ marginBottomMm: versMm(e.target.value) })}
                       style={{
                         width: '100%',
-                        padding: '6px 8px',
-                        borderRadius: 'var(--radius-xs)',
-                        border: '1px solid var(--border-strong)',
+                        minHeight: 'var(--control-height)',
+                        padding: '0 var(--space-3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-input)',
                         backgroundColor: 'var(--bg-app)',
                         color: 'var(--fg-primary)',
                       }}
@@ -237,10 +245,11 @@ export function StylesAndMarginsDialog({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 500, marginBottom: '4px' }}>
+                    <label htmlFor={`${uid}-2`} style={{ display: 'block', fontSize: 'var(--text-md)', fontWeight: 500, color: 'var(--fg-secondary)', marginBottom: 'var(--space-1)' }}>
                       Gauche (cm)
                     </label>
                     <input
+                      id={`${uid}-2`}
                       type="number"
                       min={0.5}
                       max={6}
@@ -249,9 +258,10 @@ export function StylesAndMarginsDialog({
                       onChange={(e) => updateMargins({ marginLeftMm: versMm(e.target.value) })}
                       style={{
                         width: '100%',
-                        padding: '6px 8px',
-                        borderRadius: 'var(--radius-xs)',
-                        border: '1px solid var(--border-strong)',
+                        minHeight: 'var(--control-height)',
+                        padding: '0 var(--space-3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-input)',
                         backgroundColor: 'var(--bg-app)',
                         color: 'var(--fg-primary)',
                       }}
@@ -259,10 +269,11 @@ export function StylesAndMarginsDialog({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 500, marginBottom: '4px' }}>
+                    <label htmlFor={`${uid}-3`} style={{ display: 'block', fontSize: 'var(--text-md)', fontWeight: 500, color: 'var(--fg-secondary)', marginBottom: 'var(--space-1)' }}>
                       Droite (cm)
                     </label>
                     <input
+                      id={`${uid}-3`}
                       type="number"
                       min={0.5}
                       max={6}
@@ -271,9 +282,10 @@ export function StylesAndMarginsDialog({
                       onChange={(e) => updateMargins({ marginRightMm: versMm(e.target.value) })}
                       style={{
                         width: '100%',
-                        padding: '6px 8px',
-                        borderRadius: 'var(--radius-xs)',
-                        border: '1px solid var(--border-strong)',
+                        minHeight: 'var(--control-height)',
+                        padding: '0 var(--space-3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-input)',
                         backgroundColor: 'var(--bg-app)',
                         color: 'var(--fg-primary)',
                       }}
@@ -283,7 +295,7 @@ export function StylesAndMarginsDialog({
               </div>
 
               {/* Orientation */}
-              <div style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
                 <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-secondary)' }}>
                   Orientation :
                 </span>
@@ -314,7 +326,7 @@ export function StylesAndMarginsDialog({
                 style={{
                   width: pageSetupDraft.orientation === 'portrait' ? '150px' : '200px',
                   height: pageSetupDraft.orientation === 'portrait' ? '212px' : '140px',
-                  backgroundColor: '#ffffff',
+                  backgroundColor: 'var(--paper-bg)',
                   border: '1px solid var(--border-strong)',
                   boxShadow: 'var(--elevation-popover)',
                   position: 'relative',
@@ -330,7 +342,7 @@ export function StylesAndMarginsDialog({
                     left: `${(pageSetupDraft.marginLeftMm / (pageSetupDraft.orientation === 'portrait' ? 210 : 297)) * 100}%`,
                     right: `${(pageSetupDraft.marginRightMm / (pageSetupDraft.orientation === 'portrait' ? 210 : 297)) * 100}%`,
                     border: '1px dashed var(--accent)',
-                    backgroundColor: 'rgba(26, 86, 219, 0.05)',
+                    backgroundColor: 'var(--paper-sunken)',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'center',
@@ -351,20 +363,22 @@ export function StylesAndMarginsDialog({
         )}
 
         {tab === 'styles' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
+                <label htmlFor={`${uid}-4`} style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
                   Police par défaut
                 </label>
                 <select
+                      id={`${uid}-4`}
                   value={defaultsDraft.fontFamily}
                   onChange={(e) => setDefaultsDraft((d) => ({ ...d, fontFamily: e.target.value }))}
                   style={{
                     width: '100%',
-                    padding: '6px 8px',
-                    borderRadius: 'var(--radius-xs)',
-                    border: '1px solid var(--border-strong)',
+                    minHeight: 'var(--control-height)',
+                    padding: '0 var(--space-3)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-input)',
                     backgroundColor: 'var(--bg-app)',
                     color: 'var(--fg-primary)',
                   }}
@@ -386,17 +400,19 @@ export function StylesAndMarginsDialog({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
+                <label htmlFor={`${uid}-5`} style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
                   Taille par défaut (pt)
                 </label>
                 <select
+                      id={`${uid}-5`}
                   value={defaultsDraft.fontSizePt}
                   onChange={(e) => setDefaultsDraft((d) => ({ ...d, fontSizePt: Number(e.target.value) }))}
                   style={{
                     width: '100%',
-                    padding: '6px 8px',
-                    borderRadius: 'var(--radius-xs)',
-                    border: '1px solid var(--border-strong)',
+                    minHeight: 'var(--control-height)',
+                    padding: '0 var(--space-3)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-input)',
                     backgroundColor: 'var(--bg-app)',
                     color: 'var(--fg-primary)',
                   }}
@@ -410,19 +426,21 @@ export function StylesAndMarginsDialog({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
+                <label htmlFor={`${uid}-6`} style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
                   Interligne par défaut
                 </label>
                 <select
+                      id={`${uid}-6`}
                   value={defaultsDraft.lineSpacing}
                   onChange={(e) => setDefaultsDraft((d) => ({ ...d, lineSpacing: Number(e.target.value) }))}
                   style={{
                     width: '100%',
-                    padding: '6px 8px',
-                    borderRadius: 'var(--radius-xs)',
-                    border: '1px solid var(--border-strong)',
+                    minHeight: 'var(--control-height)',
+                    padding: '0 var(--space-3)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-input)',
                     backgroundColor: 'var(--bg-app)',
                     color: 'var(--fg-primary)',
                   }}
@@ -435,10 +453,11 @@ export function StylesAndMarginsDialog({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
+                <label htmlFor={`${uid}-7`} style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: '4px' }}>
                   Couleur par défaut
                 </label>
                 <input
+                      id={`${uid}-7`}
                   type="color"
                   value={defaultsDraft.color}
                   onChange={(e) => setDefaultsDraft((d) => ({ ...d, color: e.target.value }))}
@@ -446,8 +465,8 @@ export function StylesAndMarginsDialog({
                     width: '100%',
                     height: '34px',
                     padding: '2px',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: 'var(--radius-xs)',
+                    border: '1px solid var(--border-input)',
+                    borderRadius: 'var(--radius-md)',
                     backgroundColor: 'var(--bg-app)',
                     cursor: 'pointer',
                   }}
@@ -458,12 +477,12 @@ export function StylesAndMarginsDialog({
         )}
 
         {/* Actions */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--space-4)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--space-3)' }}>
           <Button variant="ghost" onClick={handleReset}>
             Valeurs par défaut
           </Button>
 
-          <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <Button variant="ghost" onClick={onClose}>
               Annuler
             </Button>

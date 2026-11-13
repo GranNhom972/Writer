@@ -1,0 +1,203 @@
+/*
+ * Warm Bento — jetons de design (source unique de vérité).
+ *
+ * Copie de référence : design/warm-bento/tokens.css (dépôt racine CloudAntille).
+ * Chaque client en garde une copie IDENTIQUE dans src/design/warm-bento/ ;
+ * scripts/sync-design.sh la recopie, `scripts/verify.sh guards` vérifie l'égalité.
+ * Ne jamais modifier une copie : modifier la référence puis lancer la synchro.
+ *
+ * Aucune couleur, aucun rayon, aucune ombre en dur ailleurs : toujours var(--…).
+ * Contrastes calculés selon WCAG 2.2.
+ */
+
+/* Polices embarquées (SIL Open Font License 1.1, voir fonts/OFL-*.txt) : aucune requête réseau. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./fonts/InterVariable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./fonts/InterVariable-Italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg-canvas: #FBF9F7;        /* fond de l'application */
+  --surface: #FFFFFF;          /* cartes, barres, sidebar */
+  --surface-subtle: #F9F6F3;   /* en-tête de tableau, survol bouton secondaire */
+  --surface-muted: #F3EFEA;    /* panneaux, colonnes kanban, survol de ligne, élément actif */
+  --surface-strong: #EAE4DC;   /* survol bouton fantôme, tags, squelettes de chargement */
+  --surface-glass: rgba(255, 255, 255, 0.92); /* panneaux flottants sur une carte */
+  --overlay: rgba(38, 28, 22, 0.40);          /* voile des modales et tiroirs */
+
+  /* Texte */
+  --text-primary: #261C16;     /* 16,7:1 sur blanc, 14,6:1 sur muted */
+  --text-secondary: #6E5D53;   /* 6,3:1 sur blanc, 5,5:1 sur muted */
+  --text-muted: #776860;       /* placeholders, méta : 5,3:1 sur blanc, 4,7:1 sur muted */
+  --text-on-accent: #FFFFFF;   /* 11,6:1 sur espresso */
+  --text-on-danger: #FFFFFF;   /* 8,1:1 sur --danger */
+
+  /* Marque */
+  --accent: #4A3428;           /* espresso : CTA, onglet actif, icônes principales */
+  --accent-hover: #36251C;
+  --clay: #8C6D58;             /* argile : accent secondaire */
+  --sand: #D4C5B9;             /* sable : décoratif uniquement (1,7:1) */
+  --accent-halo: rgba(74, 52, 40, 0.20); /* halo du marqueur actif */
+
+  /* Papier : ce qui est posé sur un document au rendu toujours clair (page Writer, PDF,
+     feuille de CV, post-it). Ces jetons ne changent PAS en mode sombre. */
+  --paper: #FFFFFF;
+  --paper-ink: #261C16;
+  --paper-accent: #4A3428;     /* 11,6:1 sur --paper */
+
+  /* Bordures */
+  --border: rgba(74, 52, 40, 0.08);        /* cartes : décoratif */
+  --border-strong: rgba(74, 52, 40, 0.20); /* bouton secondaire, séparateurs marqués */
+  --border-input: #9E8E85;                 /* champs de saisie : 3,1:1 sur blanc */
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+
+  /* Statuts : texte sur fond */
+  --success: #2D5A3F;  --success-bg: #EBF3ED;  /* 7,0:1 */
+  --warning: #9A6016;  --warning-bg: #FBF3E6;  /* 4,7:1 */
+  --danger:  #902D2D;  --danger-bg:  #FDF0F0;  /* 7,3:1 */
+  --info:    #4A3428;  --info-bg:    #F3EFEA;  /* 10,1:1 */
+
+  /* Séries de graphiques : 4 au maximum, dans cet ordre */
+  --chart-1: var(--accent);
+  --chart-2: var(--clay);
+  --chart-3: var(--success);
+  --chart-4: var(--warning);
+
+  /* Ombres */
+  --shadow-sm: 0 2px 6px -1px rgba(74, 52, 40, 0.03);
+  --shadow-md: 0 4px 20px -2px rgba(74, 52, 40, 0.05), 0 2px 6px -1px rgba(74, 52, 40, 0.03);
+  --shadow-lg: 0 8px 24px rgba(74, 52, 40, 0.12); /* glisser-déposer, modales, menus */
+
+  /* Rayons */
+  --radius-sm: 8px;    /* bouton fantôme, bouton icône, tags */
+  --radius-md: 10px;   /* boutons, champs */
+  --radius-lg: 12px;   /* cartes de fichier, colonnes kanban, tableaux */
+  --radius-xl: 16px;   /* cartes bento, modales */
+  --radius-full: 999px;/* badges, pastilles de compteur */
+  --radius-xs: 4px;    /* petites marques : cases de carte de chaleur, barres de graphique */
+
+  /* Espacements (base 4 px) */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px; --space-12: 48px;
+
+  /* Typographie */
+  --font-sans: "Inter", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --text-h1: 700 28px/36px var(--font-sans);
+  --text-h2: 600 20px/28px var(--font-sans);
+  --text-h3: 600 15px/22px var(--font-sans);
+  --text-body: 400 14px/20px var(--font-sans);
+  --text-small: 500 12px/16px var(--font-sans);
+
+  /* Dimensions de cadre */
+  --sidebar-width: 240px;
+  --sidebar-width-compact: 64px;
+  --control-height: 40px;
+  --icon-button: 36px;
+  --toolbar-height: 44px;
+  --content-max: 1440px;
+
+  /* Mouvement */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+}
+
+/* Mode sombre — mêmes rôles, valeurs inversées et vérifiées.
+   Deux blocs identiques : préférence du système, ou choix manuel data-theme="dark". */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg-canvas: #1C1613;
+    --surface: #251D19;
+    --surface-subtle: #2A211C;
+    --surface-muted: #30261F;
+    --surface-strong: #3A2E26;
+    --surface-glass: rgba(37, 29, 25, 0.92);
+    --overlay: rgba(0, 0, 0, 0.55);
+    --text-primary: #F3EDE8;   /* 14,3:1 sur surface */
+    --text-secondary: #BBA99E; /* 7,3:1 */
+    --text-muted: #A08E83;     /* 5,3:1 sur surface, 4,7:1 sur muted */
+    --text-on-accent: #1C1613;
+    --text-on-danger: #1C1613;
+    --accent: #E6D5C7;         /* l'espresso devient crème : 11,6:1 sur surface */
+    --accent-hover: #F3EDE8;
+    --clay: #C9A48A;           /* 7,2:1 */
+    --sand: #5A4639;
+    --accent-halo: rgba(230, 213, 199, 0.25);
+    --border: rgba(243, 237, 232, 0.08);
+    --border-strong: rgba(243, 237, 232, 0.20);
+    --border-input: #7E6D63;   /* 3,4:1 */
+    --success: #8FC4A0; --success-bg: #1F2E24;
+    --warning: #E3B06A; --warning-bg: #33281A;
+    --danger:  #EE9A9A; --danger-bg:  #3A2020;
+    --info:    #E6D5C7; --info-bg:    #30261F;
+    --shadow-sm: 0 2px 6px -1px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-canvas: #1C1613;
+  --surface: #251D19;
+  --surface-subtle: #2A211C;
+  --surface-muted: #30261F;
+  --surface-strong: #3A2E26;
+  --surface-glass: rgba(37, 29, 25, 0.92);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --text-primary: #F3EDE8;
+  --text-secondary: #BBA99E;
+  --text-muted: #A08E83;
+  --text-on-accent: #1C1613;
+  --text-on-danger: #1C1613;
+  --accent: #E6D5C7;
+  --accent-hover: #F3EDE8;
+  --clay: #C9A48A;
+  --sand: #5A4639;
+  --accent-halo: rgba(230, 213, 199, 0.25);
+  --border: rgba(243, 237, 232, 0.08);
+  --border-strong: rgba(243, 237, 232, 0.20);
+  --border-input: #7E6D63;
+  --success: #8FC4A0; --success-bg: #1F2E24;
+  --warning: #E3B06A; --warning-bg: #33281A;
+  --danger:  #EE9A9A; --danger-bg:  #3A2020;
+  --info:    #E6D5C7; --info-bg:    #30261F;
+  --shadow-sm: 0 2px 6px -1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 80ms;
+  }
+}

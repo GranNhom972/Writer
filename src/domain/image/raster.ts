@@ -145,3 +145,68 @@ export async function rasterizeAll(sources: readonly string[]): Promise<Map<stri
   );
   return out;
 }
+
+/** Longest side of a pasted picture, in pixels: beyond it, nobody sees the difference on an A4 sheet. */
+const MAX_PASTED_SIDE_PX = 4000;
+
+/** Size in bytes of the content of a base64 `data:` URL. */
+function dataUrlBytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(',');
+  return Math.floor(((dataUrl.length - comma - 1) * 3) / 4);
+}
+
+/**
+ * Turns any picture the browser can read into a `data:` URL the document accepts.
+ *
+ * A paste must **work**, not explain itself: a 4K screenshot easily weighs more than the 4 MB limit, and a
+ * BMP or a TIFF copied from another application is not among the formats the server stores. Rather than
+ * refuse, the picture is redrawn: as PNG when it fits (sharp text, transparency kept), then as JPEG and
+ * smaller if needed. A file already acceptable passes untouched.
+ */
+export async function pictureToAcceptedDataUrl(
+  file: Blob,
+  accepted: (type: string) => boolean,
+): Promise<string> {
+  if (accepted(file.type) && file.size <= MAX_IMAGE_BYTES) return readFileAsDataUrl(file);
+
+  if (typeof document === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    throw new Error('Conversion d’image indisponible hors navigateur.');
+  }
+
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('Image illisible.'));
+      element.src = url;
+    });
+
+    let scale = Math.min(1, MAX_PASTED_SIDE_PX / Math.max(image.naturalWidth, image.naturalHeight, 1));
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Conversion d’image indisponible.');
+
+      const png = (() => {
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/png');
+      })();
+      if (dataUrlBytes(png) <= MAX_IMAGE_BYTES) return png;
+
+      // JPEG has no transparency: white background, as for the PDF export.
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const jpeg = canvas.toDataURL('image/jpeg', 0.88);
+      if (dataUrlBytes(jpeg) <= MAX_IMAGE_BYTES) return jpeg;
+
+      scale *= 0.75;
+    }
+    throw new Error(`Image trop lourde (${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} Mo maximum).`);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

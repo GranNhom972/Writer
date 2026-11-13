@@ -67,6 +67,7 @@ import {
   type DocumentBlock,
   type DocumentPosition,
   type DocumentSelection,
+  type HeadingLevel,
   type ListKind,
   type ParagraphNode,
   type RunFormatting,
@@ -412,6 +413,7 @@ export function splitParagraph(state: EditorState): EditorState {
   if (node.paragraph.type === 'heading') {
     follower.type = 'paragraph';
     delete follower.headingLevel;
+    delete follower.styleName;
   }
   // An explicit page break stays attached to the node that received it.
   delete follower.pageBreakBefore;
@@ -592,16 +594,30 @@ function applyParagraphPatch(node: ParagraphNode, patch: ParagraphPatch): Paragr
     if (value === undefined || value === null) delete fields[key];
     else fields[key] = value;
   }
-  // A paragraph that becomes ordinary again does not keep its heading level.
-  if (updated.type !== 'heading') delete updated.headingLevel;
+  // A paragraph that becomes ordinary again does not keep its heading level nor its heading style.
+  if (updated.type !== 'heading') {
+    delete updated.headingLevel;
+    delete updated.styleName;
+  }
   return updated;
 }
 
 /** Turns the selection into a heading of the given level, or into an ordinary paragraph. */
 export function setHeading(state: EditorState, level: 0 | 1 | 2 | 3 | 4 | 5 | 6): EditorState {
   return level === 0
-    ? applyParagraphFormat(state, { type: 'paragraph' })
-    : applyParagraphFormat(state, { type: 'heading', headingLevel: level });
+    ? applyParagraphFormat(state, { type: 'paragraph', styleName: null })
+    : applyParagraphFormat(state, { type: 'heading', headingLevel: level, styleName: null });
+}
+
+/**
+ * Applies a custom heading style: the paragraph becomes a heading of the style's outline level
+ * (so it shows up in the outline and the table of contents) and points to the style by its id.
+ */
+export function setCustomHeadingStyle(
+  state: EditorState,
+  style: { id: string; level: HeadingLevel },
+): EditorState {
+  return applyParagraphFormat(state, { type: 'heading', headingLevel: style.level, styleName: style.id });
 }
 
 /* ------------------------------------------------------------------ lists */
@@ -663,6 +679,7 @@ export function toggleList(state: EditorState, kind: ListKind): EditorState {
       if (updated.type === 'heading') {
         updated.type = 'paragraph';
         delete updated.headingLevel;
+        delete updated.styleName;
       }
       if (kind !== 'task') delete updated.listChecked;
       else updated.listChecked = paragraph.listChecked ?? false;
@@ -748,6 +765,7 @@ export function extractFragment(state: EditorState): DocumentFragment {
 
     const attributes: ParagraphPatch = { type: node.type };
     if (node.headingLevel !== undefined) attributes.headingLevel = node.headingLevel;
+    if (node.styleName !== undefined) attributes.styleName = node.styleName;
     if (node.alignment !== undefined) attributes.alignment = node.alignment;
     if (node.lineSpacing !== undefined) attributes.lineSpacing = node.lineSpacing;
 
@@ -806,7 +824,10 @@ export function insertFragment(state: EditorState, fragment: DocumentFragment): 
 
     const created = createParagraph('', { runs });
     Object.assign(created, entry.attributes);
-    if (created.type !== 'heading') delete created.headingLevel;
+    if (created.type !== 'heading') {
+      delete created.headingLevel;
+      delete created.styleName;
+    }
 
     doc = insertParagraphAfter(doc, previousId, created);
     previousId = created.id;

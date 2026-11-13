@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Writer contributors
 
 import { useEffect, useRef, useState } from 'react';
+import { fileNameForTitle, normalizeTitle, UNTITLED } from '../../domain/document/fileName';
 
 interface DocumentTitleProps {
   title: string;
@@ -30,11 +31,13 @@ export function DocumentTitle({ title, disabled, onCommit }: DocumentTitleProps)
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const commit = (): void => {
-    const next = draft.trim();
+    const next = normalizeTitle(draft);
     if (!next) {
       setDraft(committed.current);
       return;
     }
+    // The field shows the cleaned name, `.odt` typed out of habit included.
+    setDraft(next);
     if (next !== committed.current) {
       committed.current = next;
       onCommit(next);
@@ -48,7 +51,10 @@ export function DocumentTitle({ title, disabled, onCommit }: DocumentTitleProps)
         className="titlebar__input"
         value={draft}
         disabled={disabled}
-        aria-label="Titre du document"
+        placeholder={UNTITLED}
+        aria-label="Nom du document"
+        // The name is also that of the saved file: the tooltip says so, since nothing else on screen does.
+        title={`Nom du document, et du fichier enregistré : ${fileNameForTitle(draft || UNTITLED)}. Cliquer pour renommer.`}
         onChange={(event) => setDraft(event.target.value.slice(0, 200))}
         onBlur={commit}
         onKeyDown={(event) => {

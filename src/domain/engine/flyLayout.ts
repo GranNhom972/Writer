@@ -191,6 +191,44 @@ export function resolveFlyLeft(
   }
 }
 
+/* ----------------------------------------------------- vertical position */
+
+/**
+ * Keeps a frame on its sheet, vertically. Counterpart of `SwFlyFreeFrm::CheckClip`
+ * (`sw/source/core/layout/flylay.cxx`): a frame anchored to a paragraph near the bottom of
+ * the page is **pushed back up** until it fits on the sheet, instead of running off it.
+ *
+ * `topPx` is in the frame of reference of the content area (the top margin is negative).
+ * A frame taller than the sheet sticks to its top edge: that is the only edge Writer keeps.
+ */
+export function clampFlyTopPx(
+  topPx: number,
+  heightPx: number,
+  geometry: Pick<PageGeometry, 'pageHeightPx' | 'contentTopPx'>,
+): number {
+  const minTopPx = -geometry.contentTopPx;
+  const maxTopPx = minTopPx + geometry.pageHeightPx - heightPx;
+  return Math.max(minTopPx, Math.min(topPx, Math.max(minTopPx, maxTopPx)));
+}
+
+/**
+ * Vertical correction that `clampFlyTopPx` applies to a frame whose anchor starts at
+ * `originPx`. Zero for every frame that already fits on the sheet, which is the usual case.
+ *
+ * The painted frame (`attachFlies`) and the band carved out of the text (the exclusions)
+ * must move **together**: correcting one without the other left the text going around an
+ * empty space while the image covered other lines.
+ */
+export function flyClampShiftPx(
+  fly: Pick<FlyFrame, 'topPx' | 'heightPx'>,
+  originPx: number,
+  geometry: Pick<PageGeometry, 'pageHeightPx' | 'contentTopPx'> | undefined,
+): number {
+  if (!geometry) return 0;
+  const top = originPx + fly.topPx;
+  return clampFlyTopPx(top, fly.heightPx, geometry) - top;
+}
+
 /** Is a frame floating, as opposed to "as a character"? */
 export function isFloatingFly(run: TextRun): boolean {
   return (
@@ -338,7 +376,31 @@ export function usableBand(
   contentWidthPx: number,
   minWidthPx: number = MIN_BAND_WIDTH_PX,
 ): { leftPx: number; rightPx: number } | null {
-  if (exclusions.length === 0) return { leftPx: 0, rightPx: contentWidthPx };
+  let best: { leftPx: number; rightPx: number } | null = null;
+  for (const band of usableBands(exclusions, topPx, bottomPx, contentWidthPx, minWidthPx)) {
+    if (!best || band.rightPx - band.leftPx > best.rightPx - best.leftPx) best = band;
+  }
+  return best;
+}
+
+/**
+ * **Every** free interval for a line occupying `[topPx, bottomPx)`, from left to right, each at
+ * least `minWidthPx` wide. Empty when nothing usable remains (see `nextClearY`).
+ *
+ * This is what `SwTxtFormatter::CalcFlyWidth` (`sw/source/core/text/itrform2.cxx`) works with: a
+ * frame wrapped `parallel` in the middle of the column does not choose a side, the line is filled
+ * on the left of the frame, a `SwFlyPortion` jumps over it, and the **same** line carries on to
+ * its right. Keeping only the widest interval sent the whole text to one side and left the other
+ * empty, unlike Writer.
+ */
+export function usableBands(
+  exclusions: readonly FlyExclusion[],
+  topPx: number,
+  bottomPx: number,
+  contentWidthPx: number,
+  minWidthPx: number = MIN_BAND_WIDTH_PX,
+): { leftPx: number; rightPx: number }[] {
+  if (exclusions.length === 0) return [{ leftPx: 0, rightPx: contentWidthPx }];
 
   // Free intervals, initially the whole column. Each frame that crosses the line vertically takes
   // its share out of them.
@@ -360,17 +422,13 @@ export function usableBand(
       if (exclusion.rightPx < span.right) next.push({ left: exclusion.rightPx, right: span.right });
     }
     free = next;
-    if (free.length === 0) return null;
+    if (free.length === 0) return [];
   }
 
-  let best: { left: number; right: number } | null = null;
-  for (const span of free) {
-    const width = span.right - span.left;
-    if (width < minWidthPx) continue;
-    if (!best || width > best.right - best.left) best = span;
-  }
-
-  return best ? { leftPx: best.left, rightPx: best.right } : null;
+  return free
+    .filter((span) => span.right - span.left >= minWidthPx)
+    .sort((a, b) => a.left - b.left)
+    .map((span) => ({ leftPx: span.left, rightPx: span.right }));
 }
 
 /**
@@ -405,12 +463,26 @@ export function paragraphExclusions(
   flies: readonly FlyFrame[],
   paragraph: ParagraphNode,
   contentWidthPx: number,
+  /**
+   * Where the paragraph starts on its page, and the sheet it sits on. Only needed to keep a
+   * frame on the sheet (`clampFlyTopPx`); without it the frames are taken as they are.
+   */
+  origin?: {
+    topPx: number;
+    geometry: Pick<PageGeometry, 'pageHeightPx' | 'contentTopPx'>;
+  },
 ): FlyExclusion[] {
   const out: FlyExclusion[] = [];
   for (const fly of flies) {
     if (fly.anchor !== 'to-para' || fly.anchorBlockId !== paragraph.id) continue;
     const exclusion = exclusionOf(fly, contentWidthPx);
-    if (exclusion) out.push(exclusion);
+    if (!exclusion) continue;
+    const shift = origin ? flyClampShiftPx(fly, origin.topPx, origin.geometry) : 0;
+    out.push(
+      shift === 0
+        ? exclusion
+        : { ...exclusion, topPx: exclusion.topPx + shift, bottomPx: exclusion.bottomPx + shift },
+    );
   }
   return out;
 }
@@ -457,6 +529,8 @@ export function projectedExclusions(
    * line.
    */
   currentBlockId?: string,
+  /** Sheet the frames must stay on (`clampFlyTopPx`). Absent: frames taken as they are. */
+  geometry?: Pick<PageGeometry, 'pageHeightPx' | 'contentTopPx'>,
 ): FlyExclusion[] {
   const out: FlyExclusion[] = [];
   for (const fly of flies) {
@@ -472,7 +546,7 @@ export function projectedExclusions(
     // with a y coordinate counted from the top of the content area, then brought back to the
     // paragraph's frame of reference.
     const originePx = fly.anchor === 'to-page' ? 0 : place.topPx;
-    const decalagePx = originePx - paragraphTopPx;
+    const decalagePx = originePx + flyClampShiftPx(fly, originePx, geometry) - paragraphTopPx;
 
     out.push({
       ...exclusion,

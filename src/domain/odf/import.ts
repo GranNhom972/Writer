@@ -22,7 +22,7 @@ import {
   DEFAULT_DEFAULTS,
   newId,
 } from '../document/document';
-import { A4_PORTRAIT } from '../document/pageSetup';
+import { A4_PORTRAIT, pageGeometry } from '../document/pageSetup';
 import { makeRun, normalizeRuns, runFormatting } from '../document/runs';
 import {
   DEFAULT_FURNITURE,
@@ -55,10 +55,18 @@ import { DEFAULT_TOC_MAX_LEVEL, DEFAULT_TOC_TITLE } from '../document/tox';
 import type { Redline } from '../document/redline';
 import { attr, localName, NS } from './namespaces';
 import { clampSize, cropFormatting, isSafeImageSrc, IMAGE_PLACEHOLDER } from '../document/images';
-import { collectStyles, resolveStyle, type StyleTable } from './styles';
+import {
+  collectStyles,
+  customHeadingIdOf,
+  findHeadingStyleInChain,
+  readHeadingStyles,
+  resolveStyle,
+  type GraphicAttributes,
+  type StyleTable,
+} from './styles';
 import { parseLengthMm } from './units';
 import { normalizeUrl } from '../document/url';
-import { mmToPt } from '../document/units';
+import { mmToPt, pxToPt } from '../document/units';
 
 export interface ImportResult {
   document: WriterDocumentState;
@@ -138,6 +146,8 @@ export function importOdfContent(
     }
   }
 
+  Object.assign(document.defaults, readHeadingStyles(styles, document.defaults));
+
   const body = findFirst(content, 'text');
   if (!body) {
     warnings.push("Aucun élément <office:text> : le fichier n'est pas un document texte.");
@@ -157,6 +167,14 @@ export function importOdfContent(
     comments: [],
     redlines,
     deletedText,
+    page: (() => {
+      const geometry = pageGeometry(document.pageSetup);
+      return {
+        contentTopPt: pxToPt(geometry.contentTopPx),
+        contentHeightPt: pxToPt(geometry.contentHeightPx),
+        pageHeightPt: pxToPt(geometry.pageHeightPx),
+      };
+    })(),
   };
 
   document.blocks = readBlocks(body, ctx);
@@ -437,6 +455,16 @@ interface ImportContext {
   redlines: ReadonlyMap<string, Redline>;
   /** Deleted text, to put back at the `<text:change>` milestones. */
   deletedText: ReadonlyMap<string, string>;
+  /** The sheet, to bring the position of a page frame back into the model's frame of reference. */
+  page?: PageFrameOfReference;
+}
+
+/** Vertical measurements of the sheet, in points. */
+interface PageFrameOfReference {
+  /** Top of the printable area, from the top edge of the sheet. */
+  contentTopPt: number;
+  contentHeightPt: number;
+  pageHeightPt: number;
 }
 
 /** Walks the children of a flow container and produces the blocks of the model. */
@@ -446,10 +474,47 @@ function readBlocks(
   list: ListScope | null = null,
 ): DocumentBlock[] {
   const blocks: DocumentBlock[] = [];
+  /*
+   * Frames anchored to the page. Writer writes them **between** the paragraphs, directly in
+   * `<office:text>`, since they belong to no paragraph. The model carries every frame on an anchor
+   * character, so they are given to the paragraph that follows (the one that opens their page in the
+   * usual case), or to an empty paragraph at the end. Ignoring them made every page image of an
+   * OpenOffice document disappear on import.
+   */
+  let pageFrames: TextRun[] = [];
+  const confierCadres = (): void => {
+    if (pageFrames.length === 0) return;
+    const dernier = blocks[blocks.length - 1];
+    if (!dernier || isTable(dernier) || dernier.type === 'toc') return;
+    dernier.runs = [...pageFrames, ...dernier.runs.filter((run) => run.text.length > 0)];
+    pageFrames = [];
+  };
 
   for (let i = 0; i < container.children.length; i += 1) {
     const element = container.children[i]!;
+    const avant = blocks.length;
     switch (localName(element)) {
+      case 'frame': {
+        const cadre = readImageFrame(element, ctx.pictures, ctx.styles, ctx.page);
+        if (cadre) {
+          pageFrames.push(
+            cadre.imageAnchor === 'to-page' || !cadre.imageAnchor || cadre.imageAnchor === 'as-char'
+              ? makeRun(cadre.text, {
+                  ...runFormatting(cadre),
+                  ...(cadre.imageAnchor === 'to-page'
+                    ? {}
+                    : {
+                        imageAnchor: 'to-page' as const,
+                        imageSurround: cadre.imageSurround ?? 'parallel',
+                        imageXPt: cadre.imageXPt ?? 0,
+                        imageYPt: cadre.imageYPt ?? 0,
+                      }),
+                })
+              : cadre,
+          );
+        }
+        break;
+      }
       case 'p':
         blocks.push(readParagraph(element, ctx, null, list));
         break;
@@ -497,6 +562,13 @@ function readBlocks(
       default:
         break;
     }
+    if (blocks.length > avant) confierCadres();
+  }
+
+  if (pageFrames.length > 0) {
+    const porteur = createParagraph('');
+    porteur.runs = pageFrames;
+    blocks.push(porteur);
   }
 
   return blocks;
@@ -637,6 +709,7 @@ function readImageFrame(
   frame: Element,
   pictures: ReadonlyMap<string, string>,
   styles: StyleTable,
+  page?: PageFrameOfReference,
 ): TextRun | null {
   /*
    * Enclosing frame of a captioned image: ours when exporting, Writer's when reading back. The image lives in a
@@ -647,7 +720,7 @@ function readImageFrame(
   if (textBox) {
     const inner = textBox.getElementsByTagNameNS(NS.draw, 'frame')[0];
     if (!inner) return null;
-    const base = readImageFrame(inner, pictures, styles);
+    const base = readImageFrame(inner, pictures, styles, page);
     if (!base) return null;
 
     const texte = attr(frame, NS.writer, 'caption');
@@ -718,9 +791,13 @@ function readImageFrame(
           imageXPt: parseLengthMm(attr(frame, NS.svg, 'x')) !== null
             ? parseLengthMm(attr(frame, NS.svg, 'x'))! * PT_PER_MM
             : 0,
-          imageYPt: parseLengthMm(attr(frame, NS.svg, 'y')) !== null
-            ? parseLengthMm(attr(frame, NS.svg, 'y'))! * PT_PER_MM
-            : 0,
+          imageYPt: frameYPt(
+            anchor,
+            parseLengthMm(attr(frame, NS.svg, 'y')),
+            heightPt,
+            graphic,
+            page,
+          ),
           ...(graphic?.wrapMarginPt !== undefined
             ? { imageWrapMarginPt: graphic.wrapMarginPt }
             : {}),
@@ -743,6 +820,42 @@ function readImageFrame(
     ...(crop ? cropFormatting(crop) : {}),
     ...flyFormatting,
   });
+}
+
+/**
+ * Vertical offset of a floating frame, in the model's frame of reference.
+ *
+ * The model counts a page frame from the top of the **printable area**; Writer usually writes it from
+ * the top edge of the **sheet** (`style:vertical-rel="page"`), which put every page image too low by
+ * the whole top margin. A page frame aligned at the top, middle or bottom (`style:vertical-pos`) has no
+ * `svg:y` at all: the alignment is resolved here, once, into an offset.
+ */
+function frameYPt(
+  anchor: FlyAnchor,
+  yMm: number | null,
+  heightPt: number,
+  graphic: GraphicAttributes | undefined,
+  page: PageFrameOfReference | undefined,
+): number {
+  const yPt = yMm !== null ? yMm * PT_PER_MM : 0;
+  if (anchor !== 'to-page' || !page) return yPt;
+
+  const surLaFeuille = graphic?.vertRelation === 'page';
+  // Height of the reference, and where it starts relative to the printable area.
+  const hauteurPt = surLaFeuille ? page.pageHeightPt : page.contentHeightPt;
+  const originePt = surLaFeuille ? -page.contentTopPt : 0;
+
+  switch (graphic?.vertOrient) {
+    case 'top':
+      return originePt;
+    case 'middle':
+      return originePt + (hauteurPt - heightPt) / 2;
+    case 'bottom':
+      return originePt + hauteurPt - heightPt;
+    case 'from-top':
+    default:
+      return originePt + yPt;
+  }
 }
 
 /**
@@ -803,7 +916,11 @@ function readParagraph(
   list: ListScope | null,
 ): ParagraphNode {
   const styleName = attr(element, NS.text, 'style-name');
-  const resolved = resolveStyle(ctx.styles, styleName);
+  // The look of a heading style lives in the document defaults (`readHeadingStyles`): flattening it
+  // into the runs as well would freeze it, and editing "Titre 1" afterwards would change nothing.
+  const headingStyle = headingLevel !== null ? findHeadingStyleInChain(ctx.styles, styleName) : null;
+  const resolved = resolveStyle(ctx.styles, styleName, headingStyle?.name);
+  const customHeadingId = headingStyle ? customHeadingIdOf(headingStyle.name) : null;
 
   const runs: TextRun[] = [];
   collectRuns(element, ctx, resolved.text, runs);
@@ -814,6 +931,7 @@ function readParagraph(
     id: newId('p'),
     type: headingLevel !== null ? 'heading' : 'paragraph',
     ...(headingLevel !== null ? { headingLevel } : {}),
+    ...(customHeadingId ? { styleName: customHeadingId } : {}),
     runs: normalized.length > 0 ? normalized : [makeRun('')],
     ...(resolved.paragraph.alignment ? { alignment: resolved.paragraph.alignment } : {}),
     ...(resolved.paragraph.lineSpacing !== undefined ? { lineSpacing: resolved.paragraph.lineSpacing } : {}),
@@ -943,7 +1061,7 @@ function collectRuns(
         break;
       }
       case 'frame': {
-        const cadre = readImageFrame(element, ctx.pictures, ctx.styles);
+        const cadre = readImageFrame(element, ctx.pictures, ctx.styles, ctx.page);
         if (cadre) runs.push(cadre);
         // A frame that was not transcribed does **not** descend: its `<svg:desc>` would become text inside the paragraph,
         // which was never intended.

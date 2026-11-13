@@ -1,7 +1,7 @@
 /*
  * No token is defined here: `design/tokens.css` is the single source for them.
  *
- * This file used to redeclare a competing `:root`: same names, different values (`--space-1` was 4 px versus 2 px). Nothing showed, because the injection order gave `tokens.css` the last word; but nothing guarantees that
+ * This file used to redeclare a competing `:root`: same names, different values (`--space-half` was 4 px versus 2 px). Nothing showed, because the injection order gave `tokens.css` the last word; but nothing guarantees that
  * order, and the day it was reversed, the spacing scale of the whole application would have doubled, and the dark theme would have gone back to light, the dark overrides of `tokens.css` being overwritten by a later light
  * `:root`.
  */
@@ -12,8 +12,8 @@
 
 body {
   margin: 0;
-  font-family: var(--font-ui);
-  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  color: var(--text-primary);
   background: var(--bg-canvas);
 }
 
@@ -44,8 +44,8 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
+  gap: var(--space-half);
+  padding: var(--space-1) var(--space-2);
   background: var(--bg-app);
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -54,8 +54,8 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding-right: var(--space-2);
-  margin-right: var(--space-2);
+  padding-right: var(--space-1);
+  margin-right: var(--space-1);
   border-right: 1px solid var(--border-subtle);
 }
 
@@ -69,7 +69,7 @@ body {
   justify-content: center;
   min-width: 30px;
   height: 30px;
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-1);
   font: inherit;
   font-size: var(--text-md);
   color: var(--fg-primary);
@@ -90,14 +90,14 @@ body {
 
 .writer-button[aria-pressed='true'] {
   color: var(--accent);
-  background: var(--accent-subtle);
-  border-color: var(--accent-subtle);
+  background: var(--surface);
+  border-color: var(--border-strong);
 }
 
 .writer-button:focus-visible,
 .writer-select:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .writer-button--bold { font-weight: 700; }
@@ -107,7 +107,7 @@ body {
 
 .writer-select {
   height: 30px;
-  padding: 0 var(--space-1);
+  padding: 0 var(--space-half);
   font: inherit;
   font-size: var(--text-md);
   color: var(--fg-primary);
@@ -121,7 +121,7 @@ body {
 .writer-surface {
   position: relative;
   flex: 1;
-  padding: var(--space-4) 0 48px;
+  padding: var(--space-3) 0 48px;
   overflow: auto;
   /* The I-beam cursor over the whole surface: the document is clickable everywhere. */
   cursor: text;
@@ -290,49 +290,49 @@ body.writer-resizing-image * {
   left: 0;
   z-index: 4;
   display: inline-flex;
-  gap: var(--space-2);
-  padding: var(--space-2);
+  gap: var(--space-half);
+  padding: var(--space-half);
   /*
    * Line spacing taken back in hand.
    *
    * The bar lives in a line of text whose line spacing equals the height of the image, nearly a hundred pixels. Without this reset, the button's `font: inherit` inherited that value and the bar stretched to the height of the
    * image: an empty 145 × 119 px rectangle for a single button.
    */
-  font-family: var(--font-ui);
+  font-family: var(--font-sans);
   font-size: var(--text-sm);
   line-height: normal;
   white-space: nowrap;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--elevation-popover);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
   pointer-events: auto;
-  white-space: nowrap;
 }
 
 .writer-image__action {
   display: inline-flex;
   align-items: center;
-  min-height: var(--control-height);
-  padding: 0 var(--space-3);
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
+  min-height: var(--tool-height);
+  padding: 0 var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  font-weight: 500;
   /* Same: never the document's line spacing, which is that of the image. */
   line-height: normal;
-  color: var(--fg-primary);
+  color: var(--accent);
   background: transparent;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xs);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 .writer-image__action:hover {
-  background: var(--accent-subtle);
-  border-color: var(--accent);
+  background: var(--surface-strong);
 }
 
 .writer-image__action--primary {
-  color: #ffffff;
+  color: var(--text-on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -351,7 +351,7 @@ body.writer-resizing-image * {
   position: absolute;
   z-index: 2;
   border: 1px solid var(--accent);
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 9999px var(--media-dimmer);
   pointer-events: none;
 }
 
@@ -415,7 +415,7 @@ body.writer-resizing-image * {
   align-items: baseline;
   justify-content: center;
   cursor: pointer;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-xs);
   padding: 0;
   margin: 0;
   line-height: normal;
@@ -429,13 +429,13 @@ body.writer-resizing-image * {
 }
 
 .writer-math:hover {
-  background-color: var(--accent-subtle, rgba(26, 86, 219, 0.08));
-  box-shadow: 0 0 0 1.5px var(--accent, #1a56db);
+  background-color: var(--surface-muted);
+  box-shadow: 0 0 0 1.5px var(--accent);
 }
 
 .writer-math:active {
-  background-color: var(--accent-subtle, rgba(26, 86, 219, 0.16));
-  box-shadow: 0 0 0 2px var(--accent, #1a56db);
+  background-color: var(--surface-strong);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .writer-math--inline {
@@ -504,7 +504,7 @@ body.writer-resizing-image * {
 }
 
 .katex-error {
-  color: var(--danger, #e53e3e);
+  color: var(--danger);
 }
 
 .writer-caret {
@@ -563,13 +563,13 @@ body.writer-resizing-image * {
  */
 .writer-search {
   position: absolute;
-  background: rgba(181, 71, 8, 0.22);
+  background: var(--search-hit);
   pointer-events: none;
 }
 
 .writer-search--current {
-  background: rgba(181, 71, 8, 0.42);
-  outline: 1.5px solid var(--warning, #b54708);
+  background: var(--search-current);
+  outline: 1.5px solid var(--warning);
   outline-offset: -1px;
 }
 
@@ -703,8 +703,8 @@ body.writer-resizing-column .writer-table-resize__line {
 }
 
 .writer-table-grip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .writer-table-grip--column {
@@ -723,13 +723,16 @@ body.writer-resizing-column .writer-table-resize__line {
 
 .writer-status {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-4);
   align-items: center;
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--fg-secondary);
-  background: var(--bg-app);
-  border-top: 1px solid var(--border-subtle);
+  min-height: 28px;
+  padding: var(--space-1) var(--space-4);
+  font: 400 12px/16px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
 }
 
 .writer-status__spacer {
@@ -749,32 +752,30 @@ body.writer-resizing-column .writer-table-resize__line {
 
 .writer-page__furniture-header:hover,
 .writer-page__furniture-footer:hover {
-  background-color: rgba(26, 86, 219, 0.04);
-  outline: 1px dashed rgba(26, 86, 219, 0.45);
+  background-color: var(--surface-subtle);
+  outline: 1px dashed var(--border-input);
   outline-offset: -1px;
 }
 
 .page-guide__acces {
   position: absolute;
-  right: 16px;
+  right: var(--space-4);
   z-index: 5;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   min-height: 24px;
-  padding: 2px 10px;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  color: #1a56db;
-  background: #ffffff;
-  border: 1px solid #1a56db;
-  border-radius: 999px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  padding: var(--space-half) var(--space-2);
+  font: 500 12px/16px var(--font-sans);
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
   transform: translateY(-2px);
 }
 
@@ -795,9 +796,8 @@ body.writer-resizing-column .writer-table-resize__line {
 }
 
 .page-guide__acces:hover {
-  background: #ebf5ff;
-  color: #1e429f;
-  border-color: #1e429f;
+  background: var(--surface-subtle);
+  border-color: var(--accent);
 }
 
 /* ------------------------------------------------------------------ printing */
@@ -864,7 +864,7 @@ body.writer-resizing-column .writer-table-resize__line {
     max-height: none !important;
     padding: 0 !important;
     margin: 0 !important;
-    background: #ffffff !important;
+    background: var(--paper-bg) !important;
     transform: none !important;
     border: none !important;
     box-shadow: none !important;
@@ -875,7 +875,7 @@ body.writer-resizing-column .writer-table-resize__line {
     position: relative !important;
     box-shadow: none !important;
     border: none !important;
-    background: #ffffff !important;
+    background: var(--paper-bg) !important;
     margin: 0 auto !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;

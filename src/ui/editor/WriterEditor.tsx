@@ -25,15 +25,26 @@ import type {
   WriterDocumentState,
 } from '../../domain/document/types';
 import { paragraphIndex, paragraphText } from '../../domain/document/document';
-import { imageKey } from '../../domain/document/images';
+import { IMAGE_PLACEHOLDER, imageKey } from '../../domain/document/images';
+import { UNTITLED } from '../../domain/document/fileName';
 import { locateOffset } from '../../domain/document/runs';
 import { mmToPt, ptToMm, ptToPx, pxToPt } from '../../domain/document/units';
 import { fitToContentWidth, type ImageWrapPlacement } from '../../domain/document/images';
-import { probeImageSize, readFileAsDataUrl } from '../../domain/image/raster';
+import { pictureToAcceptedDataUrl, probeImageSize } from '../../domain/image/raster';
+import {
+  imageFromClipboard,
+  isAcceptedImageType,
+  type ClipboardImage,
+} from '../../domain/image/clipboard';
 import { DEFAULT_FURNITURE, type FurnitureBand } from '../../domain/document/pageFurniture';
 import { A4Page, AUCUN_RECT, AUCUNE_OCCURRENCE, AUCUN_PLACEMENT, type SearchRect } from './A4Page';
 import type { ImageContext } from './ParagraphView';
-import { useWriterInput, imageDraftAt } from './useWriterInput';
+import {
+  useWriterInput,
+  imageDraftAt,
+  imageRunAt,
+  rememberCopiedFragment,
+} from './useWriterInput';
 import { Ribbon } from '../components/Ribbon';
 import { MenuBar, type MenuDefinition } from '../components/MenuBar';
 import { ContextMenu } from '../components/ContextMenu';
@@ -43,6 +54,7 @@ import { DocumentOutline } from '../components/DocumentOutline';
 import { FindReplacePanel, type FindReplaceState } from '../dialogs/FindReplacePanel';
 import { CommandPalette, type PaletteCommand } from '../dialogs/CommandPalette';
 import { StylesAndMarginsDialog } from '../dialogs/StylesAndMarginsDialog';
+import { HeadingStylesDialog, type HeadingStyleTarget } from '../dialogs/HeadingStylesDialog';
 import { FootnoteDialog } from '../dialogs/FootnoteDialog';
 import { BookmarkDialog, CommentDialog } from '../dialogs/AnnotationDialog';
 import { CommentBand, COMMENT_BAND_WIDTH_PX } from './CommentBand';
@@ -64,6 +76,7 @@ import {
   selectMatch,
 } from '../../domain/engine/search';
 import { normalizeSelection, positionFromPoint, rangeRects } from '../../domain/engine/cursor';
+import type { LaidOutFly } from '../../domain/engine/paginate';
 import { downloadPdfWithImages, printDocument } from '../../domain/pdf';
 import { shortcutLabel } from '../shortcuts';
 import { PresenceAvatars } from '../../design/components/PresenceAvatars';
@@ -314,6 +327,8 @@ export function WriterEditor({
   const [showRuler, setShowRuler] = useState(true);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [stylesMarginsOpen, setStylesMarginsOpen] = useState(false);
+  // `null` = closed; otherwise the style the heading styles editor opens on.
+  const [headingStylesTarget, setHeadingStylesTarget] = useState<HeadingStyleTarget | null>(null);
   const [footnoteDialogOpen, setFootnoteDialogOpen] = useState(false);
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [bookmarkDialogOpen, setBookmarkDialogOpen] = useState(false);
@@ -513,6 +528,43 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       }
     },
     [commands, contentWidthPt, adresseFinale],
+  );
+
+  /**
+   * Pasting an image (`SwTransferable::PasteData`): a screenshot, a picture copied from a browser, from
+   * OpenOffice or from an image viewer.
+   *
+   * Same path as a dropped file, so the same rules: natural size brought down to the printable width, upload
+   * to the server when the document is shared. A picture too heavy or in a format the server does not keep is
+   * converted on the way rather than refused: a paste that does nothing is the worst outcome of all.
+   */
+  const handlePastedImage = useCallback(
+    (image: ClipboardImage) => {
+      if (image.kind === 'src') {
+        void handleDropImage(image.src);
+        return;
+      }
+      void pictureToAcceptedDataUrl(image.file, isAcceptedImageType)
+        .then(handleDropImage)
+        .catch(() => {
+          // Unreadable picture: the workshop opens on an empty frame, where the user can pick the file instead.
+          setImageDraft({ src: '', widthPt: contentWidthPt / 2, heightPt: contentWidthPt / 3, alt: '' });
+        });
+    },
+    [handleDropImage, contentWidthPt],
+  );
+
+  const onPasteInEditor = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const image = lectureSeule ? null : imageFromClipboard(event.clipboardData);
+      if (!image) {
+        handlers.onPaste(event);
+        return;
+      }
+      event.preventDefault();
+      handlePastedImage(image);
+    },
+    [handlers, handlePastedImage, lectureSeule],
   );
 
   /**
@@ -720,11 +772,30 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       commands.updateDocument('Mise en page', (current) => ({
         ...current,
         pageSetup: nextPageSetup,
-        defaults: nextDefaults,
+        // The margins dialog only edits the body text defaults: the heading styles always come
+        // from the document, so that a draft opened earlier never brings back stale ones.
+        defaults: (() => {
+          const { headingStyles: _h, customHeadingStyles: _c, ...body } = nextDefaults;
+          const { headingStyles, customHeadingStyles } = current.defaults;
+          return {
+            ...body,
+            ...(headingStyles ? { headingStyles } : {}),
+            ...(customHeadingStyles ? { customHeadingStyles } : {}),
+          };
+        })(),
       }));
       focus();
     },
     [commands, doc, focus],
+  );
+
+  // Saving the heading styles: one undo step for the whole dialog.
+  const handleSaveHeadingStyles = useCallback(
+    (nextDefaults: DocumentDefaults) => {
+      commands.updateDocument('Styles de titre', (current) => ({ ...current, defaults: nextDefaults }));
+      focus();
+    },
+    [commands, focus],
   );
 
   // Changing the margins from the ruler
@@ -774,7 +845,13 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
    * Without this re-anchoring, an image dragged far from its paragraph stayed drawn on that paragraph's page: the frame did follow the pointer, but dropped two pages further down it came out outside the original sheet.
    */
   const handleImageRelocated = useCallback(
-    (blockId: string, offset: number, clientX: number, clientY: number) => {
+    (
+      blockId: string,
+      offset: number,
+      clientX: number,
+      clientY: number,
+      grab?: { xPx: number; yPx: number },
+    ) => {
       const feuille = document
         .elementsFromPoint(clientX, clientY)
         .find((element): element is HTMLElement =>
@@ -790,28 +867,60 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       const xPx = (clientX - rect.left) / zoom - layout.geometry.contentLeftPx;
       const yPx = (clientY - rect.top) / zoom - layout.geometry.contentTopPx;
 
-      const cible = positionFromPoint(layout, pageIndex, xPx, yPx, measurer);
+      let cible = positionFromPoint(layout, pageIndex, xPx, yPx, measurer);
       if (!cible) return;
 
-      /*
-       * Position of the frame relative to its **new** anchor.
-       *
-       * The receiving paragraph has not moved since the previous pass: we therefore read its y coordinate as it is. The few pixels of gap that the layout recomputation will introduce afterwards are invisible, whereas keeping
-       * the old origin would make the image jump by a paragraph.
-       */
-      const accueil = layout.placements.get(cible.blockId)?.[0]?.placed.topPx ?? 0;
       const cadre = paragraphIndex(session.state.doc).byId.get(blockId)?.paragraph;
-      const largeurPx = cadre
-        ? ptToPx(imageDraftAt(cadre.runs, offset)?.widthPt ?? 0)
-        : 0;
+      const trouve = cadre ? imageRunAt(cadre.runs, offset) : null;
+      const run = trouve && cadre ? cadre.runs[trouve.index] : undefined;
+      if (!run) return;
+
+      // An image in the line has no coordinates: it simply takes the place of the text under the pointer.
+      if (!run.imageAnchor || run.imageAnchor === 'as-char') {
+        commands.moveImageTo(blockId, offset, cible, 0, 0);
+        return;
+      }
+
+      /*
+       * Re-anchoring keeps the frame **exactly where it was dropped** (`SwFEShell::EndDrag`).
+       *
+       * The frame's corner is the pointer minus the point where it was held. The previous version put the
+       * pointer at the center horizontally and at the top vertically: on release the image jumped by half
+       * its width and by the height between the grab point and its top edge.
+       */
+      const largeurPx = ptToPx(run.imageWidthPt ?? 0);
+      const cadreGauchePx = xPx - (grab?.xPx ?? largeurPx / 2);
+      const cadreHautPx = yPx - (grab?.yPx ?? 0);
+
+      /*
+       * The anchor decides the page (`SwFlyFrm::AnchorFrm`), and a paragraph anchors its frames where it
+       * **starts**. A paragraph that comes from the previous page would bring the frame back there: in that
+       * case the first paragraph that starts on this page takes the anchor instead.
+       */
+      let accueil = layout.placements.get(cible.blockId)?.[0];
+      if (accueil && accueil.pageIndex !== pageIndex) {
+        for (const [id, entrees] of layout.placements) {
+          const premiere = entrees[0];
+          if (premiere?.pageIndex === pageIndex && !layout.generatedBlockIds.has(id)) {
+            cible = { blockId: id, offset: 0 };
+            accueil = premiere;
+            break;
+          }
+        }
+      }
+
+      // A page frame counts from the top of the content area; a paragraph frame from its anchor.
+      const origineYPx = run.imageAnchor === 'to-page' ? 0 : (accueil?.placed.topPx ?? 0);
+      // The horizontal offset is read in the reference of its alignment: the sheet starts in the margin.
+      const origineXPx =
+        (run.imageHoriRelation ?? 'text') === 'page' ? -layout.geometry.contentLeftPx : 0;
 
       commands.moveImageTo(
         blockId,
         offset,
         cible,
-        // The grabbed point becomes the **center** of the frame: that is where the eye believes it is holding the image, and putting its corner under the pointer would shift it by half a width at every drop.
-        pxToPt(xPx - largeurPx / 2),
-        pxToPt(yPx - accueil),
+        pxToPt(cadreGauchePx - origineXPx),
+        pxToPt(cadreHautPx - origineYPx),
       );
     },
     [layout, measurer, zoom, session.state.doc, commands],
@@ -860,14 +969,130 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   );
 
   // `Escape` also clears the selection: it is the expected gesture, and it saves having to aim at the text to get rid of the handles.
+  /*
+   * Keyboard of a selected image, as in Writer when a frame is selected (`SwFEShell`, `frmsh.cxx`):
+   *
+   *  - `Suppr` / `Retour arrière` delete the image, not the character next to the caret;
+   *  - the arrows move a floating frame by 1 mm, `Alt` by one pixel for fine adjustment. An image in the
+   *    line has no coordinates: the arrows go back to the text, which is what moves the caret around it.
+   *
+   * The listener is in the **capture** phase: the hidden input of the editor would otherwise receive the
+   * key first and erase a character. Keys typed in a field of a window (the image dialog, a menu) are left
+   * alone: deleting the image while typing in its caption would be a nasty surprise.
+   */
   useEffect(() => {
     if (!imageSelection) return;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setImageSelection(null);
+      if (event.key === 'Escape') {
+        setImageSelection(null);
+        return;
+      }
+
+      const cibleClavier = event.target;
+      if (
+        cibleClavier instanceof HTMLElement &&
+        cibleClavier !== inputRef.current &&
+        (cibleClavier.closest('[role="dialog"], [role="menu"]') ||
+          /^(INPUT|TEXTAREA|SELECT)$/.test(cibleClavier.tagName) ||
+          cibleClavier.isContentEditable)
+      ) {
+        return;
+      }
+      if (lectureSeule || event.ctrlKey || event.metaKey) return;
+
+      const { blockId, offset } = imageSelection;
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        event.stopPropagation();
+        commands.deleteImage(blockId, offset);
+        setImageSelection(null);
+        return;
+      }
+
+      const fleches: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const direction = fleches[event.key];
+      if (!direction) return;
+
+      // The offset the frame really has on the page: an aligned frame stores `0` but sits elsewhere.
+      let pose: LaidOutFly | undefined;
+      for (const page of layout.pages) {
+        pose = page.flies?.find(
+          (laid) => laid.fly.anchorBlockId === blockId && laid.fly.anchorOffset === offset,
+        );
+        if (pose) break;
+      }
+      if (!pose) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      const pasPt = event.altKey ? pxToPt(1) : mmToPt(1);
+      const origineXPx =
+        (pose.fly.run.imageHoriRelation ?? 'text') === 'page' ? layout.geometry.contentLeftPx : 0;
+      commands.setImagePosition(
+        blockId,
+        offset,
+        pxToPt(pose.leftPx + origineXPx) + direction[0] * pasPt,
+        pxToPt(pose.topPx - pose.anchorTopPx) + direction[1] * pasPt,
+      );
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [imageSelection]);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [imageSelection, layout, commands, lectureSeule, inputRef]);
+
+  /*
+   * Copying a selected image (`Ctrl+C`, `Ctrl+X`), as Writer does with a selected frame.
+   *
+   * A click selects the image without selecting text, so the ordinary copy found nothing to copy. The image
+   * is kept as an internal fragment (caption, wrapping and size travel with it), and also written to the
+   * system clipboard as HTML, so it can be pasted into another application or another tab of the editor.
+   */
+  useEffect(() => {
+    if (!imageSelection) return;
+    const onClipboard = (event: ClipboardEvent): void => {
+      const cible = event.target;
+      if (
+        cible instanceof HTMLElement &&
+        cible !== inputRef.current &&
+        (cible.closest('[role="dialog"]') || /^(INPUT|TEXTAREA|SELECT)$/.test(cible.tagName))
+      ) {
+        return;
+      }
+      const { blockId, offset } = imageSelection;
+      const paragraphe = paragraphIndex(session.state.doc).byId.get(blockId)?.paragraph;
+      const trouve = paragraphe ? imageRunAt(paragraphe.runs, offset) : null;
+      const run = trouve && paragraphe ? paragraphe.runs[trouve.index] : undefined;
+      if (!run?.imageSrc || !event.clipboardData) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      rememberCopiedFragment(IMAGE_PLACEHOLDER, {
+        paragraphs: [{ runs: [run], attributes: { type: 'paragraph' } }],
+      });
+      event.clipboardData.setData('text/plain', IMAGE_PLACEHOLDER);
+      const alt = (run.imageAlt ?? '').replace(/"/g, '&quot;');
+      event.clipboardData.setData(
+        'text/html',
+        `<img src="${run.imageSrc.replace(/"/g, '&quot;')}" alt="${alt}">`,
+      );
+
+      if (event.type === 'cut' && !lectureSeule) {
+        commands.deleteImage(blockId, offset);
+        setImageSelection(null);
+      }
+    };
+    window.addEventListener('copy', onClipboard, true);
+    window.addEventListener('cut', onClipboard, true);
+    return () => {
+      window.removeEventListener('copy', onClipboard, true);
+      window.removeEventListener('cut', onClipboard, true);
+    };
+  }, [imageSelection, session.state.doc, commands, lectureSeule, inputRef]);
 
   // Definition of the menus of the MenuBar
   const menus = useMemo<MenuDefinition[]>(
@@ -974,6 +1199,8 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
           { label: 'Justifier', shortcut: shortcutLabel('Mod-j'), run: () => commands.setAlignment('justify') },
           { label: 'En-tête et pied de page…', run: () => setFurnitureBandToEdit('header'), separatorBefore: true },
           { label: 'Paramètres des marges et styles…', run: () => setStylesMarginsOpen(true) },
+          { label: 'Styles de titre…', run: () => setHeadingStylesTarget({ kind: 'level', level: 1 }), separatorBefore: true },
+          { label: 'Créer un style de titre…', run: () => setHeadingStylesTarget({ kind: 'new' }) },
         ],
       },
       {
@@ -1192,7 +1419,18 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       { id: 'h1', title: 'Titre 1', category: 'Styles', perform: () => commands.setHeadingLevel(1) },
       { id: 'h2', title: 'Titre 2', category: 'Styles', perform: () => commands.setHeadingLevel(2) },
       { id: 'h3', title: 'Titre 3', category: 'Styles', perform: () => commands.setHeadingLevel(3) },
+      { id: 'h4', title: 'Titre 4', category: 'Styles', perform: () => commands.setHeadingLevel(4) },
+      { id: 'h5', title: 'Titre 5', category: 'Styles', perform: () => commands.setHeadingLevel(5) },
+      { id: 'h6', title: 'Titre 6', category: 'Styles', perform: () => commands.setHeadingLevel(6) },
+      ...(doc.defaults.customHeadingStyles ?? []).map((style) => ({
+        id: `hs_${style.id}`,
+        title: `${style.name} (titre de niveau ${style.level})`,
+        category: 'Styles',
+        perform: () => commands.setCustomHeadingStyle(style.id),
+      })),
       { id: 'p', title: 'Texte normal (paragraphe)', category: 'Styles', perform: () => commands.setHeadingLevel(0) },
+      { id: 'heading_styles', title: 'Modifier les styles de titre…', category: 'Styles', perform: () => setHeadingStylesTarget({ kind: 'level', level: 1 }) },
+      { id: 'heading_style_new', title: 'Créer un style de titre…', category: 'Styles', perform: () => setHeadingStylesTarget({ kind: 'new' }) },
       { id: 'align_left', title: 'Aligner à gauche', category: 'Paragraphe', shortcut: shortcutLabel('Mod-l'), perform: () => commands.setAlignment('left') },
       { id: 'align_center', title: 'Centrer', category: 'Paragraphe', shortcut: shortcutLabel('Mod-e'), perform: () => commands.setAlignment('center') },
       { id: 'align_right', title: 'Aligner à droite', category: 'Paragraphe', shortcut: shortcutLabel('Mod-r'), perform: () => commands.setAlignment('right') },
@@ -1214,7 +1452,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
   );
 
   // Tab title = document title: a screen reader announces it when coming back to the tab, and printing to PDF suggests it as the file name.
-  const documentTitle = doc.meta.title || 'Sans titre';
+  const documentTitle = doc.meta.title || UNTITLED;
   useEffect(() => {
     document.title = `${documentTitle} – Writer`;
   }, [documentTitle]);
@@ -1225,8 +1463,8 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
       <header className="titlebar">
         <div className="titlebar__identity">
           <DocumentTitle
-            title={doc.meta.title || 'Guide de Référence CloudAntille Writer'}
-            disabled={false}
+            title={doc.meta.title}
+            disabled={lectureSeule}
             onCommit={handleTitleCommit}
           />
           <MenuBar menus={menus} />
@@ -1259,6 +1497,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         onToggleOutline={() => setOutlineOpen((open) => !open)}
         outlineOpen={outlineOpen}
         onOpenPageSetup={() => setStylesMarginsOpen(true)}
+        onOpenHeadingStyles={(target) => setHeadingStylesTarget(target ?? { kind: 'level', level: 1 })}
         onOpenMath={openMathDialog}
         onOpenImage={openImageDialog}
         onOpenFurniture={(band) => setFurnitureBandToEdit(band ?? 'header')}
@@ -1345,7 +1584,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                   );
                   if (!fichier) return;
                   event.preventDefault();
-                  void readFileAsDataUrl(fichier)
+                  void pictureToAcceptedDataUrl(fichier, isAcceptedImageType)
                     .then(handleDropImage)
                     .catch(() => {
                       /* unreadable file: nothing dropped, nothing broken */
@@ -1357,7 +1596,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                     key={page.index}
                     page={page}
                     totalPages={layout.pages.length}
-                    documentTitle={doc.meta.title || 'Sans titre'}
+                    documentTitle={doc.meta.title || UNTITLED}
                     furniture={doc.furniture ?? DEFAULT_FURNITURE}
                     geometry={geometry}
                     paragraphLayouts={layout.paragraphLayouts}
@@ -1406,7 +1645,7 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
                   onBlur={handlers.onBlur}
                   onCopy={handlers.onCopy}
                   onCut={handlers.onCut}
-                  onPaste={handlers.onPaste}
+                  onPaste={onPasteInEditor}
                 />
               </div>
 
@@ -1488,6 +1727,14 @@ function placementDraft(placement: ImageWrapPlacement | undefined): Partial<Imag
         defaults={doc.defaults}
         onSave={handleSavePageSetupAndDefaults}
         onClose={() => setStylesMarginsOpen(false)}
+      />
+
+      <HeadingStylesDialog
+        open={headingStylesTarget !== null}
+        defaults={doc.defaults}
+        initialTarget={headingStylesTarget ?? undefined}
+        onSave={handleSaveHeadingStyles}
+        onClose={() => setHeadingStylesTarget(null)}
       />
 
       <CommentDialog

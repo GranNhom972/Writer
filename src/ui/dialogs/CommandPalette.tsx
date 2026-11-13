@@ -58,7 +58,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
 
   return (
     <Modal title="Palette de commandes" onClose={onClose} width={560}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }} onKeyDown={handleKeyDown}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }} onKeyDown={handleKeyDown}>
         <input
           ref={inputRef}
           type="text"
@@ -70,9 +70,10 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
           placeholder="Rechercher une commande, raccourci ou action…"
           autoFocus
           style={{
-            padding: 'var(--space-2) var(--space-3)',
-            border: '1px solid var(--border-strong)',
-            borderRadius: 'var(--radius-sm)',
+            minHeight: 'var(--control-height)',
+            padding: '0 var(--space-3)',
+            border: '1px solid var(--border-input)',
+            borderRadius: 'var(--radius-md)',
             background: 'var(--bg-app)',
             color: 'var(--fg-primary)',
             fontSize: 'var(--text-base)',
@@ -84,7 +85,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
           {filteredCommands.length === 0 ? (
             <div
               style={{
-                padding: 'var(--space-4)',
+                padding: 'var(--space-3)',
                 color: 'var(--fg-secondary)',
                 fontSize: 'var(--text-sm)',
                 textAlign: 'center',
@@ -108,9 +109,10 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      padding: 'var(--space-2) var(--space-3)',
+                      minHeight: '36px',
+                      padding: '0 var(--space-3)',
                       border: 'none',
-                      borderRadius: 'var(--radius-xs)',
+                      borderRadius: 'var(--radius-sm)',
                       backgroundColor: idx === selectedIndex ? 'var(--accent-subtle)' : 'transparent',
                       color: 'var(--fg-primary)',
                       fontSize: 'var(--text-sm)',
@@ -121,8 +123,8 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
                       <span
                         style={{
                           color: 'var(--fg-secondary)',
-                          fontSize: 'var(--text-xs)',
-                          marginRight: 'var(--space-2)',
+                          fontSize: 'var(--text-sm)',
+                          marginRight: 'var(--space-1)',
                         }}
                       >
                         [{c.category}]

@@ -33,6 +33,10 @@ import {
 } from './domain/collab/api';
 import { readCloudServLink, readShareLink, readTicketClaims } from './domain/collab/session';
 import { collectImageRuns, isImageRun } from './domain/document/images';
+import { fileNameForTitle, titleFromFileName } from './domain/document/fileName';
+
+/** Sample document served next to the application, opened in standalone mode. */
+const SAMPLE_FILE = 'doc_test.odt';
 import {
   isParagraph,
   isTable,
@@ -288,15 +292,15 @@ export function App(): JSX.Element {
     let annule = false;
     void (async () => {
       try {
-        const response = await fetch('/doc_test.odt');
+        const response = await fetch(`/${SAMPLE_FILE}`);
         if (!response.ok || annule) return;
         const bytes = new Uint8Array(await response.arrayBuffer());
-        const result = await openOdt(bytes, { title: "Banc d'essai OpenOffice Writer" });
+        const result = await openOdt(bytes, { title: titleFromFileName(SAMPLE_FILE) });
         if (annule) return;
         setDoc(result.document);
         liveDocRef.current = result.document;
         setGeneration((v) => v + 1);
-        setMessage("Document d'exemple OpenOffice « doc_test.odt » chargé.");
+        setMessage(`Document d'exemple OpenOffice « ${SAMPLE_FILE} » chargé.`);
       } catch (e) {
         console.warn("Impossible de charger doc_test.odt, conservation de l'exemple de repli :", e);
       }
@@ -309,14 +313,14 @@ export function App(): JSX.Element {
 
   const onLoadSample = useCallback(async () => {
     try {
-      const response = await fetch('/doc_test.odt');
+      const response = await fetch(`/${SAMPLE_FILE}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const bytes = new Uint8Array(await response.arrayBuffer());
-      const result = await openOdt(bytes, { title: "Banc d'essai OpenOffice Writer" });
+      const result = await openOdt(bytes, { title: titleFromFileName(SAMPLE_FILE) });
       setDoc(result.document);
       liveDocRef.current = result.document;
       setGeneration((v) => v + 1);
-      setMessage("Document d'exemple OpenOffice « doc_test.odt » chargé.");
+      setMessage(`Document d'exemple OpenOffice « ${SAMPLE_FILE} » chargé.`);
     } catch (error) {
       setMessage(`Impossible de charger le document d’exemple : ${(error as Error).message}`);
     }
@@ -325,7 +329,7 @@ export function App(): JSX.Element {
   const onOpen = useCallback(async (file: File) => {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const result = await openOdt(bytes, { title: file.name.replace(/\.odt$/i, '') });
+      const result = await openOdt(bytes, { title: titleFromFileName(file.name) });
       setDoc(result.document);
       liveDocRef.current = result.document;
       setGeneration((value) => value + 1);
@@ -348,10 +352,10 @@ export function App(): JSX.Element {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${docToSave.meta.title || 'document'}.odt`;
+    link.download = fileNameForTitle(docToSave.meta.title);
     link.click();
     URL.revokeObjectURL(url);
-    setMessage('Document enregistré au format OpenDocument (.odt).');
+    setMessage(`Document enregistré sous « ${link.download} ».`);
   }, []);
 
   /**
@@ -534,6 +538,11 @@ export function App(): JSX.Element {
   );
 
   const handleTitleCommit = useCallback((newTitle: string) => {
+    // The live document carries the new name at once: "Share" and "Save" read it from here.
+    liveDocRef.current = {
+      ...liveDocRef.current,
+      meta: { ...liveDocRef.current.meta, title: newTitle },
+    };
     setDoc((prev) => ({
       ...prev,
       meta: {
@@ -552,12 +561,12 @@ export function App(): JSX.Element {
           role="status"
           style={{
             flex: 'none',
-            padding: '6px 16px',
+            padding: 'var(--space-2) var(--space-4)',
             color: 'var(--fg-secondary)',
             background: 'var(--bg-sunken)',
             borderBottom: '1px solid var(--border-subtle)',
             display: 'flex',
-            gap: 'var(--space-3)',
+            gap: 'var(--space-2)',
             justifyContent: 'space-between',
             alignItems: 'center',
           }}

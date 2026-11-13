@@ -77,7 +77,26 @@ export interface ImageFrameProps {
    *
    * It is the editor that knows which paragraph is under that point; this component only knows its own box. So it hands it the raw point and lets it re-anchor (`SwFEShell::SetAnchor`).
    */
-  onDrop?: (blockId: string, offset: number, clientX: number, clientY: number) => void;
+  onDrop?: (
+    blockId: string,
+    offset: number,
+    clientX: number,
+    clientY: number,
+    /**
+     * Where the pointer held the frame, from its top-left corner, in page pixels (zoom undone).
+     * The editor subtracts it so the frame lands exactly where it was dragged, instead of
+     * jumping to put its corner, or its center, under the pointer.
+     */
+    grab?: { xPx: number; yPx: number },
+  ) => void;
+  /**
+   * Offset the floating frame **really** has in its anchor, in points, once its alignment is
+   * resolved and it is kept on the sheet. A drag starts from here.
+   *
+   * The stored `imageXPt` is not enough: a frame aligned to the right carries `0`, and starting
+   * from it threw the image against the left edge at the first pixel of the drag.
+   */
+  flyOffsetPt?: { xPt: number; yPt: number };
 }
 
 /** The four corners, with their cursor and the direction of their drag. */
@@ -106,6 +125,7 @@ export function ImageFrame({
   onWrapChange,
   onMove,
   onDrop,
+  flyOffsetPt,
 }: ImageFrameProps): JSX.Element {
   const wrapMode = imageWrapMode(formatting);
   const flottant = wrapMode !== 'inline';
@@ -188,6 +208,8 @@ export function ImageFrame({
     flottant: boolean;
     /** Has the pointer really moved? A simple click moves nothing. */
     bouge: boolean;
+    /** Pointer position inside the frame at the start, in page pixels. */
+    grab: { xPx: number; yPx: number };
   } | null>(null);
 
   /** Under this threshold, in pixels, the gesture is a click and not a drag. */
@@ -221,7 +243,9 @@ export function ImageFrame({
       document.body.classList.remove('writer-resizing-image');
 
       // A click is not a drop: re-anchoring in place would replace the run and lose the selection every time the image is touched.
-      if (drag.bouge && event && onDrop) onDrop(blockId, offset, event.clientX, event.clientY);
+      if (drag.bouge && event && onDrop) {
+        onDrop(blockId, offset, event.clientX, event.clientY, drag.grab);
+      }
     },
     [blockId, offset, onDrop],
   );
@@ -313,13 +337,22 @@ export function ImageFrame({
          */
         if (!deplacable || event.button !== 0) return;
         event.preventDefault();
+        // The box of reference is the one the layout placed: the floating layer's for a frame, the
+        // frame itself in the line.
+        const boite = (
+          (event.currentTarget.closest('.writer-fly') as HTMLElement | null) ?? event.currentTarget
+        ).getBoundingClientRect();
         move.current = {
           startX: event.clientX,
           startY: event.clientY,
-          xPt: formatting.imageXPt ?? 0,
-          yPt: formatting.imageYPt ?? 0,
+          xPt: flyOffsetPt?.xPt ?? formatting.imageXPt ?? 0,
+          yPt: flyOffsetPt?.yPt ?? formatting.imageYPt ?? 0,
           flottant,
           bouge: false,
+          grab: {
+            xPx: (event.clientX - boite.left) / zoom,
+            yPx: (event.clientY - boite.top) / zoom,
+          },
         };
         document.body.classList.add('writer-resizing-image');
       }}

@@ -29,8 +29,12 @@ import { isParagraph, type HeadingLevel, type TocNode, type WriterDocumentState 
 /** Default title, that of Writer's "Contents Heading" style. */
 export const DEFAULT_TOC_TITLE = 'Table des matières';
 
-/** Default depth: `SwTOXBase` keeps levels 1 to 3. */
-export const DEFAULT_TOC_MAX_LEVEL: HeadingLevel = 3;
+/**
+ * Default depth. `SwTOXBase` keeps levels 1 to 3, but a table of contents that silently drops
+ * "Titre 4" and below surprises people who expect every heading to show up; the levels are
+ * told apart by their look instead (see `engine/tox.ts`).
+ */
+export const DEFAULT_TOC_MAX_LEVEL: HeadingLevel = 6;
 
 export interface TocOptions {
   id?: string;

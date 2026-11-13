@@ -25,6 +25,8 @@ import { MAX_FONT_SIZE_PT, MIN_FONT_SIZE_PT, type WriterController } from '../ed
 import { shortcutLabel } from '../shortcuts';
 import { TableSizePicker } from '../dialogs/TableSizePicker';
 import { UrlDialog } from '../dialogs/LinkDialog';
+import type { HeadingStyleTarget } from '../dialogs/HeadingStylesDialog';
+import { HEADING_LEVELS } from '../../domain/engine/style';
 
 export const ZOOM_LEVELS = [0.5, 0.75, 0.9, 1, 1.25, 1.5, 2] as const;
 
@@ -54,6 +56,8 @@ export interface RibbonProps {
   onToggleOutline: () => void;
   outlineOpen: boolean;
   onOpenPageSetup: () => void;
+  /** Opens the heading styles editor, on a given style or to create a new one. */
+  onOpenHeadingStyles?: (target?: HeadingStyleTarget) => void;
   onOpenMath?: () => void;
   onOpenImage?: () => void;
   onOpenFurniture?: (band?: 'header' | 'footer') => void;
@@ -67,6 +71,7 @@ export function Ribbon({
   onToggleOutline,
   outlineOpen,
   onOpenPageSetup,
+  onOpenHeadingStyles,
   onOpenMath,
   onOpenImage,
   onOpenFurniture,
@@ -78,9 +83,16 @@ export function Ribbon({
   const { commands, activeFormat, currentParagraph, canUndo, canRedo, zoom, setZoom } = controller;
   const defaults = controller.session.state.doc.defaults;
 
-  const blockValue = currentParagraph?.type === 'heading'
-    ? `h${currentParagraph.headingLevel ?? 1}`
-    : 'p';
+  const customStyles = defaults.customHeadingStyles ?? [];
+  const currentCustom = currentParagraph?.type === 'heading'
+    ? customStyles.find((style) => style.id === currentParagraph.styleName)
+    : undefined;
+  const blockValue = currentCustom
+    ? `c:${currentCustom.id}`
+    : currentParagraph?.type === 'heading'
+      ? `h${currentParagraph.headingLevel ?? 1}`
+      : 'p';
+  const currentLevel = currentParagraph?.type === 'heading' ? currentParagraph.headingLevel ?? 1 : undefined;
   const fontSize = activeFormat.fontSizePt ?? defaults.fontSizePt;
   const lineSpacing = currentParagraph?.lineSpacing ?? defaults.lineSpacing;
   const effectiveFontFamily = activeFormat.fontFamily ?? defaults.fontFamily;
@@ -159,13 +171,44 @@ export function Ribbon({
             aria-label="Style de paragraphe"
             onChange={(event) => {
               const value = event.target.value;
-              commands.setHeadingLevel(value === 'p' ? 0 : (Number(value.slice(1)) as 1 | 2 | 3 | 4 | 5 | 6));
+              if (value === '__edit') {
+                onOpenHeadingStyles?.(
+                  currentCustom
+                    ? { kind: 'custom', id: currentCustom.id }
+                    : { kind: 'level', level: currentLevel ?? 1 },
+                );
+              } else if (value === '__new') {
+                onOpenHeadingStyles?.({ kind: 'new', ...(currentLevel ? { level: currentLevel } : {}) });
+              } else if (value.startsWith('c:')) {
+                commands.setCustomHeadingStyle(value.slice(2));
+              } else {
+                commands.setHeadingLevel(value === 'p' ? 0 : (Number(value.slice(1)) as 1 | 2 | 3 | 4 | 5 | 6));
+              }
             }}
           >
-            <option value="p">Texte standard</option>
-            {[1, 2, 3, 4, 5, 6].map((level) => (
-              <option key={level} value={`h${level}`}>{`Titre ${level}`}</option>
-            ))}
+            <option value="p">Texte normal</option>
+            <optgroup label="Titres">
+              {HEADING_LEVELS.map((level) => (
+                <option key={level} value={`h${level}`}>
+                  {level === 1 ? 'Titre 1 (titre)' : `Titre ${level} (sous-titre)`}
+                </option>
+              ))}
+            </optgroup>
+            {customStyles.length > 0 && (
+              <optgroup label="Mes styles de titre">
+                {customStyles.map((style) => (
+                  <option key={style.id} value={`c:${style.id}`}>
+                    {`${style.name} (niveau ${style.level})`}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {onOpenHeadingStyles && (
+              <optgroup label="Gérer">
+                <option value="__edit">Modifier les styles de titre…</option>
+                <option value="__new">Créer un style de titre…</option>
+              </optgroup>
+            )}
           </select>
         </label>
       </div>

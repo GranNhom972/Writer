@@ -48,7 +48,7 @@ import {
   isImageRun,
   visibleFraction,
 } from '../document/images';
-import { AutomaticStyles } from './styles';
+import { AutomaticStyles, headingStylesXml } from './styles';
 import { formatMmAsCm, formatPt } from './units';
 
 const XML_HEADER = '<?xml version="1.0" encoding="UTF-8"?>';
@@ -768,7 +768,7 @@ export function buildContentXml(
   doc: WriterDocumentState,
   hrefBySrc: ReadonlyMap<string, string> = new Map(),
 ): string {
-  const styles = new AutomaticStyles();
+  const styles = new AutomaticStyles(new Set((doc.defaults.customHeadingStyles ?? []).map((style) => style.id)));
 
   const commentsByThread = new Map<string, DocumentComment[]>();
   for (const comment of doc.comments ?? []) {
@@ -892,6 +892,7 @@ export function buildStylesXml(doc: WriterDocumentState): string {
     `<style:style style:name="Heading" style:family="paragraph" style:parent-style-name="Standard">` +
     `<style:text-properties fo:font-weight="bold"/>` +
     `</style:style>` +
+    headingStylesXml(defaults) +
     `<style:style style:name="Header" style:family="paragraph" style:parent-style-name="Standard">` +
     `<style:text-properties fo:font-size="9pt" fo:color="#475467"/>` +
     `</style:style>` +

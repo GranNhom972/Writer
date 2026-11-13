@@ -25,7 +25,13 @@ import type {
   WriterDocumentState,
 } from '../document/types';
 import { graphemeBoundaries, graphemes, type TextMeasurer } from './measure';
-import { isBlank, type LayoutLine, type ParagraphLayout } from './lineBreak';
+import {
+  isBlank,
+  lineTopInPiece,
+  segmentWordSpacing,
+  type LayoutLine,
+  type ParagraphLayout,
+} from './lineBreak';
 import type { DocumentLayout, PlacedParagraph, PlacedTable } from './paginate';
 
 export function makePosition(blockId: string, offset: number): DocumentPosition {
@@ -275,12 +281,12 @@ export function lineIndexAt(layout: ParagraphLayout, offset: number): number {
  * diverging from the first.
  */
 function paintedLineWidth(line: LayoutLine): number {
-  if (line.wordSpacingPx <= 0) return line.widthPx;
-  let blanks = 0;
+  let stretch = 0;
   for (const segment of line.segments) {
-    blanks += countBlanksIn(segment.text, 0, segment.text.length);
+    const spacing = segmentWordSpacing(line, segment);
+    if (spacing > 0) stretch += countBlanksIn(segment.text, 0, segment.text.length) * spacing;
   }
-  return line.widthPx + blanks * line.wordSpacingPx;
+  return line.widthPx + stretch;
 }
 
 /** X coordinate of the cursor on its line, relative to the left edge of the content. */
@@ -305,7 +311,7 @@ export function caretXOnLine(
     const inner = offset - segment.startOffset;
     const prefix = measurer.prefixWidths(segment.text, segment.font);
     const blanks = countBlanksIn(segment.text, 0, inner);
-    return segment.leftPx + (prefix[inner] ?? 0) + blanks * line.wordSpacingPx;
+    return segment.leftPx + (prefix[inner] ?? 0) + blanks * segmentWordSpacing(line, segment);
   }
 
   return line.leftPx + paintedLineWidth(line);
@@ -389,9 +395,7 @@ function lineTopWithin(
   placed: PlacedParagraph,
   lineIndex: number,
 ): number {
-  let top = 0;
-  for (let i = placed.fromLine; i < lineIndex; i += 1) top += layout.lines[i]?.heightPx ?? 0;
-  return top;
+  return lineTopInPiece(layout, placed.fromLine, lineIndex);
 }
 
 /**
@@ -425,11 +429,10 @@ export function positionFromPoint(
       if (entry.pageIndex !== pageIndex) continue;
       const placed = entry.placed;
       const paragraphLayout = placed.layout;
-      let top = paragraphTop(placed);
-
       for (let i = placed.fromLine; i < placed.toLine; i += 1) {
         const line = paragraphLayout.lines[i];
         if (!line) continue;
+        const top = paragraphTop(placed) + lineTopInPiece(paragraphLayout, placed.fromLine, i);
         const bottom = top + line.heightPx;
         // Vertical distance to the line's strip: zero if the point falls inside it.
         const vertical = yPx < top ? top - yPx : yPx > bottom ? yPx - bottom : 0;
@@ -454,7 +457,6 @@ export function positionFromPoint(
             },
           };
         }
-        top = bottom;
       }
     }
   }
@@ -536,7 +538,7 @@ export function offsetFromX(
     for (const grapheme of graphemes(segment.text)) {
       for (const candidate of [consumed, consumed + grapheme.length]) {
         const width = (prefix[candidate] ?? 0) +
-          countBlanksIn(segment.text, 0, candidate) * line.wordSpacingPx;
+          countBlanksIn(segment.text, 0, candidate) * segmentWordSpacing(line, segment);
         const distance = Math.abs(local - width);
         if (distance < bestDistance) {
           bestDistance = distance;
@@ -669,14 +671,11 @@ function nearestLineVertically(
       for (const entry of entries) {
         if (entry.pageIndex !== pageIndex) continue;
         const placed = entry.placed;
-        let top = paragraphTop(placed);
-
         for (let i = placed.fromLine; i < placed.toLine; i += 1) {
           const line = placed.layout.lines[i];
           if (!line) continue;
-          const bottom = top + line.heightPx;
-          const lineTop = top;
-          top = bottom;
+          const lineTop = paragraphTop(placed) + lineTopInPiece(placed.layout, placed.fromLine, i);
+          const bottom = lineTop + line.heightPx;
 
           // The line we start from cannot be its own neighbor.
           if (blockId === fromBlockId && lineTop >= from.top - EPSILON && bottom <= from.bottom + EPSILON) {
@@ -815,10 +814,9 @@ export function rangeRects(
     const to = rank === endRank ? end.offset : Number.MAX_SAFE_INTEGER;
 
     for (const { pageIndex, placed } of placements) {
-      let top = paragraphTop(placed);
-
       for (let i = placed.fromLine; i < placed.toLine; i += 1) {
         const line = paragraphLayout.lines[i]!;
+        const top = paragraphTop(placed) + lineTopInPiece(paragraphLayout, placed.fromLine, i);
         const lineFrom = Math.max(from, line.startOffset);
         const lineTo = Math.min(to, Math.max(line.endOffset, line.startOffset));
 
@@ -836,7 +834,6 @@ export function rangeRects(
             heightPx: line.heightPx,
           });
         }
-        top += line.heightPx;
       }
     }
   }

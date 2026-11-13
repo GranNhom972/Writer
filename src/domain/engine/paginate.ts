@@ -42,6 +42,7 @@ import {
   captionHeightPx,
   CAPTION_FONT_RATIO,
   layoutParagraph,
+  piecesHeight,
   type LayoutContext,
   type ParagraphLayout,
 } from './lineBreak';
@@ -53,7 +54,9 @@ import {
 } from '../document/images';
 import type { TextMeasurer } from './measure';
 import { expandToc } from './tox';
+import { resolveBlockSpacing } from './style';
 import {
+  clampFlyTopPx,
   collectFlyFrames,
   projectedExclusions,
   paragraphExclusions,
@@ -100,6 +103,13 @@ export interface LaidOutFly {
   topPx: number;
   widthPx: number;
   heightPx: number;
+  /**
+   * Origin of the frame's vertical offset, in the same frame of reference: the top of its
+   * anchor paragraph, or `0` for a frame anchored to the page. `topPx - anchorTopPx` is the
+   * offset the frame really has once kept on the sheet, which is where a drag must start
+   * from, not from the stored `imageYPt`.
+   */
+  anchorTopPx: number;
 }
 
 export interface PlacedParagraph {
@@ -630,7 +640,10 @@ function layoutPass(
 
   const layoutOf = (paragraph: ParagraphNode, ctx: LayoutContext): ParagraphLayout => {
     const marker = markers.get(paragraph.id);
-    const own = paragraphExclusions(flies, paragraph, ctx.contentWidthPx);
+    const own = paragraphExclusions(flies, paragraph, ctx.contentWidthPx, {
+      topPx: builder.top,
+      geometry,
+    });
     // Frames that come from elsewhere (anchored to the page, or to a neighboring paragraph that they overflow)
     // only have a known position after a first pass.
     const ailleurs = flyAnchorPlacements.size
@@ -641,9 +654,26 @@ function layoutPass(
           builder.top,
           ctx.contentWidthPx,
           paragraph.id,
+          geometry,
         )
       : [];
-    const exclusions = own.length + ailleurs.length > 0 ? [...own, ...ailleurs] : undefined;
+    /*
+     * Frames are positioned from the top of the paragraph **area** (`placed.topPx`, space above
+     * included: OpenOffice's `vertical-rel="paragraph"`), whereas the line formatter counts from
+     * its first line, below that space. The exclusions are brought into the formatter's frame of
+     * reference here; without it, under a heading or any paragraph with space above, the text
+     * went around an empty band shifted by that space while the image covered other lines.
+     */
+    const spaceAbovePx = ptToPx(resolveBlockSpacing(paragraph, ctx).topPt);
+    const merged = own.length + ailleurs.length > 0 ? [...own, ...ailleurs] : undefined;
+    const exclusions =
+      merged && spaceAbovePx !== 0
+        ? merged.map((e) => ({
+            ...e,
+            topPx: e.topPx - spaceAbovePx,
+            bottomPx: e.bottomPx - spaceAbovePx,
+          }))
+        : merged;
 
     let effective = ctx;
     if (marker) effective = { ...effective, marker };
@@ -757,8 +787,9 @@ function attachFlies(
 
     // A frame anchored to the paragraph is placed relative to it; a frame anchored to the page is placed
     // relative to the top of the content area.
-    const topPx =
-      fly.anchor === 'to-para' ? placement.placed.topPx + fly.topPx : fly.topPx;
+    const anchorTopPx = fly.anchor === 'to-para' ? placement.placed.topPx : 0;
+    // Kept on the sheet like `SwFlyFreeFrm::CheckClip`; the exclusions apply the same correction.
+    const topPx = clampFlyTopPx(anchorTopPx + fly.topPx, fly.heightPx, geometry);
 
     /*
      * The frame is kept on the **sheet**, not in the text column.
@@ -776,6 +807,7 @@ function attachFlies(
       topPx,
       widthPx: fly.widthPx,
       heightPx: fly.heightPx,
+      anchorTopPx,
     };
     // `push` and not a copy: recreating the array for every frame made attachment quadratic in the number of
     // frames on one page.
@@ -895,11 +927,9 @@ function footnotesInLines(
   return out;
 }
 
-/** Sum of the heights of lines `[from, to)`. */
+/** Height of lines `[from, to)` on the page, moves below frames included (`piecesHeight`). */
 function linesHeight(layout: ParagraphLayout, from: number, to: number): number {
-  let total = 0;
-  for (let i = from; i < to; i += 1) total += layout.lines[i]?.heightPx ?? 0;
-  return total;
+  return piecesHeight(layout, from, to);
 }
 
 /**
@@ -909,12 +939,9 @@ function linesHeight(layout: ParagraphLayout, from: number, to: number): number 
  * bottom of a sheet would be unreadable.
  */
 function fittingLines(layout: ParagraphLayout, from: number, available: number): number {
-  let used = 0;
   let count = 0;
   for (let i = from; i < layout.lines.length; i += 1) {
-    const height = layout.lines[i]!.heightPx;
-    if (used + height > available) break;
-    used += height;
+    if (piecesHeight(layout, from, i + 1) > available) break;
     count += 1;
   }
   return count;

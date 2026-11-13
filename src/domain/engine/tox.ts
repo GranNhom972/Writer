@@ -42,6 +42,7 @@ import { makeRun } from '../document/runs';
 import type {
   HeadingLevel,
   ParagraphNode,
+  RunFormatting,
   TocNode,
   WriterDocumentState,
 } from '../document/types';
@@ -51,6 +52,25 @@ import type { LayoutContext } from './lineBreak';
 
 /** Indent per heading level, in points. `SwForm` uses 0.5 cm per step. */
 const TOC_LEVEL_INDENT_PT = 14;
+
+/**
+ * Look of an entry by level, so that a reader tells titles, subtitles and deeper levels apart at
+ * a glance (Writer's "Contents 1..10" paragraph styles play this role):
+ * - level 1, the titles: bold, with some air above;
+ * - level 2, the subtitles: regular weight, body size;
+ * - level 3 and deeper: smaller and softer.
+ */
+export function tocEntryLook(level: HeadingLevel, baseSizePt: number): {
+  formatting: RunFormatting;
+  marginTopPt: number;
+} {
+  if (level === 1) return { formatting: { bold: true }, marginTopPt: Math.round(baseSizePt * 0.5) };
+  if (level === 2) return { formatting: {}, marginTopPt: 0 };
+  return {
+    formatting: { fontSizePt: Math.round(baseSizePt * 0.92 * 2) / 2, color: '#4b5563' },
+    marginTopPt: 0,
+  };
+}
 
 /** Fill character of the tab stop, the one from `SwForm::SetPattern`. */
 const LEADER_CHAR = '.';
@@ -95,12 +115,14 @@ export function expandToc(
     const id = tocLineId(toc.id, index);
     const indentPt = (entry.level - 1) * TOC_LEVEL_INDENT_PT;
     const pageNumber = pageNumbers.get(entry.blockId);
+    const look = tocEntryLook(entry.level, ctx.defaults.fontSizePt);
 
     const paragraph: ParagraphNode = {
       id,
       type: 'paragraph',
-      runs: buildEntryRuns(entry.text, entry.level, pageNumber, toc, ctx, indentPt),
-      marginTopPt: 0,
+      runs: buildEntryRuns(entry.text, look.formatting, pageNumber, toc, ctx, indentPt),
+      // No air above the very first line: the title of the table already provides it.
+      marginTopPt: index === 0 ? 0 : look.marginTopPt,
       marginBottomPt: 0,
     };
     if (indentPt > 0) paragraph.indentLeftPt = indentPt;
@@ -116,7 +138,11 @@ export function expandToc(
     paragraphs.push({
       id,
       type: 'paragraph',
-      runs: [makeRun('(Aucun titre — appliquez un style Titre 1 à 6 pour peupler la table.)', { italic: true })],
+      runs: [
+        makeRun('(Aucun titre — appliquez un style Titre 1 à 6, ou un de vos styles de titre, pour peupler la table.)', {
+          italic: true,
+        }),
+      ],
       marginTopPt: 0,
       marginBottomPt: 0,
     });
@@ -134,26 +160,28 @@ export function expandToc(
  */
 function buildEntryRuns(
   text: string,
-  level: HeadingLevel,
+  formatting: RunFormatting,
   pageNumber: number | undefined,
   toc: TocNode,
   ctx: LayoutContext,
   indentPt: number,
 ): ReturnType<typeof makeRun>[] {
-  const label = makeRun(text);
+  const label = makeRun(text, formatting);
 
   if (!toc.showPageNumbers || pageNumber === undefined) {
     return [label];
   }
 
   const numberText = String(pageNumber);
-  const numberRun = makeRun(numberText);
+  const numberRun = makeRun(numberText, formatting);
 
   if (!toc.useDotLeader) {
-    return [label, makeRun('\t'), numberRun];
+    return [label, makeRun('\t', formatting), numberRun];
   }
 
-  const font = resolveFont({}, { type: 'paragraph' }, { defaults: ctx.defaults });
+  // Measured with the entry's own font: a bold title is wider than the same text in regular.
+  const font = resolveFont(formatting, { type: 'paragraph' }, { defaults: ctx.defaults });
+  const leaderFont = resolveFont({}, { type: 'paragraph' }, { defaults: ctx.defaults });
   const available =
     ctx.contentWidthPx -
     ptToPx(indentPt) -
@@ -161,14 +189,13 @@ function buildEntryRuns(
     ctx.measurer.measure(numberText, font) -
     ptToPx(LEADER_GAP_PT) * 2;
 
-  const dots = leaderDots(available, font, ctx.measurer);
+  const dots = leaderDots(available, leaderFont, ctx.measurer);
 
   // No room for even one dot: the line makes do with a space. Without this guard, a heading wider
   // than the column would produce a negative fill, so an empty string that glues the number to
   // the text.
-  if (dots.length === 0) return [label, makeRun(' '), numberRun];
+  if (dots.length === 0) return [label, makeRun(' ', formatting), numberRun];
 
-  void level;
   return [label, makeRun(` ${dots} `, { color: '#888888' }), numberRun];
 }
 

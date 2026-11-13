@@ -33,7 +33,7 @@ import type {
   ParagraphNode,
   RunFormatting,
 } from '../document/types';
-import { resolveBlockSpacing, resolveColor, resolveFont, resolveLineSpacing } from './style';
+import { resolveAlignment, resolveBlockSpacing, resolveColor, resolveFont, resolveLineSpacing } from './style';
 import type { FontMetrics, FontSpec, TextMeasurer } from './measure';
 import { measureMathExact } from '../math/render';
 import {
@@ -45,7 +45,7 @@ import {
   imageMarginPt,
   isImageFormatting,
 } from '../document/images';
-import { nextClearY, usableBand, type FlyExclusion } from './flyLayout';
+import { MIN_BAND_WIDTH_PX, nextClearY, usableBands, type FlyExclusion } from './flyLayout';
 
 /** Writer's default tab stop: 1.25 cm. */
 export const DEFAULT_TAB_STOP_PX = cmToPx(1.25);
@@ -88,6 +88,25 @@ export interface LayoutSegment {
    * derivation, which would end up diverging from the authoritative one.
    */
   captionHeightPx?: number;
+  /**
+   * Word spacing of **this** segment, when the line has several of them.
+   *
+   * A line that a frame cuts in two (`SwFlyPortion`) is justified piece by piece: the part on the
+   * left of the frame is stretched up to the frame, the part on its right up to the margin, and
+   * the two stretches differ. Absent: the line's `wordSpacingPx` applies.
+   */
+  wordSpacingPx?: number;
+  /**
+   * The blank a floating frame takes in the line (`SwFlyPortion`): no text, no offset of its own,
+   * only a width that carries the text over to the other side of the frame. Painted and hit-tested
+   * like a tab (`isTab` is true).
+   */
+  flyGap?: true;
+}
+
+/** Word spacing that applies to a segment: its own, or failing that the line's. */
+export function segmentWordSpacing(line: LayoutLine, segment: LayoutSegment): number {
+  return segment.wordSpacingPx ?? line.wordSpacingPx;
 }
 
 export interface LayoutLine {
@@ -108,6 +127,29 @@ export interface LayoutLine {
   /** Word spacing added by justification, in pixels. */
   wordSpacingPx: number;
   isLast: boolean;
+}
+
+/**
+ * Y coordinate of line `index` within the piece of paragraph that starts at line `fromLine`.
+ *
+ * The **only** rule for stacking lines. A line is not always right below the previous one: one that
+ * a frame blocks over the whole width (`surround: none`, or `ideal` with no room left beside it) is
+ * moved down below the frame by the formatter, and `topPx` says by how much. Adding up heights
+ * instead dropped that move: the engine put the text under the image, the screen painted it over.
+ *
+ * A piece carried over to another page starts at its own first line: what came before stayed on the
+ * previous page.
+ */
+export function lineTopInPiece(layout: Pick<ParagraphLayout, 'lines'>, fromLine: number, index: number): number {
+  const base = fromLine === 0 ? 0 : (layout.lines[fromLine]?.topPx ?? 0);
+  return (layout.lines[index]?.topPx ?? 0) - base;
+}
+
+/** Height that lines `[fromLine, toLine)` take on the page, moves below frames included. */
+export function piecesHeight(layout: Pick<ParagraphLayout, 'lines'>, fromLine: number, toLine: number): number {
+  const last = layout.lines[toLine - 1];
+  if (!last || toLine <= fromLine) return 0;
+  return lineTopInPiece(layout, fromLine, toLine - 1) + last.heightPx;
 }
 
 /** Bullet or number painted in front of the first line of a list item. */
@@ -407,7 +449,7 @@ function measureParagraph(paragraph: ParagraphNode, ctx: LayoutContext): Paragra
     const font = resolveFont(formatting, paragraph, ctx);
     formats.push(formatting);
     fonts.push(font);
-    colors.push(resolveColor(formatting, ctx));
+    colors.push(resolveColor(formatting, ctx, paragraph));
 
     if (isImageFormatting(formatting)) {
       // An image frame has no baseline of its own: `SwFlyCntFrm` sits on the text's baseline and rises by
@@ -571,6 +613,13 @@ interface LineBreakResult {
   endOffset: number;
   /** Start of the next line. */
   nextOffset: number;
+  /**
+   * Nothing fitted: the cut was forced (a single cluster, or a word longer than the room). A band
+   * on the left of a frame then gives up its place and the word jumps over the frame.
+   */
+  forced?: true;
+  /** The line stops on a deliberate line break (`\n`): nothing more goes on it, frame or not. */
+  hard?: true;
 }
 
 /**
@@ -616,7 +665,7 @@ function breakLine(
     if (char === '\n') {
       // Deliberate line break (`SwBreakPortion`): the line stops before it, and the character itself is
       // not painted.
-      return { endOffset: pos, nextOffset: pos + 1 };
+      return { endOffset: pos, nextOffset: pos + 1, hard: true };
     }
 
     // Tab: advance to the next tab stop. If the tab stop falls outside the line, the tab itself causes
@@ -625,7 +674,7 @@ function breakLine(
     if (tabX > available) {
       return pos > lineStart
         ? { endOffset: pos, nextOffset: pos + 1 }
-        : { endOffset: pos + 1, nextOffset: pos + 1 };
+        : { endOffset: pos + 1, nextOffset: pos + 1, forced: true };
     }
     x = tabX;
     pos += 1;
@@ -645,7 +694,21 @@ function breakInsideChunk(
 
   // A column so narrow that not one character fits: advance by one cluster anyway. Without this guard
   // the line would be empty and the calling loop would never make progress.
-  if (cutPos <= lineStart) cutPos = advanceOneGrapheme(text, lineStart);
+  if (cutPos <= lineStart) {
+    cutPos = advanceOneGrapheme(text, lineStart);
+    return { ...cutAt(m, lineStart, chunkEnd, cutPos), forced: true };
+  }
+  return cutAt(m, lineStart, chunkEnd, cutPos);
+}
+
+/** Where the line ends once `cutPos`, the first offset that no longer fits, is known. */
+function cutAt(
+  m: ParagraphMetrics,
+  lineStart: number,
+  chunkEnd: number,
+  cutPos: number,
+): LineBreakResult {
+  const { text } = m;
   if (cutPos >= chunkEnd) return { endOffset: chunkEnd, nextOffset: chunkEnd };
 
   // If cutPos falls in the middle of an atomic object (a formula or an image frame), cut **before** the
@@ -686,7 +749,7 @@ function breakInsideChunk(
 
   // No break opportunity: a word longer than the line, forced break.
   const forced = Math.max(cutPos, advanceOneGrapheme(text, lineStart));
-  return { endOffset: forced, nextOffset: forced };
+  return { endOffset: forced, nextOffset: forced, forced: true };
 }
 
 /** Builds the painted segments of a line, with tabs resolved. */
@@ -803,16 +866,133 @@ const EMPTY_EXCLUSIONS: readonly FlyExclusion[] = [];
  */
 const MAX_FLY_DESCENTS = 64;
 
-/** Usable band for a line, or the whole column when there is no frame. */
-function resolveBand(
+/**
+ * *Probable* height of the line that starts at `offset`, before it is cut.
+ *
+ * The first character is not enough: a paragraph that holds a floating frame almost always
+ * **starts** with its anchor character, which takes no height in the line (`SwFlyCntPortion`
+ * never shows, the frame lives on its own layer). Probing with it gave a zero-height line, which
+ * no frame ever overlaps: the line then stayed at the top, under the image it should have gone
+ * around, and every wrapping mode looked like "in front of the text". The probe therefore takes the
+ * first character that does have a height, as the line will once it holds its text.
+ */
+function probeLineHeight(m: ParagraphMetrics, offset: number, spacing: number): number {
+  const total = m.text.length;
+  for (let i = offset; i < total; i += 1) {
+    const height = lineHeightOf(m, i, i + 1, spacing).heightPx;
+    if (height > 0) return height;
+  }
+  return lineHeightOf(m, offset, Math.min(total, offset + 1), spacing).heightPx;
+}
+
+/** A horizontal interval a line may write in, indents already applied. */
+interface Band {
+  leftPx: number;
+  rightPx: number;
+}
+
+/**
+ * Bands usable by a line, from left to right, cut down to the paragraph's indents. Empty when the
+ * frames leave no room at this height: the line then moves down (`nextClearY`).
+ *
+ * Without frames, a single band: the column between the indents, as before frames existed.
+ */
+function resolveBands(
   exclusions: readonly FlyExclusion[],
   hasExclusions: boolean,
   topPx: number,
   heightPx: number,
   contentWidthPx: number,
-): { leftPx: number; rightPx: number } | null {
-  if (!hasExclusions) return { leftPx: 0, rightPx: contentWidthPx };
-  return usableBand(exclusions, topPx, topPx + Math.max(1, heightPx), contentWidthPx);
+  indentLeftPx: number,
+  indentRightPx: number,
+): Band[] {
+  const minLeft = indentLeftPx;
+  const maxRight = contentWidthPx - indentRightPx;
+  if (!hasExclusions) return [{ leftPx: minLeft, rightPx: maxRight }];
+
+  const free = usableBands(exclusions, topPx, topPx + Math.max(1, heightPx), contentWidthPx);
+  if (free.length === 0) return [];
+
+  const clipped = free
+    .map((band) => ({
+      leftPx: Math.max(minLeft, band.leftPx),
+      rightPx: Math.min(maxRight, band.rightPx),
+    }))
+    .filter((band) => band.rightPx - band.leftPx >= MIN_BAND_WIDTH_PX);
+  if (clipped.length > 0) return clipped;
+
+  // The indents swallow every band: keep the widest, as narrow as it is, rather than push the line
+  // down below a frame that does not actually block it.
+  let widest = free[0]!;
+  for (const band of free) {
+    if (band.rightPx - band.leftPx > widest.rightPx - widest.leftPx) widest = band;
+  }
+  return [{ leftPx: Math.max(minLeft, widest.leftPx), rightPx: Math.min(maxRight, widest.rightPx) }];
+}
+
+function sameBands(a: readonly Band[], b: readonly Band[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((band, i) => band.leftPx === b[i]!.leftPx && band.rightPx === b[i]!.rightPx)
+  );
+}
+
+/** A piece of a line: the text that goes into one band. */
+interface LinePiece {
+  band: Band;
+  /** First-line indent carried by this piece (only the first piece of the first line has one). */
+  indentPx: number;
+  startOffset: number;
+  endOffset: number;
+  nextOffset: number;
+}
+
+/**
+ * Fills the bands of a line, from left to right, starting at `offset`.
+ *
+ * Port of what `SwTxtFormatter::BuildPortions` does around a `SwFlyPortion`
+ * (`sw/source/core/text/itrform2.cxx`, `CalcFlyWidth`): the text fills the band on the left of the
+ * frame, the frame is jumped over, and the **same** line goes on in the band on its right. A word
+ * that does not fit into a band before a frame is not cut: it jumps over the frame with the rest.
+ *
+ * A deliberate line break ends the line wherever it falls, as it does in Writer.
+ */
+function fillBands(
+  m: ParagraphMetrics,
+  bands: readonly Band[],
+  offset: number,
+  extraIndentPx: number,
+  tabStopPx: number,
+): LinePiece[] {
+  const total = m.text.length;
+  const pieces: LinePiece[] = [];
+  let pos = offset;
+
+  for (let i = 0; i < bands.length; i += 1) {
+    const band = bands[i]!;
+    const indentPx = pieces.length === 0 ? extraIndentPx : 0;
+    const available = Math.max(1, band.rightPx - band.leftPx - indentPx);
+    const broken = breakLine(m, pos, available, tabStopPx);
+
+    // Nothing fits before the frame: the band stays empty and the text resumes after the frame.
+    if (broken.forced && i < bands.length - 1) continue;
+
+    pieces.push({ band, indentPx, startOffset: pos, endOffset: broken.endOffset, nextOffset: broken.nextOffset });
+    pos = broken.nextOffset;
+    if (broken.hard || pos >= total) break;
+  }
+
+  if (pieces.length > 0) return pieces;
+
+  // Unreachable in practice (the last band always takes something), kept so the caller never
+  // receives an empty line: the widest band, forced cut included.
+  let widest = bands[0]!;
+  for (const band of bands) {
+    if (band.rightPx - band.leftPx > widest.rightPx - widest.leftPx) widest = band;
+  }
+  const available = Math.max(1, widest.rightPx - widest.leftPx - extraIndentPx);
+  const broken = breakLine(m, offset, available, tabStopPx);
+  return [{ band: widest, indentPx: extraIndentPx, startOffset: offset, endOffset: broken.endOffset, nextOffset: broken.nextOffset }];
 }
 
 /** X coordinate of the left edge of the line, alignment applied. */
@@ -837,6 +1017,94 @@ function alignLine(
 }
 
 /**
+ * Paints the pieces of a line: segments, alignment and justification, band by band.
+ *
+ * A line in a single piece comes out exactly as before frames could cut it. A line cut by a frame
+ * gets, between two pieces, a `flyGap` segment as wide as the jump over the frame, and each piece
+ * is aligned and justified **within its own band**: Writer stretches the text on the left of a
+ * frame up to the frame, not up to the margin.
+ */
+function placePieces(
+  m: ParagraphMetrics,
+  pieces: readonly LinePiece[],
+  alignment: Alignment,
+  isLast: boolean,
+  tabStopPx: number,
+): { segments: LayoutSegment[]; leftPx: number; widthPx: number; wordSpacingPx: number } {
+  const justifies = (i: number) => alignment === 'justify' && (!isLast || i < pieces.length - 1);
+
+  if (pieces.length === 1) {
+    const piece = pieces[0]!;
+    const available = Math.max(1, piece.band.rightPx - piece.band.leftPx - piece.indentPx);
+    const { segments, widthPx } = buildSegments(m, piece.startOffset, piece.endOffset, 0, tabStopPx);
+    const leftPx = alignLine(alignment, widthPx, available, piece.band.leftPx, piece.indentPx);
+
+    // Justification: the extra space is spread over the blanks of the line. The last line of a paragraph is
+    // excluded, otherwise a lone word would be stretched across the full width.
+    let wordSpacingPx = 0;
+    if (justifies(0)) {
+      const gaps = countBlanks(m.text, piece.startOffset, piece.endOffset);
+      if (gaps > 0) wordSpacingPx = Math.max(0, (available - widthPx) / gaps);
+    }
+
+    for (const segment of segments) segment.leftPx += leftPx;
+    return { segments, leftPx, widthPx, wordSpacingPx };
+  }
+
+  const segments: LayoutSegment[] = [];
+  let lineLeftPx = 0;
+  /** Painted right edge of the previous piece, stretch included. */
+  let paintedEndPx = 0;
+
+  pieces.forEach((piece, i) => {
+    const available = Math.max(1, piece.band.rightPx - piece.band.leftPx - piece.indentPx);
+    const built = buildSegments(m, piece.startOffset, piece.endOffset, 0, tabStopPx);
+    const pieceLeftPx = alignLine(alignment, built.widthPx, available, piece.band.leftPx, piece.indentPx);
+
+    let spacingPx = 0;
+    if (justifies(i)) {
+      const gaps = countBlanks(m.text, piece.startOffset, piece.endOffset);
+      if (gaps > 0) spacingPx = Math.max(0, (available - built.widthPx) / gaps);
+    }
+
+    if (i === 0) {
+      lineLeftPx = pieceLeftPx;
+    } else {
+      // The jump over the frame (`SwFlyPortion`): from where the previous piece stops being painted
+      // to where this one starts. It carries the font of what follows, for the cursor's height.
+      const runIndex = Math.max(0, Math.min(m.fonts.length - 1, m.runAt[piece.startOffset] ?? m.fonts.length - 1));
+      segments.push({
+        startOffset: piece.startOffset,
+        endOffset: piece.startOffset,
+        text: '',
+        formatting: {},
+        font: m.fonts[runIndex]!,
+        color: m.colors[runIndex] ?? '#000000',
+        leftPx: paintedEndPx,
+        widthPx: Math.max(0, pieceLeftPx - paintedEndPx),
+        isTab: true,
+        flyGap: true,
+      });
+    }
+
+    // Each segment sits where it is really painted: after the stretch of the blanks before it.
+    let stretchPx = 0;
+    for (const segment of built.segments) {
+      segment.leftPx += pieceLeftPx + stretchPx;
+      segment.wordSpacingPx = spacingPx;
+      stretchPx += countBlanks(segment.text, 0, segment.text.length) * spacingPx;
+      segments.push(segment);
+    }
+    paintedEndPx = (i === 0 ? pieceLeftPx : Math.max(paintedEndPx, pieceLeftPx)) + built.widthPx + stretchPx;
+  });
+
+  // Measured width, so that `leftPx` + width + the stretch of every blank lands on the painted
+  // right edge, as for a line in a single piece.
+  const widthPx = segments.reduce((sum, segment) => sum + segment.widthPx, 0);
+  return { segments, leftPx: lineLeftPx, widthPx, wordSpacingPx: 0 };
+}
+
+/**
  * Lays out a paragraph: splitting into lines, heights, alignment.
  *
  * A pure function: it is what makes the engine runnable in a Web Worker or in a server environment
@@ -851,7 +1119,7 @@ export function layoutParagraph(
 
   const spacing = resolveLineSpacing(paragraph, ctx);
   const { topPt, bottomPt } = resolveBlockSpacing(paragraph, ctx);
-  const alignment: Alignment = paragraph.alignment ?? 'left';
+  const alignment: Alignment = resolveAlignment(paragraph, ctx);
 
   const indentLeftPx = ptToPx(effectiveIndentLeftPt(paragraph));
   const indentRightPx = ptToPx(paragraph.indentRightPt ?? 0);
@@ -872,75 +1140,56 @@ export function layoutParagraph(
     const isFirst = index === 0;
     const extraIndent = isFirst ? firstLineIndentPx : 0;
 
-    // *Probable* height of the line, before knowing what it will contain: the usable band depends on the
-    // vertical extent of the line, which depends on its content, which depends on the band. Writer
+    // *Probable* height of the line, before knowing what it will contain: the usable bands depend on
+    // the vertical extent of the line, which depends on its content, which depends on the bands. Writer
     // settles the circularity the same way (`SwTxtFrm::FormatLine`): we estimate, we cut, and we only start
     // again once if the estimate turned out too low.
-    let probeHeight = lineHeightOf(metrics, offset, Math.min(total, offset + 1), spacing).heightPx;
-    let band = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
+    let probeHeight = probeLineHeight(metrics, offset, spacing);
+    const bandsAt = (y: number, height: number): Band[] =>
+      resolveBands(exclusions, hasExclusions, y, height, ctx.contentWidthPx, indentLeftPx, indentRightPx);
+    let bands = bandsAt(top, probeHeight);
 
     // No usable band: the line moves down below the frame that blocks it.
     let guard = 0;
-    while (band === null && guard < MAX_FLY_DESCENTS) {
-      const clear = nextClearY(exclusions, top, top + probeHeight);
+    while (bands.length === 0 && guard < MAX_FLY_DESCENTS) {
+      const clear = nextClearY(exclusions, top, top + Math.max(1, probeHeight));
       if (clear === null || clear <= top) break;
       top = clear;
-      band = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
+      bands = bandsAt(top, probeHeight);
       guard += 1;
     }
+    if (bands.length === 0) bands = [{ leftPx: indentLeftPx, rightPx: ctx.contentWidthPx - indentRightPx }];
 
-    let bandLeftPx = band ? band.leftPx : 0;
-    let bandRightPx = band ? band.rightPx : ctx.contentWidthPx;
-
-    let lineLeftPx = Math.max(indentLeftPx, bandLeftPx);
-    let lineRightPx = Math.min(ctx.contentWidthPx - indentRightPx, bandRightPx);
-    let available = Math.max(1, lineRightPx - lineLeftPx - extraIndent);
-
-    let broken = breakLine(metrics, offset, available, tabStopPx);
-    let measured = lineHeightOf(
-      metrics,
-      offset,
-      Math.max(offset + 1, broken.endOffset),
-      spacing,
-    );
+    let pieces = fillBands(metrics, bands, offset, extraIndent, tabStopPx);
+    const measure = (from: readonly LinePiece[]) =>
+      lineHeightOf(metrics, offset, Math.max(offset + 1, from[from.length - 1]!.endOffset), spacing);
+    let measured = measure(pieces);
 
     // The line turned out taller than the estimate (an inline image, a formula) and may therefore cross a
-    // frame that the band ignored. A single retry is enough: the second estimate is exact.
+    // frame that the bands ignored. A single retry is enough: the second estimate is exact.
     if (hasExclusions && measured.heightPx > probeHeight) {
       probeHeight = measured.heightPx;
-      const retry = resolveBand(exclusions, hasExclusions, top, probeHeight, ctx.contentWidthPx);
-      if (retry && (retry.leftPx !== bandLeftPx || retry.rightPx !== bandRightPx)) {
-        bandLeftPx = retry.leftPx;
-        bandRightPx = retry.rightPx;
-        lineLeftPx = Math.max(indentLeftPx, bandLeftPx);
-        lineRightPx = Math.min(ctx.contentWidthPx - indentRightPx, bandRightPx);
-        available = Math.max(1, lineRightPx - lineLeftPx - extraIndent);
-        broken = breakLine(metrics, offset, available, tabStopPx);
-        measured = lineHeightOf(
-          metrics,
-          offset,
-          Math.max(offset + 1, broken.endOffset),
-          spacing,
-        );
+      const retry = bandsAt(top, probeHeight);
+      if (retry.length > 0 && !sameBands(retry, bands)) {
+        bands = retry;
+        pieces = fillBands(metrics, bands, offset, extraIndent, tabStopPx);
+        measured = measure(pieces);
       }
     }
 
-    const { endOffset, nextOffset } = broken;
+    const lastPiece = pieces[pieces.length - 1]!;
+    const endOffset = lastPiece.endOffset;
+    const nextOffset = lastPiece.nextOffset;
     const isLast = nextOffset >= total;
 
-    const { segments, widthPx } = buildSegments(metrics, offset, endOffset, 0, tabStopPx);
+    const { segments, leftPx, widthPx, wordSpacingPx } = placePieces(
+      metrics,
+      pieces,
+      alignment,
+      isLast,
+      tabStopPx,
+    );
     const { heightPx, ascentPx } = measured;
-    const leftPx = alignLine(alignment, widthPx, available, lineLeftPx, extraIndent);
-
-    // Justification: the extra space is spread over the blanks of the line. The last line of a paragraph is
-    // excluded, otherwise a lone word would be stretched across the full width.
-    let wordSpacingPx = 0;
-    if (alignment === 'justify' && !isLast) {
-      const gaps = countBlanks(metrics.text, offset, endOffset);
-      if (gaps > 0) wordSpacingPx = Math.max(0, (available - widthPx) / gaps);
-    }
-
-    for (const segment of segments) segment.leftPx += leftPx;
 
     lines.push({
       index,
@@ -1008,7 +1257,7 @@ function buildMarker(
     leftPx: Math.max(0, indentLeftPx - ptToPx(LIST_INDENT_PT)),
     widthPx: ptToPx(LIST_INDENT_PT),
     font,
-    color: resolveColor(formatting, ctx),
+    color: resolveColor(formatting, ctx, paragraph),
   };
 }
 

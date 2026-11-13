@@ -541,12 +541,44 @@ export interface PageSetup {
   footerHeightMm?: number;
 }
 
+/**
+ * Appearance of a heading style (OpenOffice: the attribute set of a `SwTxtFmtColl` such as
+ * "Heading 1"). Every field is optional: a missing one falls back to the built-in value of the
+ * level, so a style only stores what the user actually changed.
+ */
+export interface HeadingStyle {
+  fontFamily?: string;
+  fontSizePt?: number;
+  bold?: boolean;
+  italic?: boolean;
+  color?: string;
+  alignment?: Alignment;
+  spaceBeforePt?: number;
+  spaceAfterPt?: number;
+}
+
+/**
+ * A heading style created by the user ("Chapitre", "Annexe"...). It is *based on* an outline
+ * level, like a Writer paragraph style assigned to an outline level: the level decides its rank
+ * in the document outline and the table of contents, and its look starts from that level's style.
+ * A paragraph uses it through `ParagraphNode.styleName`, which holds the style `id`.
+ */
+export interface CustomHeadingStyle extends HeadingStyle {
+  id: string;
+  name: string;
+  level: HeadingLevel;
+}
+
 /** Default style of the document, applied to every run that does not override it. */
 export interface DocumentDefaults {
   fontFamily: string;
   fontSizePt: number;
   lineSpacing: number;
   color: string;
+  /** Changes made to the built-in "Titre 1..6" styles, keyed by level. */
+  headingStyles?: Partial<Record<HeadingLevel, HeadingStyle>>;
+  /** Heading styles created by the user. */
+  customHeadingStyles?: CustomHeadingStyle[];
 }
 
 import type { PageFurniture } from './pageFurniture';

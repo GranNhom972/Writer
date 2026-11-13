@@ -27,8 +27,8 @@ export function FootnoteDialog({ open, onClose, onInsert }: FootnoteDialogProps)
 
   return (
     <Modal title="Insérer une note de bas de page" onClose={onClose} width={480}>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
           <span style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--fg-primary)' }}>
             Contenu de la note
           </span>
@@ -39,9 +39,9 @@ export function FootnoteDialog({ open, onClose, onInsert }: FootnoteDialogProps)
             placeholder="Ex : Référence bibliographique ou précision complémentaire…"
             autoFocus
             style={{
-              padding: 'var(--space-2) var(--space-3)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: 'var(--radius-sm)',
+              padding: 'var(--space-1) var(--space-2)',
+              border: '1px solid var(--border-input)',
+              borderRadius: 'var(--radius-md)',
               background: 'var(--bg-app)',
               color: 'var(--fg-primary)',
               fontFamily: 'inherit',
@@ -51,7 +51,7 @@ export function FootnoteDialog({ open, onClose, onInsert }: FootnoteDialogProps)
           />
         </label>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-1)' }}>
           <Button variant="ghost" onClick={onClose} type="button">
             Annuler
           </Button>

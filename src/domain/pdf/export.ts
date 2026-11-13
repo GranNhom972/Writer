@@ -17,7 +17,7 @@ import { isParagraph, type WriterDocumentState } from '../document/types';
 import { MM_PER_INCH, PT_PER_INCH, PX_PER_INCH } from '../document/units';
 import type { DocumentLayout, LaidOutFly, PlacedParagraph, PlacedTable } from '../engine/paginate';
 import { cellFrameHeightPx } from '../engine/paginate';
-import type { LayoutSegment } from '../engine/lineBreak';
+import { lineTopInPiece, type LayoutSegment } from '../engine/lineBreak';
 import { hasCrop, imageCrop, visibleFraction } from '../document/images';
 import {
   showsOn,
@@ -660,8 +660,10 @@ export function exportToPdfBytes(
           const line = lines[lIdx];
           if (!line) continue;
 
-          // Y position of the baseline in the PDF coordinate system
-          const lineTopPt = (contentTopPt + (placed.topPx + line.topPx) * PX_TO_PT);
+          // Y position of the baseline in the PDF coordinate system. Same stacking as the screen
+          // (`ParagraphView`): space above the paragraph, then the line where the engine put it.
+          const paragraphTopPx = placed.topPx + (placed.isContinuation ? 0 : layout.marginTopPx);
+          const lineTopPt = contentTopPt + (paragraphTopPx + lineTopInPiece(layout, placed.fromLine, lIdx)) * PX_TO_PT;
           const baselineYPt = pageHeightPt - lineTopPt - (line.ascentPx * PX_TO_PT);
 
           // Bullet / list number, if any

@@ -19,10 +19,14 @@
 
 import type {
   Alignment,
+  CustomHeadingStyle,
+  DocumentDefaults,
   FlyAnchor,
   FlyHoriOrient,
   FlyHoriRelation,
   FlySurround,
+  HeadingLevel,
+  HeadingStyle,
   ListKind,
   ParagraphNode,
   RunFormatting,
@@ -30,6 +34,13 @@ import type {
   TableNode,
 } from '../document/types';
 import { attr, localName, NS } from './namespaces';
+import {
+  builtinHeadingStyle,
+  HEADING_LEVELS,
+  resolveCustomStyle,
+  resolveLevelStyle,
+  type ResolvedHeadingStyle,
+} from '../engine/style';
 import { formatCm, formatPt, parseLengthPt, parsePercent } from './units';
 
 /** Paragraph attributes a style can carry. */
@@ -72,6 +83,13 @@ export interface GraphicAttributes {
   horiRelation?: FlyHoriRelation;
   /** `style:run-through="foreground"`: the frame covers the text (`RES_OPAQUE`). */
   inFront?: boolean;
+  /**
+   * `style:vertical-rel`, reduced to what changes the meaning of `svg:y` for a page frame: the whole
+   * sheet (`page`) or its printable area (`content`). The model counts from the printable area.
+   */
+  vertRelation?: 'page' | 'content';
+  /** `style:vertical-pos`: `from-top` reads `svg:y`, the three others align the frame. */
+  vertOrient?: 'from-top' | 'top' | 'middle' | 'bottom';
 }
 
 export interface ColumnAttributes {
@@ -83,6 +101,12 @@ export interface OdfStyle {
   name: string;
   family: string;
   parentName: string | null;
+  /** `style:display-name`, the name shown to the user (it may contain spaces). */
+  displayName?: string;
+  /** `style:default-outline-level`: the outline level a heading style is bound to. */
+  outlineLevel?: number;
+  /** `fo:font-size` given as a percentage of the parent's size, as Writer's "Heading N" do (130 %). */
+  fontSizePercent?: number;
   text: RunFormatting;
   paragraph: ParagraphAttributes;
   cell: CellAttributes;
@@ -205,9 +229,13 @@ function readTextProperties(element: Element): RunFormatting {
   const weight = attr(element, NS.fo, 'font-weight');
   // ODF also allows numeric weights: above 600, it is bold.
   if (weight && (weight === 'bold' || Number(weight) >= 600)) out.bold = true;
+  // An explicit "normal" matters too: it is how a style takes back the bold of its parent (a heading
+  // style that is not bold, under the bold "Heading").
+  else if (weight === 'normal' || (weight && Number(weight) < 600)) out.bold = false;
 
   const style = attr(element, NS.fo, 'font-style');
   if (style === 'italic' || style === 'oblique') out.italic = true;
+  else if (style === 'normal') out.italic = false;
 
   const underline = attr(element, NS.style, 'text-underline-style');
   if (underline && underline !== 'none') out.underline = true;
@@ -325,10 +353,22 @@ export function collectStyles(root: Element | Document): StyleTable {
       column: {},
     };
 
+    const displayName = attr(element, NS.style, 'display-name');
+    if (displayName) style.displayName = displayName;
+    const outlineLevel = Number(attr(element, NS.style, 'default-outline-level'));
+    if (Number.isFinite(outlineLevel) && outlineLevel > 0) style.outlineLevel = outlineLevel;
+
     for (let c = 0; c < element.children.length; c += 1) {
       const child = element.children[c]!;
       const kind = localName(child);
-      if (kind === 'text-properties') Object.assign(style.text, readTextProperties(child));
+      if (kind === 'text-properties') {
+        Object.assign(style.text, readTextProperties(child));
+        const size = attr(child, NS.fo, 'font-size');
+        if (size?.trim().endsWith('%')) {
+          const percent = Number.parseFloat(size);
+          if (Number.isFinite(percent) && percent > 0) style.fontSizePercent = percent;
+        }
+      }
       else if (kind === 'paragraph-properties') {
         Object.assign(style.paragraph, readParagraphProperties(child));
       } else if (kind === 'table-cell-properties') {
@@ -348,6 +388,15 @@ export function collectStyles(root: Element | Document): StyleTable {
 
         const horiRelation = readHoriRelation(attr(child, NS.style, 'horizontal-rel'));
         if (horiRelation) style.graphic.horiRelation = horiRelation;
+
+        const vertRel = attr(child, NS.style, 'vertical-rel');
+        if (vertRel === 'page') style.graphic.vertRelation = 'page';
+        else if (vertRel === 'page-content') style.graphic.vertRelation = 'content';
+
+        const vertPos = attr(child, NS.style, 'vertical-pos');
+        if (vertPos === 'from-top' || vertPos === 'top' || vertPos === 'middle' || vertPos === 'bottom') {
+          style.graphic.vertOrient = vertPos;
+        }
 
         const runThrough = readRunThrough(attr(child, NS.style, 'run-through'));
         if (runThrough !== null) style.graphic.inFront = runThrough;
@@ -380,6 +429,8 @@ const MAX_STYLE_DEPTH = 16;
 export function resolveStyle(
   table: StyleTable,
   name: string | null | undefined,
+  /** Stops the climb **before** this style: it and its parents are left out. */
+  stopAt?: string,
 ): {
   text: RunFormatting;
   paragraph: ParagraphAttributes;
@@ -391,7 +442,7 @@ export function resolveStyle(
   let current = name ? table.get(name) : undefined;
   const seen = new Set<string>();
 
-  while (current && chain.length < MAX_STYLE_DEPTH && !seen.has(current.name)) {
+  while (current && current.name !== stopAt && chain.length < MAX_STYLE_DEPTH && !seen.has(current.name)) {
     seen.add(current.name);
     chain.unshift(current);
     current = current.parentName ? table.get(current.parentName) : undefined;
@@ -410,6 +461,196 @@ export function resolveStyle(
     Object.assign(column, style.column);
   }
   return { text, paragraph, cell, graphic, column };
+}
+
+/* ---------------------------------------------------------- heading styles */
+
+/** Writer's programmatic name of the "Heading N" style (`RES_POOLCOLL_HEADLINE1` + N - 1). */
+export function headingStyleName(level: HeadingLevel): string {
+  return `Heading_20_${level}`;
+}
+
+const CUSTOM_HEADING_PREFIX = 'CloudHeading_';
+
+/** Name of the ODF style that carries a custom heading style. */
+export function customHeadingStyleName(id: string): string {
+  return `${CUSTOM_HEADING_PREFIX}${id.replace(/[^A-Za-z0-9_.-]/g, '_')}`;
+}
+
+/** Named style a heading paragraph hangs from, or `null` for body text. */
+function headingParent(node: ParagraphNode, customIds: ReadonlySet<string>): string | null {
+  if (node.type !== 'heading') return null;
+  if (node.styleName && customIds.has(node.styleName)) return customHeadingStyleName(node.styleName);
+  return headingStyleName(node.headingLevel ?? 1);
+}
+
+function headingStyleProperties(style: ResolvedHeadingStyle): string {
+  const text = textProperties({
+    fontFamily: style.fontFamily,
+    fontSizePt: style.fontSizePt,
+    color: style.color,
+  });
+  text.push(
+    `fo:font-weight="${style.bold ? 'bold' : 'normal'}"`,
+    `style:font-weight-asian="${style.bold ? 'bold' : 'normal'}"`,
+    `fo:font-style="${style.italic ? 'italic' : 'normal'}"`,
+    `style:font-style-asian="${style.italic ? 'italic' : 'normal'}"`,
+  );
+  const align = style.alignment === 'left' ? 'start' : style.alignment === 'right' ? 'end' : style.alignment;
+  return (
+    `<style:paragraph-properties fo:margin-top="${formatCm(style.spaceBeforePt)}" ` +
+    `fo:margin-bottom="${formatCm(style.spaceAfterPt)}" fo:text-align="${align}" fo:keep-with-next="always"/>` +
+    `<style:text-properties ${text.join(' ')}/>`
+  );
+}
+
+/**
+ * Named heading styles for `styles.xml`: "Heading 1..6" as the document defines them, then the
+ * user's own heading styles, each one hanging from the level it is based on. Writing them as named
+ * styles (and not as automatic ones) is what makes them show up, under their name, in the styles
+ * list of Writer.
+ */
+export function headingStylesXml(defaults: DocumentDefaults): string {
+  let out = '';
+  for (const level of HEADING_LEVELS) {
+    out +=
+      `<style:style style:name="${headingStyleName(level)}" style:display-name="Heading ${level}" ` +
+      `style:family="paragraph" style:parent-style-name="Heading" style:next-style-name="Standard" ` +
+      `style:default-outline-level="${level}" style:class="text">` +
+      headingStyleProperties(resolveLevelStyle(level, defaults)) +
+      `</style:style>`;
+  }
+  for (const custom of defaults.customHeadingStyles ?? []) {
+    out +=
+      `<style:style style:name="${customHeadingStyleName(custom.id)}" ` +
+      `style:display-name="${escapeAttr(custom.name)}" style:family="paragraph" ` +
+      `style:parent-style-name="${headingStyleName(custom.level)}" style:next-style-name="Standard" ` +
+      `style:default-outline-level="${custom.level}" style:class="text">` +
+      headingStyleProperties(resolveCustomStyle(custom, defaults)) +
+      `</style:style>`;
+  }
+  return out;
+}
+
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Fields of `candidate` that differ from `base`: what a style really changes. */
+function differences(candidate: ResolvedHeadingStyle, base: ResolvedHeadingStyle): HeadingStyle {
+  const out: HeadingStyle = {};
+  (Object.keys(candidate) as (keyof ResolvedHeadingStyle)[]).forEach((key) => {
+    const a = candidate[key];
+    const b = base[key];
+    const same =
+      typeof a === 'number' && typeof b === 'number'
+        ? Math.abs(a - b) < 0.05
+        : typeof a === 'string' && typeof b === 'string'
+          ? a.toLowerCase() === b.toLowerCase()
+          : a === b;
+    // Lengths go through centimeters in the file: rounding to a tenth of a point gives back the
+    // value that was typed, not 29.999 pt for 30.
+    if (!same) (out as Record<string, unknown>)[key] = typeof a === 'number' ? Math.round(a * 10) / 10 : a;
+  });
+  return out;
+}
+
+function toResolvedHeading(
+  table: StyleTable,
+  name: string,
+  base: ResolvedHeadingStyle,
+): ResolvedHeadingStyle {
+  const { text, paragraph } = resolveStyle(table, name);
+  return {
+    fontFamily: text.fontFamily ?? base.fontFamily,
+    fontSizePt: chainFontSizePt(table, name) ?? base.fontSizePt,
+    bold: text.bold ?? base.bold,
+    italic: text.italic ?? base.italic,
+    color: text.color ?? base.color,
+    alignment: paragraph.alignment ?? base.alignment,
+    spaceBeforePt: paragraph.marginTopPt ?? base.spaceBeforePt,
+    spaceAfterPt: paragraph.marginBottomPt ?? base.spaceAfterPt,
+  };
+}
+
+/** Font size along a style chain, percentages applied to the parent's size. */
+function chainFontSizePt(table: StyleTable, name: string): number | null {
+  const chain: OdfStyle[] = [];
+  const seen = new Set<string>();
+  let current = table.get(name);
+  while (current && !seen.has(current.name) && chain.length < MAX_STYLE_DEPTH) {
+    seen.add(current.name);
+    chain.unshift(current);
+    current = current.parentName ? table.get(current.parentName) : undefined;
+  }
+  let size: number | null = null;
+  for (const style of chain) {
+    if (style.text.fontSizePt !== undefined) size = style.text.fontSizePt;
+    else if (style.fontSizePercent !== undefined && size !== null) size = (size * style.fontSizePercent) / 100;
+  }
+  return size === null ? null : Math.round(size * 10) / 10;
+}
+
+/**
+ * Reads the heading styles of a file back into the document defaults: "Heading 1..6" become
+ * changes to "Titre 1..6" (only what differs from the built-in look is kept), and the styles
+ * written by `headingStylesXml` for the user's own headings come back as custom heading styles.
+ */
+export function readHeadingStyles(
+  table: StyleTable,
+  defaults: DocumentDefaults,
+): Pick<DocumentDefaults, 'headingStyles' | 'customHeadingStyles'> {
+  const headingStyles: Partial<Record<HeadingLevel, HeadingStyle>> = {};
+  for (const level of HEADING_LEVELS) {
+    const name = headingStyleName(level);
+    if (!table.has(name)) continue;
+    const builtin = builtinHeadingStyle(level, defaults);
+    const diff = differences(toResolvedHeading(table, name, builtin), builtin);
+    if (Object.keys(diff).length > 0) headingStyles[level] = diff;
+  }
+
+  const withLevels: DocumentDefaults = { ...defaults, headingStyles };
+  const customHeadingStyles: CustomHeadingStyle[] = [];
+  for (const style of table.values()) {
+    if (!style.name.startsWith(CUSTOM_HEADING_PREFIX) || style.family !== 'paragraph') continue;
+    const level = Math.min(6, Math.max(1, style.outlineLevel ?? 1)) as HeadingLevel;
+    const base = resolveLevelStyle(level, withLevels);
+    const diff = differences(toResolvedHeading(table, style.name, base), base);
+    customHeadingStyles.push({
+      id: style.name.slice(CUSTOM_HEADING_PREFIX.length),
+      name: style.displayName ?? style.name.slice(CUSTOM_HEADING_PREFIX.length),
+      level,
+      ...diff,
+    });
+  }
+
+  return {
+    ...(Object.keys(headingStyles).length > 0 ? { headingStyles } : {}),
+    ...(customHeadingStyles.length > 0 ? { customHeadingStyles } : {}),
+  };
+}
+
+/**
+ * The heading style a paragraph style hangs from, if any: what `readParagraph` must *not* flatten
+ * into the runs, since it now lives in the document defaults.
+ */
+export function findHeadingStyleInChain(
+  table: StyleTable,
+  name: string | null | undefined,
+): OdfStyle | null {
+  let current = name ? table.get(name) : undefined;
+  const seen = new Set<string>();
+  while (current && !seen.has(current.name)) {
+    if (/^Heading_20_[1-6]$/.test(current.name) || current.name.startsWith(CUSTOM_HEADING_PREFIX)) return current;
+    seen.add(current.name);
+    current = current.parentName ? table.get(current.parentName) : undefined;
+  }
+  return null;
+}
+
+/** Id of the custom heading style named by an ODF style, if it is one. */
+export function customHeadingIdOf(styleName: string): string | null {
+  return styleName.startsWith(CUSTOM_HEADING_PREFIX) ? styleName.slice(CUSTOM_HEADING_PREFIX.length) : null;
 }
 
 /* ----------------------------------------------------------------- writing */
@@ -478,6 +719,9 @@ export class AutomaticStyles {
   private readonly columnStyles = new Map<number, string>();
   private readonly declarations: string[] = [];
   private readonly frameStyles = new Map<string, string>();
+
+  /** `customHeadingIds`: ids of the custom heading styles that exist in the document. */
+  constructor(private readonly customHeadingIds: ReadonlySet<string> = new Set()) {}
 
   /** Name of the text style for this formatting, or `null` if it is empty. */
   text(formatting: RunFormatting): string | null {
@@ -612,10 +856,13 @@ export class AutomaticStyles {
 
   /** Name of the paragraph style, or `null` if the node has no attribute. */
   paragraph(node: ParagraphNode): string | null {
+    const parent = headingParent(node, this.customHeadingIds);
     const properties = paragraphProperties(node);
-    if (properties.length === 0) return null;
+    // A heading without attributes of its own points straight to its named style.
+    if (properties.length === 0) return parent;
 
-    const key = properties.join(' ');
+    const props = properties.join(' ');
+    const key = `${parent ?? 'Standard'}|${props}`;
     const existing = this.paragraphStyles.get(key);
     if (existing) return existing;
 
@@ -623,8 +870,8 @@ export class AutomaticStyles {
     this.paragraphStyles.set(key, name);
     this.declarations.push(
       `<style:style style:name="${name}" style:family="paragraph" ` +
-        `style:parent-style-name="${node.type === 'heading' ? 'Heading' : 'Standard'}">` +
-        `<style:paragraph-properties ${key}/>` +
+        `style:parent-style-name="${parent ?? 'Standard'}">` +
+        `<style:paragraph-properties ${props}/>` +
         `</style:style>`,
     );
     return name;

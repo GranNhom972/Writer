@@ -414,8 +414,10 @@ function construireDocument(): WriterDocumentState {
         imageWrapMarginPt: 5,
       }),
       makeRun(
-        'Un habillage « parallèle » laisse le texte des deux côtés du cadre ; le '
-        + 'moteur retient à chaque ligne la plus large des deux bandes. Un '
+        'Un habillage « parallèle » laisse le texte des deux côtés du cadre : '
+        + 'chaque ligne se remplit à gauche du cadre, le saute, puis continue à '
+        + 'sa droite, comme le SwFlyPortion de SwTxtFormatter::CalcFlyWidth. Un '
+        + 'mot qui ne tient pas avant le cadre passe de l\'autre côté. Un '
         + 'habillage « au travers » (run-through) n\'exclurait rien du tout, et le '
         + 'texte passerait sous le cadre.',
       ),

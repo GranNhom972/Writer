@@ -9,10 +9,11 @@
  */
 
 import { memo, type CSSProperties, type JSX } from 'react';
-import type {
-  LayoutMarker,
-  LayoutSegment,
-  ParagraphLayout,
+import {
+  lineTopInPiece,
+  type LayoutMarker,
+  type LayoutSegment,
+  type ParagraphLayout,
 } from '../../domain/engine/lineBreak';
 import type { PlacedParagraph } from '../../domain/engine/paginate';
 import { renderMathHtml } from '../../domain/math/render';
@@ -73,7 +74,7 @@ function segmentStyle(segment: LayoutSegment): CSSProperties {
    * explicit choice.
    */
   if (segment.formatting.commentIds && !style.backgroundColor) {
-    style.backgroundColor = 'var(--comment-highlight, rgba(255, 214, 102, 0.35))';
+    style.backgroundColor = 'var(--comment-highlight)';
   }
 
   // A bookmark is not painted: it has no visual existence in Writer either. It can only be found through the navigation panel.
@@ -221,7 +222,11 @@ function SegmentView({
     );
   }
 
-  const style = segmentStyle(segment);
+  const style: CSSProperties = {
+    ...segmentStyle(segment),
+    // A line cut by a frame is justified piece by piece: each segment then carries its own spacing.
+    ...(segment.wordSpacingPx !== undefined ? { wordSpacing: `${segment.wordSpacingPx}px` } : {}),
+  };
   /*
    * The object replacement character is never painted.
    *
@@ -246,7 +251,7 @@ function SegmentView({
           verticalAlign: 'super',
           lineHeight: 0,
           cursor: 'pointer',
-          color: 'var(--accent, #1a73e8)',
+          color: 'var(--accent)',
           fontWeight: 600,
         }}
         title={`Note de bas de page : ${segment.formatting.footnoteText}`}
@@ -345,7 +350,13 @@ export interface ImageContext {
   /** Moves a floating frame, in points, in the frame of reference of its anchor. */
   onMove: (blockId: string, offset: number, xPt: number, yPt: number) => void;
   /** End of an image drag, at window coordinates. */
-  onDrop: (blockId: string, offset: number, clientX: number, clientY: number) => void;
+  onDrop: (
+    blockId: string,
+    offset: number,
+    clientX: number,
+    clientY: number,
+    grab?: { xPx: number; yPx: number },
+  ) => void;
 }
 
 export interface ParagraphViewProps {
@@ -376,7 +387,6 @@ export const ParagraphView = memo(function ParagraphView({
 }: ParagraphViewProps): JSX.Element {
   const top = placed.topPx + (placed.isContinuation ? 0 : layout.marginTopPx);
   const rows: JSX.Element[] = [];
-  let y = top;
 
   // The marker only goes with the **first** line: a list carried over to the next page does not show its bullet again, it continues its item.
   if (layout.marker && placed.fromLine === 0) {
@@ -386,7 +396,8 @@ export const ParagraphView = memo(function ParagraphView({
         <MarkerView
           key="marqueur"
           marker={layout.marker}
-          topPx={top}
+          // With its line, wherever the engine put it (below a frame, if need be).
+          topPx={top + first.topPx}
           heightPx={first.heightPx}
           onToggle={onToggleTask ? () => onToggleTask(placed.blockId) : undefined}
         />,
@@ -397,6 +408,8 @@ export const ParagraphView = memo(function ParagraphView({
   for (let index = placed.fromLine; index < placed.toLine; index += 1) {
     const line = layout.lines[index];
     if (!line) continue;
+    // Where the engine put the line, not under the previous one: a line moved below a frame keeps its move.
+    const y = top + lineTopInPiece(layout, placed.fromLine, index);
 
     rows.push(
       <div
@@ -411,9 +424,10 @@ export const ParagraphView = memo(function ParagraphView({
           wordSpacing: line.wordSpacingPx > 0 ? `${line.wordSpacingPx}px` : undefined,
         }}
       >
-        {line.segments.map((segment) => (
+        {line.segments.map((segment, segmentIndex) => (
           <SegmentView
-            key={segment.startOffset}
+            // A frame's gap shares its offset with the text that follows it: the offset alone is not a key.
+            key={`${segment.startOffset}:${segmentIndex}`}
             segment={segment}
             blockId={placed.blockId}
             onEditMath={onEditMath}
@@ -423,7 +437,6 @@ export const ParagraphView = memo(function ParagraphView({
         ))}
       </div>,
     );
-    y += line.heightPx;
   }
 
   return <>{rows}</>;

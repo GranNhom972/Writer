@@ -1,38 +1,63 @@
 /*
- * Design tokens: the single source of truth (01_DIRECTIVE_UX_ERGONOMIE.md §2).
- * No literal color or spacing value must appear anywhere else.
+ * Writer tokens: an alias layer over the Warm Bento kit (01_DIRECTIVE_UX_ERGONOMIE.md §2).
+ *
+ * `design/warm-bento/tokens.css` is imported first (see `main.tsx`) and is the single source of truth for colors, radii, shadows,
+ * spacing and motion. This file only:
+ *   - maps the historical Writer names (`--bg-app`, `--fg-secondary`, `--accent-subtle`...) onto Warm Bento roles;
+ *   - keeps the few tokens that only Writer needs (paper, presence palette, text size scale, page geometry, tool height).
+ *
+ * Names shared with Warm Bento (`--accent`, `--bg-canvas`, `--border-strong`, `--danger`, `--space-*`, `--radius-sm`...) are NOT
+ * redeclared here: the kit's value applies. Two of them used to mean something else in Writer and were renamed at every use:
+ *   - `--focus-ring` was a color; it is now the kit's box-shadow. Focus rules write `box-shadow: var(--focus-ring)`.
+ *   - `--space-1..8` was a 2 px-based scale (--space-1 = 2px); every use was moved to the kit's 4 px-based scale
+ *     (2px -> --space-half, 4 -> --space-1, 8 -> --space-2, 12 -> --space-3, 16 -> --space-4, 24 -> --space-6, 32 -> --space-8,
+ *     48 -> --space-12).
+ *   - `--control-height` (28px, the ribbon density) became `--tool-height`; `--control-height` is now the kit's 40px field/button height.
  */
 
+/*
+ * Aliases. Declared on the paper too (see below): a custom property that references another one is resolved where it is declared,
+ * so the paper must re-declare them to pick up its own light values.
+ */
+:root,
+.writer-page,
+.atelier__feuille,
+.skeleton-page {
+  /* --- Surfaces --- */
+  --bg-app: var(--surface);
+  --bg-raised: var(--surface);
+  --bg-sunken: var(--surface-muted);
+  --bg-subtle: var(--surface-subtle);
+  --bg-hover: var(--surface-muted);
+
+  /* --- Text --- */
+  --fg-primary: var(--text-primary);
+  --fg-secondary: var(--text-secondary);
+  --fg-disabled: var(--text-muted);
+
+  /* --- Borders --- */
+  --border-subtle: var(--border);
+
+  /* --- Brand --- */
+  --accent-active: var(--accent-hover);
+  --accent-subtle: var(--surface-muted);
+  /* Outline color, for the rare focus indicator that cannot be a box-shadow (the element already uses one). */
+  --focus-color: var(--accent);
+
+  /* --- Statuses --- */
+  --danger-subtle: var(--danger-bg);
+  --warning-subtle: var(--warning-bg);
+  --success-subtle: var(--success-bg);
+
+  /* --- Elevation --- */
+  --elevation-base: none;
+  --elevation-hover: var(--shadow-sm);
+  --elevation-popover: var(--shadow-lg);
+  --elevation-modal: var(--shadow-lg);
+}
+
 :root {
-  /* --- Color: semantic roles, light theme --- */
-  --bg-canvas: #f1f2f4;
-  --bg-app: #ffffff;
-  --bg-raised: #ffffff;
-  --bg-sunken: #f7f8f9;
-  --bg-page: #ffffff;
-
-  --fg-primary: #16191d;
-  --fg-secondary: #545b64;
-  --fg-disabled: #9aa1ab;
-
-  --border-subtle: #e3e5e8;
-  --border-strong: #c4c8ce;
-
-  --accent: #1a56db;
-  --accent-hover: #1e4fc0;
-  --accent-active: #17439f;
-  --accent-subtle: #e8effc;
-
-  --danger: #b42318;
-  --danger-subtle: #fdecea;
-  --warning: #b54708;
-  --warning-subtle: #fef4e6;
-  --success: #08702f;
-  --success-subtle: #e7f6ec;
-
-  --focus-ring: #0b5cd5;
-
-  /* Presence palette: validated in deuteranopia / protanopia / tritanopia simulation */
+  /* Presence palette: validated in deuteranopia / protanopia / tritanopia simulation. Kept as is. */
   --presence-1: #d1435b;
   --presence-2: #1f7a8c;
   --presence-3: #b3541e;
@@ -43,28 +68,22 @@
   --presence-8: #7a5c00;
 
   /* --- Typography --- */
-  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-ui: var(--font-sans);
   --font-document: 'Liberation Serif', Georgia, 'Times New Roman', serif;
 
+  /* Interface text scale (the kit's --text-h1/body/small are font shorthands, these are sizes). */
   --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 13px;
   --text-lg: 14px;
   --text-xl: 16px;
+  --text-base: 14px;
   --leading-ui: 1.45;
   --leading-tight: 1.2;
 
-  /* --- Spacing: 4px scale, nothing outside the scale --- */
+  /* --- Spacing: the kit's 4 px scale, plus the two values Writer needs outside it --- */
   --space-0: 0;
-  --space-1: 2px;
-  --space-2: 4px;
-  --space-3: 8px;
-  --space-4: 12px;
-  --space-5: 16px;
-  --space-6: 24px;
-  --space-7: 32px;
-  --space-8: 48px;
+  --space-half: 2px;
 
   /*
    * --- The paper ---------------------------------------------------------
@@ -83,33 +102,39 @@
 
   /*
    * Text selection tint. An alpha, and not a solid color: the selection overlay is placed **over** the content, in `multiply` blending, and the glyphs must stay readable through it (see `.writer-selection-layer`).
+   * Same value in both themes: it is painted on the paper, which stays white.
    */
-  --selection: rgba(26, 86, 219, 0.22);
+  --selection: rgba(140, 109, 88, 0.26);
 
-  /* --- Radius --- */
-  --radius: 6px;
-  --radius-xs: 2px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* Search hits: a warm warning tint, painted on the paper (same value in both themes). */
+  --search-hit: rgba(154, 96, 22, 0.22);
+  --search-current: rgba(154, 96, 22, 0.42);
 
-  /* --- Elevation: 4 levels, not one more --- */
-  --elevation-base: none;
-  --elevation-hover: 0 1px 2px rgba(16, 24, 40, 0.08);
-  --elevation-popover: 0 4px 12px rgba(16, 24, 40, 0.12);
-  --elevation-modal: 0 16px 40px rgba(16, 24, 40, 0.2);
-  /* Drop shadow of a sheet on the work surface. */
-  --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.08);
+  /* Commented text: a marker tint on the paper (same value in both themes; removed when printing). */
+  --comment-highlight: rgba(255, 214, 102, 0.35);
+
+  /* --- Over images (crop frames, handles): white on any photo, whatever the theme --- */
+  --media-handle: #ffffff;
+  --media-handle-shadow: rgba(0, 0, 0, 0.8);
+  --media-grid: rgba(255, 255, 255, 0.4);
+  --media-dimmer: rgba(0, 0, 0, 0.55);
+
+  /* --- Radius: the kit's scale, plus a 4 px one for tiny chips (keys, swatches) --- */
+  --radius-xs: 4px;
+  --radius: var(--radius-sm);
+
+  /* Drop shadow of a sheet on the work surface: a hairline edge, then the kit's soft card shadow. */
+  --shadow-page: 0 0 0 1px var(--border), var(--shadow-md);
 
   /* --- Motion --- */
-  --motion-fast: 120ms;
-  --motion-base: 200ms;
+  --motion-fast: var(--dur-fast);
+  --motion-base: var(--dur-base);
   --motion-slow: 320ms;
-  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease: var(--ease);
 
-  /* --- Density (data-density="compact" switches these values) --- */
-  --control-height: 28px;
-  --control-height-sm: 24px;
+  /* --- Ribbon density (data-density="compact" switches these values); fields and dialog buttons use the kit's --control-height --- */
+  --tool-height: 32px;
+  --tool-height-sm: 28px;
 
   /* --- Page geometry (A4) --- */
   --page-width: 210mm;
@@ -117,42 +142,13 @@
 }
 
 :root[data-density='compact'] {
-  --control-height: 24px;
-  --control-height-sm: 20px;
+  --tool-height: 28px;
+  --tool-height-sm: 24px;
 }
 
+/* Presence colors are lightened on a dark interface (avatars sit on the dark title bar). Kept as is. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg-canvas: #14161a;
-    --bg-app: #1c1f24;
-    --bg-raised: #24282e;
-    --bg-sunken: #16181c;
-    --bg-page: #22262c;
-
-    --fg-primary: #f2f4f7;
-    --fg-secondary: #b3bac4;
-    --fg-disabled: #6c757f;
-
-    --border-subtle: #2d3239;
-    --border-strong: #444b54;
-
-    --accent: #8ab4ff;
-    --accent-hover: #a5c5ff;
-    --accent-active: #c3d9ff;
-    --accent-subtle: #1d2c47;
-
-    --danger: #ff9d94;
-    --danger-subtle: #3a1d1a;
-    --warning: #ffc078;
-    --warning-subtle: #3a2a15;
-    --success: #75d69c;
-    --success-subtle: #14301f;
-
-    --focus-ring: #9cc2ff;
-
-    --selection: rgba(138, 180, 255, 0.28);
-    --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
-
     --presence-1: #ff8fa0;
     --presence-2: #6fd2e3;
     --presence-3: #ffab6b;
@@ -165,7 +161,48 @@
 }
 
 :root[data-theme='dark'] {
-  color-scheme: dark;
+  --presence-1: #ff8fa0;
+  --presence-2: #6fd2e3;
+  --presence-3: #ffab6b;
+  --presence-4: #c8a2f2;
+  --presence-5: #74d6a1;
+  --presence-6: #ff9aa8;
+  --presence-7: #8fbcf5;
+  --presence-8: #e0c14a;
+}
+
+/*
+ * --- The paper is always light -------------------------------------------
+ *
+ * The interface drawn ON a sheet (image handles and toolbar, table grips, header/footer badges, margin guides) sits on white paper in
+ * both themes. With the dark values it became cream on white: invisible. The sheet therefore re-declares the kit's light values
+ * (same values as `design/warm-bento/tokens.css`, light theme), and the aliases above are re-resolved against them.
+ */
+.writer-page,
+.atelier__feuille,
+.skeleton-page {
+  color-scheme: light;
+  --surface: #FFFFFF;
+  --surface-subtle: #F9F6F3;
+  --surface-muted: #F3EFEA;
+  --surface-strong: #EAE4DC;
+  --text-primary: #261C16;
+  --text-secondary: #6E5D53;
+  --text-muted: #776860;
+  --text-on-accent: #FFFFFF;
+  --accent: #4A3428;
+  --accent-hover: #36251C;
+  --clay: #8C6D58;
+  --border: rgba(74, 52, 40, 0.08);
+  --border-strong: rgba(74, 52, 40, 0.20);
+  --border-input: #9E8E85;
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  --success: #2D5A3F;  --success-bg: #EBF3ED;
+  --warning: #9A6016;  --warning-bg: #FBF3E6;
+  --danger:  #902D2D;  --danger-bg:  #FDF0F0;
+  --shadow-sm: 0 2px 6px -1px rgba(74, 52, 40, 0.03);
+  --shadow-md: 0 4px 20px -2px rgba(74, 52, 40, 0.05), 0 2px 6px -1px rgba(74, 52, 40, 0.03);
+  --shadow-lg: 0 8px 24px rgba(74, 52, 40, 0.12);
 }
 
 /* `prefers-reduced-motion`: every duration falls to 0, opacity transitions included. */
@@ -199,20 +236,18 @@ body,
   margin: 0;
 }
 
+/* `html.bento-root` (index.html) already sets the canvas, Inter and the 14/20 body text; this is the fallback without it. */
 body {
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  line-height: var(--leading-ui);
-  color: var(--fg-primary);
+  font: var(--text-body);
+  color: var(--text-primary);
   background: var(--bg-canvas);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Focus visible on ALL surfaces: 2px + 2px offset (WCAG 2.4.11). */
+/* Focus visible on ALL surfaces: the kit's offset ring, visible on espresso buttons too (WCAG 2.4.11). */
 :focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-xs);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .visually-hidden {

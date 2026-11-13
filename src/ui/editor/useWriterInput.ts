@@ -43,6 +43,7 @@ import {
   cropFormatting,
   imageAttributes,
   imageWrapMode,
+  IMAGE_PLACEHOLDER,
   isImageRun,
   makeImageRun,
   placementFormatting,
@@ -135,6 +136,7 @@ import {
   bookmarkSelection,
   commentSelection,
   setHeading,
+  setCustomHeadingStyle,
   setReviewMode,
   setSelection,
   splitCurrentCell,
@@ -171,6 +173,14 @@ import { paginateDocument, type DocumentLayout, type PlacedParagraph } from '../
  */
 let lastCopied: { text: string; fragment: DocumentFragment } | null = null;
 
+/**
+ * Keeps a fragment copied by another path than a text selection: an image selected by a click, whose copy
+ * the editor handles itself. The paste then finds it as it finds any internal copy.
+ */
+export function rememberCopiedFragment(text: string, fragment: DocumentFragment): void {
+  lastCopied = { text, fragment };
+}
+
 export interface WriterCommands {
   toggleBold: () => void;
   toggleItalic: () => void;
@@ -182,6 +192,8 @@ export interface WriterCommands {
   setHighlight: (color: string | null) => void;
   clearFormatting: () => void;
   setHeadingLevel: (level: 0 | 1 | 2 | 3 | 4 | 5 | 6) => void;
+  /** Applies a custom heading style (id from `DocumentDefaults.customHeadingStyles`). */
+  setCustomHeadingStyle: (styleId: string) => void;
   setAlignment: (alignment: ParagraphNode['alignment']) => void;
   setLineSpacing: (spacing: number) => void;
   setFirstLineIndentPt: (pt: number | null) => void;
@@ -369,7 +381,7 @@ export interface WriterController {
  * We accept the offset of the **start** of the frame as well as that of its end: the rendering announces the first, whereas a cursor placed right after the image gives the second. Requiring either one would make
  * the retouch fail one time in two.
  */
-function imageRunAt(
+export function imageRunAt(
   runs: readonly TextRun[],
   offset: number,
 ): { index: number; offset: number } | null {
@@ -654,6 +666,13 @@ export function useWriterInput(
       },
       setHeadingLevel: (level) => {
         run('Style de paragraphe', (state) => setHeading(state, level));
+        focus();
+      },
+      setCustomHeadingStyle: (styleId) => {
+        run('Style de paragraphe', (state) => {
+          const style = state.doc.defaults.customHeadingStyles?.find((s) => s.id === styleId);
+          return style ? setCustomHeadingStyle(state, style) : state;
+        });
         focus();
       },
       setAlignment: (alignment) => patchParagraph('Alignement', { alignment: alignment ?? null }),
@@ -1772,8 +1791,13 @@ export function useWriterInput(
         run('Coller', (state) => insertFragment(state, fragment));
         return;
       }
-      // Paste from elsewhere: we respect at least the line ends, turning them into real paragraphs.
-      const paragraphs = text.replace(/\r\n?/g, '\n').split('\n');
+      // Paste from elsewhere: we respect at least the line ends, turning them into real paragraphs. The object
+      // replacement character only means something on an image run: copied from another editor tab it would come
+      // in as an empty, invisible character on which the cursor stumbles.
+      const paragraphs = text
+        .replace(/\r\n?/g, '\n')
+        .replaceAll(IMAGE_PLACEHOLDER, '')
+        .split('\n');
       run('Coller', (state) =>
         insertFragment(state, {
           paragraphs: paragraphs.map((line) => ({

@@ -22,7 +22,7 @@ import { FurnitureBandView } from '../components/FurnitureBand';
 import { ParagraphView, type ImageContext } from './ParagraphView';
 import { ImageFrame } from './ImageFrame';
 import { imageKey } from '../../domain/document/images';
-import { mmToPx, ptToPx, pxToMm } from '../../domain/document/units';
+import { mmToPx, ptToPx, pxToMm, pxToPt } from '../../domain/document/units';
 
 /** Fallback band height when the document has no page furniture. */
 const DEFAULT_BAND_PX = 40;
@@ -206,6 +206,16 @@ export const A4Page = memo(function A4Page({
           onWrapChange={images.onWrapChange}
           onMove={images.onMove}
           onDrop={images.onDrop}
+          flyOffsetPt={{
+            // Back into the reference of the alignment: the sheet starts in the left margin.
+            xPt: pxToPt(
+              laid.leftPx +
+                ((laid.fly.run.imageHoriRelation ?? 'text') === 'page'
+                  ? geometry.contentLeftPx
+                  : 0),
+            ),
+            yPt: pxToPt(laid.topPx - laid.anchorTopPx),
+          }}
         />
       ) : (
         <img
@@ -445,7 +455,7 @@ export const A4Page = memo(function A4Page({
           >
             {page.footnotes.map((fn) => (
               <div key={fn.id} className="writer-footnote-entry" style={{ marginBottom: '2px' }}>
-                <sup style={{ fontWeight: 600, marginRight: '4px', color: 'var(--text-color, #111)' }}>{fn.index}</sup>
+                <sup style={{ fontWeight: 600, marginRight: '4px', color: 'var(--paper-fg)' }}>{fn.index}</sup>
                 <span>{fn.text}</span>
               </div>
             ))}

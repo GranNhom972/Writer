@@ -69,7 +69,7 @@ export function DocumentOutline({
     >
       <div
         style={{
-          padding: 'var(--space-3) var(--space-4)',
+          padding: 'var(--space-2) var(--space-3)',
           borderBottom: '1px solid var(--border-subtle)',
           display: 'flex',
           justifyContent: 'space-between',
@@ -84,11 +84,11 @@ export function DocumentOutline({
         </Button>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-2)' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-1)' }}>
         {headings.length === 0 ? (
           <div
             style={{
-              padding: 'var(--space-4)',
+              padding: 'var(--space-3)',
               color: 'var(--fg-secondary)',
               fontSize: 'var(--text-xs)',
               textAlign: 'center',
@@ -106,8 +106,8 @@ export function DocumentOutline({
                   style={{
                     width: '100%',
                     textAlign: 'left',
-                    padding: 'var(--space-1) var(--space-2)',
-                    paddingLeft: `calc(var(--space-2) + ${(h.level - 1) * 12}px)`,
+                    padding: 'var(--space-half) var(--space-1)',
+                    paddingLeft: `calc(var(--space-1) + ${(h.level - 1) * 12}px)`,
                     border: 'none',
                     borderRadius: 'var(--radius-xs)',
                     backgroundColor: 'transparent',

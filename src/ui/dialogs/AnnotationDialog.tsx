@@ -13,19 +13,20 @@ import { Button } from '../../design/components/Button';
 import { Modal } from '../../design/components/Modal';
 
 const fieldStyle = {
+  minHeight: 'var(--control-height)',
   padding: 'var(--space-2) var(--space-3)',
-  border: '1px solid var(--border-strong)',
-  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--border-input)',
+  borderRadius: 'var(--radius-md)',
   background: 'var(--bg-app)',
   color: 'var(--fg-primary)',
   fontFamily: 'inherit',
-  fontSize: 'var(--text-sm)',
+  fontSize: 'var(--text-lg)',
 } as const;
 
 const labelStyle = {
-  fontSize: 'var(--text-sm)',
+  fontSize: 'var(--text-md)',
   fontWeight: 500,
-  color: 'var(--fg-primary)',
+  color: 'var(--fg-secondary)',
 } as const;
 
 interface CommentDialogProps {
@@ -63,30 +64,30 @@ export function CommentDialog({
     <Modal title="Ajouter un commentaire" onClose={onClose} width={480}>
       <form
         onSubmit={handleSubmit}
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
+        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}
       >
         {hasRange ? (
           <p
             style={{
               margin: 0,
-              padding: 'var(--space-2) var(--space-3)',
-              background: 'var(--bg-subtle, rgba(0,0,0,0.04))',
+              padding: 'var(--space-1) var(--space-2)',
+              background: 'var(--bg-subtle)',
               borderRadius: 'var(--radius-sm)',
               fontStyle: 'italic',
               fontSize: 'var(--text-sm)',
-              color: 'var(--fg-secondary, #5f6368)',
+              color: 'var(--fg-secondary)',
             }}
           >
             « {quotedText.length > 160 ? `${quotedText.slice(0, 160)}…` : quotedText} »
           </p>
         ) : (
-          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--fg-secondary, #5f6368)' }}>
+          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>
             Sélectionnez d'abord le texte à commenter : un commentaire s'ancre sur une plage, il
             n'a nulle part où se poser sans elle.
           </p>
         )}
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
           <span style={labelStyle}>Commentaire de {author}</span>
           <textarea
             rows={4}
@@ -99,7 +100,7 @@ export function CommentDialog({
           />
         </label>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-1)' }}>
           <Button variant="ghost" onClick={onClose} type="button">
             Annuler
           </Button>
@@ -148,7 +149,7 @@ export function BookmarkDialog({
     <Modal title="Poser un signet" onClose={onClose} width={440}>
       <form
         onSubmit={handleSubmit}
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
+        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}
       >
         {quotedText && (
           <p
@@ -156,14 +157,14 @@ export function BookmarkDialog({
               margin: 0,
               fontStyle: 'italic',
               fontSize: 'var(--text-sm)',
-              color: 'var(--fg-secondary, #5f6368)',
+              color: 'var(--fg-secondary)',
             }}
           >
             « {quotedText.length > 120 ? `${quotedText.slice(0, 120)}…` : quotedText} »
           </p>
         )}
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
           <span style={labelStyle}>Nom du signet</span>
           <input
             type="text"
@@ -173,14 +174,14 @@ export function BookmarkDialog({
             autoFocus
             style={fieldStyle}
           />
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-secondary, #5f6368)' }}>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-secondary)' }}>
             {duplicate
               ? 'Ce nom est déjà pris : deux signets homonymes rendraient tout renvoi ambigu.'
               : 'Ce nom sert de cible aux renvois internes, sous la forme #nom.'}
           </span>
         </label>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-1)' }}>
           <Button variant="ghost" onClick={onClose} type="button">
             Annuler
           </Button>
